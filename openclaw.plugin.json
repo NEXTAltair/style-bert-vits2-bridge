@@ -1,0 +1,47 @@
+{
+  "id": "style-bert-vits2-bridge",
+  "name": "Style-Bert-VITS2 Bridge",
+  "description": "Bridge OpenClaw to a Style-Bert-VITS2 API server for speech generation.",
+  "version": "0.0.1",
+  "skills": [
+    "./skills/voice"
+  ],
+  "configSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "baseUrl": { "type": "string", "minLength": 1 },
+      "timeoutMs": { "type": "integer", "minimum": 1000 },
+      "defaultModelName": { "type": "string" },
+      "defaultSpeakerId": { "type": "integer" },
+      "defaultSpeakerName": { "type": "string" },
+      "defaultStyle": { "type": "string" }
+    }
+  },
+  "uiHints": {
+    "baseUrl": {
+      "label": "SBV2 API Base URL",
+      "placeholder": "http://127.0.0.1:5000"
+    },
+    "timeoutMs": {
+      "label": "Request Timeout (ms)",
+      "placeholder": "30000"
+    },
+    "defaultModelName": {
+      "label": "Default Model Name",
+      "placeholder": "Optional default model_assets directory name"
+    },
+    "defaultSpeakerId": {
+      "label": "Default Speaker ID",
+      "placeholder": "Optional default speaker id"
+    },
+    "defaultSpeakerName": {
+      "label": "Default Speaker Name",
+      "placeholder": "Optional default speaker name"
+    },
+    "defaultStyle": {
+      "label": "Default Style",
+      "placeholder": "Neutral"
+    }
+  }
+}
