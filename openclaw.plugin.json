@@ -15,7 +15,8 @@
       "defaultModelName": { "type": "string" },
       "defaultSpeakerId": { "type": "integer" },
       "defaultSpeakerName": { "type": "string" },
-      "defaultStyle": { "type": "string" }
+      "defaultStyle": { "type": "string" },
+      "defaultLanguage": { "type": "string", "enum": ["JP", "EN", "ZH"] }
     }
   },
   "uiHints": {
@@ -42,6 +43,10 @@
     "defaultStyle": {
       "label": "Default Style",
       "placeholder": "Neutral"
+    },
+    "defaultLanguage": {
+      "label": "Default Language",
+      "placeholder": "JP"
     }
   }
 }

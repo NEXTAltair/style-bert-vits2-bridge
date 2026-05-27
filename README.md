@@ -31,11 +31,10 @@ pnpm install
           "baseUrl": "http://127.0.0.1:5000",
           // オプション
           "timeoutMs": 30000,
-          "modelName": "your-model-name",
-          "speakerId": 0,
-          "speakerName": "speaker",
-          "style": "Neutral",
-          "language": "JP"
+          "defaultModelName": "valentina01_bright",
+          "defaultSpeakerName": "valentina01_bright",
+          "defaultStyle": "00_Neutral",
+          "defaultLanguage": "JP"
         }
       }
     }
@@ -58,11 +57,15 @@ pnpm install
 |------|------|------|
 | `baseUrl` | string | **必須** — SBV2 API の URL |
 | `timeoutMs` | integer | リクエストタイムアウト (ms)。デフォルト 30000 |
-| `modelName` | string | デフォルトのモデル名（`model_assets/` 内のディレクトリ名） |
-| `speakerId` | integer | デフォルトのスピーカー ID（0 始まり） |
-| `speakerName` | string | デフォルトのスピーカー名（`speakerId` より優先） |
-| `style` | string | デフォルトのスタイル。デフォルト `"Neutral"` |
-| `language` | string | 言語 (`JP` / `EN` / `ZH`)。デフォルト `JP` |
+| `defaultModelName` | string | デフォルトのモデル名（`model_assets/` 内のディレクトリ名） |
+| `defaultSpeakerId` | integer | デフォルトのスピーカー ID（0 始まり） |
+| `defaultSpeakerName` | string | デフォルトのスピーカー名（`defaultSpeakerId` より優先） |
+| `defaultStyle` | string | デフォルトのスタイル。デフォルト `"Neutral"` |
+| `defaultLanguage` | string | 言語 (`JP` / `EN` / `ZH`)。デフォルト `JP` |
+
+`default*` キーが未指定の場合、bridge は SBV2 側の既定値に近い挙動になります。特定の声を安定して使うには、`defaultModelName` と `defaultSpeakerName`、必要に応じて `defaultStyle` を明示してください。
+
+既存設定との互換性のため、`modelName` / `speakerId` / `speakerName` / `style` / `language` も fallback として読みます。新規設定では `default*` キーを使ってください。
 
 ## 開発
 
