@@ -23,6 +23,21 @@ export interface Sbv2ClientOptions {
   timeoutMs?: number;
 }
 
+export interface Sbv2ModelInfo {
+  id?: number;
+  name?: string;
+  modelName?: string;
+  model_name?: string;
+  configPath?: string;
+  config_path?: string;
+  modelPath?: string;
+  model_path?: string;
+  spk2id?: Record<string, number>;
+  id2spk?: Record<string, string>;
+  style2id?: Record<string, number>;
+  [key: string]: unknown;
+}
+
 /** Maps camelCase param keys to the snake_case query params SBV2 expects. */
 const PARAM_KEY_MAP: Record<string, string> = {
   modelName: "model_name",
@@ -72,4 +87,52 @@ export class Sbv2Client {
 
     return Buffer.from(await response.arrayBuffer());
   }
+
+  async getModelsInfo(): Promise<Sbv2ModelInfo[]> {
+    const url = new URL("/models/info", this.baseUrl);
+
+    let response: Response;
+    try {
+      response = await fetch(url, {
+        method: "GET",
+        signal: AbortSignal.timeout(this.timeoutMs),
+      });
+    } catch (error) {
+      throw new Error(`SBV2 /models/info request failed: ${formatError(error)}`);
+    }
+
+    if (!response.ok) {
+      const body = await response.text().catch(() => "");
+      throw new Error(
+        `SBV2 /models/info failed: ${response.status} ${response.statusText} – ${body}`,
+      );
+    }
+
+    const payload = await response.json();
+    return normalizeModelsInfo(payload);
+  }
+}
+
+function normalizeModelsInfo(payload: unknown): Sbv2ModelInfo[] {
+  if (Array.isArray(payload)) {
+    const models = payload.filter(isRecord);
+    return models.map((model) => ({ ...model }));
+  }
+
+  if (!isRecord(payload)) {
+    throw new Error("SBV2 /models/info returned an unexpected payload");
+  }
+
+  return Object.entries(payload).flatMap(([name, value]) => {
+    if (!isRecord(value)) return [];
+    return [{ name, ...value }];
+  });
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function formatError(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
 }
