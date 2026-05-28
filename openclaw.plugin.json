@@ -4,7 +4,8 @@
   "description": "Bridge OpenClaw to a Style-Bert-VITS2 API server for speech generation.",
   "version": "0.0.1",
   "skills": [
-    "./skills/voice"
+    "./skills/voice",
+    "./skills/pr-maintainer"
   ],
   "configSchema": {
     "type": "object",

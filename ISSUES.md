@@ -1,5 +1,58 @@
 # Issues
 
+## 2026-05-27 - Gap audit: still a thin TTS provider, not a finished bridge
+
+### Summary
+The runtime path is alive: `openclaw plugins inspect style-bert-vits2-bridge --runtime --json` imports the plugin and reports speech provider `style-bert-vits2`. `pnpm run check`, `pnpm test`, and `pnpm run build` pass. The missing work is mostly productization and integration depth, not the first `/voice` call.
+
+### Confirmed observations
+- Runtime inspect reports `shape: plain-capability` and `speechProviderIds: ["style-bert-vits2"]`.
+- Cold inspect/list can show no `speechProviderIds`; use `--runtime` to prove live capability registration.
+- Initial audit found the local SBV2 API unreachable, but a follow-up after operator startup confirmed `http://127.0.0.1:5000` is healthy.
+- Live SBV2 checks passed: `GET /status`, `GET /models/info`, default short `POST /voice`, and a Valentina-targeted `POST /voice` all returned successfully.
+- `dist/index.js` cannot be imported directly outside the OpenClaw runtime because `openclaw/plugin-sdk/*` is resolved by OpenClaw, not this package's local dependencies.
+- Bundled `voice` skill is eligible and model-visible.
+- The bridge config schema uses `defaultModelName/defaultSpeakerId/defaultSpeakerName/defaultStyle`, but the runtime provider reads `modelName/speakerId/speakerName/style/language`. That mismatch means manifest/UI config defaults are not actually applied by `src/index.ts`.
+- Current OpenClaw config only sets `messages.tts.providers.style-bert-vits2.baseUrl`, so bridge synthesis without explicit model fields will fall back to SBV2 model_id `0` (`amitaro` in the observed model list), not the preferred Valentina model.
+
+### Live API snapshot
+- `GET /status`: healthy; devices include `cpu` and `cuda:0`.
+- Observed Valentina models in `/models/info`: `valentina`, `valentina01`, `valentina01_bright`, `valentina02`.
+- Default `/voice` smoke: HTTP 200, WAV/RIFF, 140332 bytes.
+- Valentina-targeted `/voice` smoke with `model_name=valentina01_bright`, `speaker_name=valentina01_bright`, `style=00_Neutral`: HTTP 200, WAV/RIFF, 177196 bytes.
+
+### Highest priority gaps
+1. Align config names and runtime reads.
+   - Either change the manifest/README to `modelName/speakerId/speakerName/style/language`, or make the provider read both `default*` and legacy non-default keys.
+   - Add tests that prove configured defaults reach `Sbv2Client.synthesize()`.
+2. Add Talk-mode mapping.
+   - Implement `resolveTalkConfig` and `resolveTalkOverrides` so Talk `voiceId`, `modelId`, and `speed/rateWpm` map predictably to SBV2 `speakerName/speakerId`, `modelName/modelId`, and `length`.
+   - Current `talk` config only has `interruptOnSpeech`; there is no active Talk provider config for SBV2.
+3. Add per-request directive support.
+   - Implement `parseDirectiveToken` for safe keys such as `voice`, `speaker`, `model`, `style`, `style_weight`, `speed/length`, and maybe `assist_text`.
+   - Respect OpenClaw override policy flags instead of accepting arbitrary query knobs.
+4. Add voice/model discovery.
+   - Implement `listVoices()` using SBV2 `GET /models/info`.
+   - Expose speaker/style/model metadata in a compact way so UI/Talk surfaces can select the real installed voices instead of guessing.
+5. Add live smoke coverage.
+   - A guarded live test should hit `/status`, `/models/info`, and a short `/voice` call when `SBV2_BASE_URL` is set.
+   - It should validate returned `audio/wav`, RIFF header, and useful error messages when model/speaker/style are invalid.
+
+### Secondary gaps
+- Add response/content validation: verify non-empty WAV output instead of blindly returning any successful body.
+- Improve error handling for timeout, connection refusal, and SBV2 validation errors; current messages are developer-readable but not operator-friendly.
+- Decide voice-note compatibility. The provider always returns WAV with `voiceCompatible: false`, so Discord delivery may work after channel conversion, but mobile/voice-note surfaces likely need Opus/OGG conversion or a documented non-goal.
+- Add `defaultTimeoutMs`, `models`, and maybe `voices` metadata when static values are known.
+- Document the exact runtime verification commands, especially `openclaw plugins inspect ... --runtime --json`.
+- Decide distribution strategy: local linked plugin is fine, but published package/import behavior should be tested through `openclaw plugins install`, not direct Node import.
+
+### Suggested next implementation order
+1. Fix config-name mismatch and add provider-level unit tests.
+2. Add `/models/info` client + `listVoices()`.
+3. Add Talk config/override mapping.
+4. Add directive parsing.
+5. Add live smoke tests and README runbook.
+
 ## 2026-04-05 - TTS provider works; surface behavior differs by channel
 
 ### Summary
