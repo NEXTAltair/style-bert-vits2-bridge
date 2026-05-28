@@ -16,7 +16,12 @@
       "defaultSpeakerId": { "type": "integer" },
       "defaultSpeakerName": { "type": "string" },
       "defaultStyle": { "type": "string" },
-      "defaultLanguage": { "type": "string", "enum": ["JP", "EN", "ZH"] }
+      "defaultLanguage": { "type": "string", "enum": ["JP", "EN", "ZH"] },
+      "modelName": { "type": "string" },
+      "speakerId": { "type": "integer" },
+      "speakerName": { "type": "string" },
+      "style": { "type": "string" },
+      "language": { "type": "string", "enum": ["JP", "EN", "ZH"] }
     }
   },
   "uiHints": {
