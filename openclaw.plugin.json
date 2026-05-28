@@ -71,6 +71,10 @@
     "defaultStyle": {
       "label": "Default Style",
       "placeholder": "00_Neutral"
+    },
+    "defaultLanguage": {
+      "label": "Default Language",
+      "placeholder": "JP"
     }
   }
 }

@@ -1,4 +1,4 @@
-import type { Sbv2Client, Sbv2ModelInfo, Sbv2SynthesizeParams } from "./sbv2-client";
+import type { Sbv2Client, Sbv2ModelInfo, Sbv2SynthesizeParams } from "./sbv2-client.js";
 
 export type Sbv2Language = "JP" | "EN" | "ZH";
 
@@ -209,10 +209,12 @@ export function listVoiceProfiles(models: Sbv2ModelInfo[]): Array<{ id: string; 
     }
 
     return model.speakers.map((speaker) => ({
-      id: `${model.name}:${speaker.name}`,
+      id: `sbv2:${encodeURIComponent(model.name)}:${encodeURIComponent(speaker.name)}${
+        model.styles[0]?.name ? `:${encodeURIComponent(model.styles[0].name)}` : ""
+      }`,
       name: `${speaker.name} (${model.name})`,
     }));
-  });
+  }).sort((left, right) => (left.name ?? left.id).localeCompare(right.name ?? right.id));
 }
 
 export function parseVoiceDirectiveToken(ctx: {

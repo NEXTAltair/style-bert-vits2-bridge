@@ -29,10 +29,30 @@ export interface Sbv2NamedItem {
 }
 
 export interface Sbv2ModelInfo {
+  id?: number;
+  sourceId?: string;
   name: string;
+  modelName?: string;
+  model_name?: string;
+  configPath?: string;
+  config_path?: string;
+  modelPath?: string;
+  model_path?: string;
+  spk2id?: Record<string, number>;
+  id2spk?: Record<string, string>;
+  speaker2id?: Record<string, number>;
+  speaker2Id?: Record<string, number>;
+  speaker_map?: Record<string, number>;
+  speakerMap?: Record<string, number>;
+  style2id?: Record<string, number>;
+  style2Id?: Record<string, number>;
+  id2style?: Record<string, string>;
+  style_map?: Record<string, number>;
+  styleMap?: Record<string, number>;
   speakers: Sbv2NamedItem[];
   styles: Sbv2NamedItem[];
   raw: unknown;
+  [key: string]: unknown;
 }
 
 /** Maps camelCase param keys to the snake_case query params SBV2 expects. */
@@ -59,6 +79,17 @@ function asFiniteNumber(value: unknown): number | undefined {
 
 function asNonEmptyString(value: unknown): string | undefined {
   return typeof value === "string" && value.trim() ? value.trim() : undefined;
+}
+
+function formatError(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
+function modelNameFromPath(path: string | undefined): string | undefined {
+  if (!path) return undefined;
+  const segments = path.split(/[\\/]+/).filter(Boolean);
+  if (segments.length < 2) return undefined;
+  return segments[segments.length - 2];
 }
 
 function normalizeNamedCollection(value: unknown): Sbv2NamedItem[] {
@@ -117,41 +148,52 @@ function normalizeNamedCollection(value: unknown): Sbv2NamedItem[] {
 
 function normalizeModelInfoEntry(nameHint: string | undefined, value: unknown): Sbv2ModelInfo | undefined {
   if (!isRecord(value)) {
-    return nameHint ? { name: nameHint, speakers: [], styles: [], raw: value } : undefined;
+    return nameHint
+      ? { name: nameHint, sourceId: nameHint, speakers: [], styles: [], raw: value }
+      : undefined;
   }
 
-  const name =
+  const numericId = nameHint && /^\d+$/.test(nameHint) ? Number(nameHint) : undefined;
+  const modelName =
     asNonEmptyString(value.name) ??
     asNonEmptyString(value.model_name) ??
     asNonEmptyString(value.modelName) ??
-    nameHint;
+    modelNameFromPath(asNonEmptyString(value.configPath) ?? asNonEmptyString(value.config_path)) ??
+    modelNameFromPath(asNonEmptyString(value.modelPath) ?? asNonEmptyString(value.model_path)) ??
+    (numericId === undefined ? nameHint : undefined);
 
-  if (!name) {
+  if (!modelName) {
     return undefined;
   }
 
+  const speakers = normalizeNamedCollection(
+    value.speakers ??
+      value.speaker2id ??
+      value.speaker2Id ??
+      value.spk2id ??
+      value.id2speaker ??
+      value.id2spk ??
+      value.speaker_map ??
+      value.speakerMap,
+  );
+  const styles = normalizeNamedCollection(
+    value.styles ??
+      value.style2id ??
+      value.style2Id ??
+      value.id2style ??
+      value.style_map ??
+      value.styleMap,
+  );
+
   return {
-    name,
-    speakers: normalizeNamedCollection(
-      value.speakers ??
-        value.speaker2id ??
-        value.speaker2Id ??
-        value.spk2id ??
-        value.id2speaker ??
-        value.id2spk ??
-        value.speaker_map ??
-        value.speakerMap,
-    ),
-    styles: normalizeNamedCollection(
-      value.styles ??
-        value.style2id ??
-        value.style2Id ??
-        value.id2style ??
-        value.style_map ??
-        value.styleMap,
-    ),
+    sourceId: nameHint,
+    id: asFiniteNumber(value.id) ?? numericId,
+    ...(value as Record<string, unknown>),
+    name: modelName,
+    speakers,
+    styles,
     raw: value,
-  };
+  } as Sbv2ModelInfo;
 }
 
 export function normalizeModelsInfo(value: unknown): Sbv2ModelInfo[] {
@@ -186,10 +228,16 @@ export class Sbv2Client {
 
   async getModelsInfo(): Promise<Sbv2ModelInfo[]> {
     const url = new URL("/models/info", this.baseUrl);
-    const response = await fetch(url, {
-      method: "GET",
-      signal: AbortSignal.timeout(this.timeoutMs),
-    });
+
+    let response: Response;
+    try {
+      response = await fetch(url, {
+        method: "GET",
+        signal: AbortSignal.timeout(this.timeoutMs),
+      });
+    } catch (error) {
+      throw new Error(`SBV2 /models/info request failed: ${formatError(error)}`);
+    }
 
     if (!response.ok) {
       const body = await response.text().catch(() => "");

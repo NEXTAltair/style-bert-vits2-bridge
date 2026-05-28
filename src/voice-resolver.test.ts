@@ -144,12 +144,12 @@ describe("voice resolver helpers", () => {
   it("lists voices from model and speaker metadata", () => {
     expect(listVoiceProfiles(modelInfo)).toEqual([
       {
-        id: "valentina01_bright:valentina01_bright",
-        name: "valentina01_bright (valentina01_bright)",
+        id: "sbv2:custom-model:custom-speaker:Neutral",
+        name: "custom-speaker (custom-model)",
       },
       {
-        id: "custom-model:custom-speaker",
-        name: "custom-speaker (custom-model)",
+        id: "sbv2:valentina01_bright:valentina01_bright:00_Neutral",
+        name: "valentina01_bright (valentina01_bright)",
       },
     ]);
   });

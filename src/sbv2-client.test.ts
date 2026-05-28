@@ -133,7 +133,9 @@ describe("Sbv2Client", () => {
       json: () =>
         Promise.resolve({
           valentina01_bright: {
-            speaker2id: { valentina01_bright: 0 },
+            id: 2,
+            spk2id: { valentina01_bright: 0 },
+            id2spk: { "0": "valentina01_bright" },
             style2id: { "00_Neutral": 0, Happy: 1 },
           },
         }),
@@ -146,18 +148,16 @@ describe("Sbv2Client", () => {
     expect(mockFetch).toHaveBeenCalledOnce();
     const url = new URL(mockFetch.mock.calls[0][0]);
     expect(url.pathname).toBe("/models/info");
-    expect(result).toEqual([
+    expect(result).toMatchObject([
       {
+        sourceId: "valentina01_bright",
         name: "valentina01_bright",
+        id: 2,
         speakers: [{ id: 0, name: "valentina01_bright" }],
         styles: [
           { id: 0, name: "00_Neutral" },
           { id: 1, name: "Happy" },
         ],
-        raw: {
-          speaker2id: { valentina01_bright: 0 },
-          style2id: { "00_Neutral": 0, Happy: 1 },
-        },
       },
     ]);
   });
@@ -171,16 +171,29 @@ describe("Sbv2Client", () => {
           styles: [{ name: "Neutral", id: 2 }],
         },
       ]),
-    ).toEqual([
+    ).toMatchObject([
       {
         name: "demo",
         speakers: [{ id: 0, name: "alice" }],
         styles: [{ id: 2, name: "Neutral" }],
-        raw: {
-          model_name: "demo",
-          speakers: ["alice"],
-          styles: [{ name: "Neutral", id: 2 }],
+      },
+    ]);
+  });
+
+  it("preserves numeric models info keys as ids while deriving model names from paths", () => {
+    expect(
+      normalizeModelsInfo({
+        "2": {
+          config_path: "model_assets/valentina01_bright/config.json",
+          spk2id: { valentina01_bright: 0 },
         },
+      }),
+    ).toMatchObject([
+      {
+        sourceId: "2",
+        id: 2,
+        name: "valentina01_bright",
+        speakers: [{ id: 0, name: "valentina01_bright" }],
       },
     ]);
   });
@@ -200,5 +213,17 @@ describe("Sbv2Client", () => {
         styles: [{ id: 0, name: "Neutral" }],
       },
     ]);
+  });
+
+  it("throws a clear error when models info cannot be reached", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockRejectedValue(new Error("connect ECONNREFUSED 127.0.0.1:5000")),
+    );
+
+    const client = new Sbv2Client({ baseUrl: "http://localhost:5000" });
+    await expect(client.getModelsInfo()).rejects.toThrow(
+      /SBV2 \/models\/info request failed: connect ECONNREFUSED/,
+    );
   });
 });

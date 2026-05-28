@@ -1,11 +1,11 @@
 import { definePluginEntry } from "openclaw/plugin-sdk/plugin-entry";
 import type { SpeechProviderPlugin } from "openclaw/plugin-sdk/speech";
-import { Sbv2Client } from "./sbv2-client";
+import { Sbv2Client } from "./sbv2-client.js";
 import {
   listVoiceProfiles,
   parseVoiceDirectiveToken,
   resolveVoiceProfile,
-} from "./voice-resolver";
+} from "./voice-resolver.js";
 
 function trimToUndefined(value: unknown): string | undefined {
   return typeof value === "string" && value.trim() ? value.trim() : undefined;
@@ -13,6 +13,32 @@ function trimToUndefined(value: unknown): string | undefined {
 
 function asNumber(value: unknown): number | undefined {
   return typeof value === "number" && Number.isFinite(value) ? value : undefined;
+}
+
+function parseSbv2VoiceId(value: unknown): Record<string, unknown> | undefined {
+  const raw = trimToUndefined(value);
+  if (!raw?.startsWith("sbv2:")) return undefined;
+
+  const [, encodedModelName, encodedSpeakerName, encodedStyle] = raw.split(":");
+  if (!encodedModelName || !encodedSpeakerName) return undefined;
+
+  try {
+    return {
+      modelName: decodeURIComponent(encodedModelName),
+      speakerName: decodeURIComponent(encodedSpeakerName),
+      style: encodedStyle ? decodeURIComponent(encodedStyle) : undefined,
+    };
+  } catch {
+    return undefined;
+  }
+}
+
+function normalizeOverrides(overrides: Record<string, unknown> | undefined): Record<string, unknown> | undefined {
+  const selectedVoice = parseSbv2VoiceId(overrides?.voiceId) ?? parseSbv2VoiceId(overrides?.voice);
+  if (!selectedVoice) return overrides;
+
+  const { voiceId: _voiceId, voice: _voice, ...rest } = overrides ?? {};
+  return { ...rest, ...selectedVoice };
 }
 
 export function buildSbv2SpeechProvider(): SpeechProviderPlugin {
@@ -48,12 +74,14 @@ export function buildSbv2SpeechProvider(): SpeechProviderPlugin {
     },
 
     listVoices: async (req) => {
-      const baseUrl = trimToUndefined(req.providerConfig?.baseUrl) ?? trimToUndefined(req.baseUrl);
+      const config = req.providerConfig ?? {};
+      const baseUrl = trimToUndefined(config.baseUrl) ?? trimToUndefined(req.baseUrl);
       if (!baseUrl) {
         throw new Error("Style-Bert-VITS2 baseUrl is not configured");
       }
 
-      const client = new Sbv2Client({ baseUrl });
+      const timeoutMs = asNumber(config.timeoutMs) ?? 30_000;
+      const client = new Sbv2Client({ baseUrl, timeoutMs });
       return listVoiceProfiles(await client.getModelsInfo());
     },
 
@@ -69,7 +97,7 @@ export function buildSbv2SpeechProvider(): SpeechProviderPlugin {
       const resolvedVoice = await resolveVoiceProfile({
         client,
         providerConfig: config,
-        providerOverrides: req.providerOverrides,
+        providerOverrides: normalizeOverrides(req.providerOverrides),
       });
 
       const audioBuffer = await client.synthesize({

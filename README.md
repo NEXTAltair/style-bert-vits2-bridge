@@ -16,7 +16,17 @@ cd ~/.openclaw/extensions
 git clone <repo-url> style-bert-vits2-bridge
 cd style-bert-vits2-bridge
 pnpm install
+pnpm run build
+openclaw plugins install --link .
 ```
+
+リンクインストール後、runtime inspection で speech provider が見えることを確認します。
+
+```bash
+openclaw plugins inspect style-bert-vits2-bridge --runtime --json
+```
+
+成功時は `speechProviderIds` に `style-bert-vits2` が含まれます。bundled skill は `openclaw.plugin.json` の `skills` から discovery されます。
 
 ## OpenClaw 設定
 
@@ -34,7 +44,7 @@ pnpm install
           "defaultModelName": "valentina01_bright",
           "defaultSpeakerName": "valentina01_bright",
           "defaultStyle": "00_Neutral",
-          "language": "JP"
+          "defaultLanguage": "JP"
         }
       }
     }
@@ -67,9 +77,9 @@ pnpm install
 | `defaultLength` / `length` | number | 話速相当。大きいほど遅く、小さいほど速い |
 | `defaultAssistText` / `assistText` | string | 感情補助テキスト |
 | `defaultAssistTextWeight` / `assistTextWeight` | number | 感情補助テキストの影響度 |
-| `language` | string | 言語 (`JP` / `EN` / `ZH`)。デフォルト `JP` |
+| `defaultLanguage` / `language` | string | 言語 (`JP` / `EN` / `ZH`)。デフォルト `JP` |
 
-`default*` キーを優先します。既存設定との互換性のため、従来の `modelName`、`speakerName`、`style` なども同じ意味で読み取ります。
+`default*` キーを優先します。既存設定との互換性のため、従来の `modelName`、`speakerId`、`speakerName`、`style`、`language` なども fallback として読み取ります。新規設定では `default*` キーを使ってください。
 
 ## Voice profile と directive
 
@@ -94,7 +104,18 @@ OpenClaw の policy が許可している場合、directive や Talk params か�
 pnpm install          # 依存インストール
 pnpm run check        # 型チェック
 pnpm test             # テスト実行
+pnpm run build        # dist/ に配布用 entrypoint を生成
 ```
+
+配布・検証時の entrypoint は `package.json#openclaw.extensions` の `./dist/index.js` です。git install でも runtime が読めるように `dist/` は git 管理します。source checkout で作業した後は `pnpm run build` を実行してから `openclaw plugins install --link .` または runtime inspection を行ってください。
+
+manifest と runtime registration の確認:
+
+```bash
+openclaw plugins inspect style-bert-vits2-bridge --runtime --json
+```
+
+`openclaw plugins validate` は simple tool plugin metadata 用のコマンドなので、この capability plugin の検証には使いません。
 
 ## バンドルスキル
 
