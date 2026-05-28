@@ -126,4 +126,99 @@ describe("Sbv2Client", () => {
     const url = new URL(mockFetch.mock.calls[0][0]);
     expect(url.origin).toBe("http://localhost:5000");
   });
+
+  it("fetches models info from SBV2", async () => {
+    const mockFetch = vi.fn().mockResolvedValue({
+      ok: true,
+      json: () =>
+        Promise.resolve({
+          valentina01_bright: {
+            id: 2,
+            spk2id: { valentina01_bright: 0 },
+            id2spk: { "0": "valentina01_bright" },
+            style2id: { "00_Neutral": 0 },
+          },
+        }),
+    });
+    vi.stubGlobal("fetch", mockFetch);
+
+    const client = new Sbv2Client({ baseUrl: "http://localhost:5000" });
+    const result = await client.getModelsInfo();
+
+    expect(mockFetch).toHaveBeenCalledOnce();
+    const url = new URL(mockFetch.mock.calls[0][0]);
+    expect(url.pathname).toBe("/models/info");
+    expect(result).toEqual([
+      {
+        sourceId: "valentina01_bright",
+        name: "valentina01_bright",
+        id: 2,
+        spk2id: { valentina01_bright: 0 },
+        id2spk: { "0": "valentina01_bright" },
+        style2id: { "00_Neutral": 0 },
+      },
+    ]);
+  });
+
+  it("preserves numeric models info keys as ids", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({
+        ok: true,
+        json: () =>
+          Promise.resolve({
+            "2": {
+              config_path: "model_assets/valentina01_bright/config.json",
+              spk2id: { valentina01_bright: 0 },
+            },
+          }),
+      }),
+    );
+
+    const client = new Sbv2Client({ baseUrl: "http://localhost:5000" });
+    await expect(client.getModelsInfo()).resolves.toEqual([
+      {
+        sourceId: "2",
+        id: 2,
+        config_path: "model_assets/valentina01_bright/config.json",
+        spk2id: { valentina01_bright: 0 },
+      },
+    ]);
+  });
+
+  it("preserves zero models info key as an id without using it as a name", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({
+        ok: true,
+        json: () =>
+          Promise.resolve({
+            "0": {
+              spk2id: { amitaro: 0 },
+            },
+          }),
+      }),
+    );
+
+    const client = new Sbv2Client({ baseUrl: "http://localhost:5000" });
+    await expect(client.getModelsInfo()).resolves.toEqual([
+      {
+        sourceId: "0",
+        id: 0,
+        spk2id: { amitaro: 0 },
+      },
+    ]);
+  });
+
+  it("throws a clear error when models info cannot be reached", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockRejectedValue(new Error("connect ECONNREFUSED 127.0.0.1:5000")),
+    );
+
+    const client = new Sbv2Client({ baseUrl: "http://localhost:5000" });
+    await expect(client.getModelsInfo()).rejects.toThrow(
+      /SBV2 \/models\/info request failed: connect ECONNREFUSED/,
+    );
+  });
 });
