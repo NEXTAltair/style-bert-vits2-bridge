@@ -17,7 +17,7 @@ git clone <repo-url> style-bert-vits2-bridge
 cd style-bert-vits2-bridge
 pnpm install
 pnpm run build
-openclaw plugins install --link . --force
+openclaw plugins install --link .
 ```
 
 リンクインストール後、runtime inspection で speech provider が見えることを確認します。
@@ -83,7 +83,7 @@ pnpm test             # テスト実行
 pnpm run build        # dist/ に配布用 entrypoint を生成
 ```
 
-配布・検証時の entrypoint は `package.json#openclaw.extensions` の `./dist/index.js` です。source checkout で作業した後は `pnpm run build` を実行してから `openclaw plugins install --link . --force` または runtime inspection を行ってください。
+配布・検証時の entrypoint は `package.json#openclaw.extensions` の `./dist/index.js` です。git install でも runtime が読めるように `dist/` は git 管理します。source checkout で作業した後は `pnpm run build` を実行してから `openclaw plugins install --link .` または runtime inspection を行ってください。
 
 manifest と runtime registration の確認:
 
