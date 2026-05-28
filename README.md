@@ -16,7 +16,17 @@ cd ~/.openclaw/extensions
 git clone <repo-url> style-bert-vits2-bridge
 cd style-bert-vits2-bridge
 pnpm install
+pnpm run build
+openclaw plugins install --link .
 ```
+
+リンクインストール後、runtime inspection で speech provider が見えることを確認します。
+
+```bash
+openclaw plugins inspect style-bert-vits2-bridge --runtime --json
+```
+
+成功時は `speechProviderIds` に `style-bert-vits2` が含まれます。bundled skill は `openclaw.plugin.json` の `skills` から discovery されます。
 
 ## OpenClaw 設定
 
@@ -70,7 +80,18 @@ pnpm install
 pnpm install          # 依存インストール
 pnpm run check        # 型チェック
 pnpm test             # テスト実行
+pnpm run build        # dist/ に配布用 entrypoint を生成
 ```
+
+配布・検証時の entrypoint は `package.json#openclaw.extensions` の `./dist/index.js` です。git install でも runtime が読めるように `dist/` は git 管理します。source checkout で作業した後は `pnpm run build` を実行してから `openclaw plugins install --link .` または runtime inspection を行ってください。
+
+manifest と runtime registration の確認:
+
+```bash
+openclaw plugins inspect style-bert-vits2-bridge --runtime --json
+```
+
+`openclaw plugins validate` は simple tool plugin metadata 用のコマンドなので、この capability plugin の検証には使いません。
 
 ## バンドルスキル
 

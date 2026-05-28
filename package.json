@@ -3,18 +3,31 @@
   "version": "0.0.1",
   "description": "Bridge OpenClaw to a Style-Bert-VITS2 API server for speech generation.",
   "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "files": [
+    "dist",
+    "openclaw.plugin.json",
+    "skills",
+    "README.md",
+    "LICENSE"
+  ],
   "openclaw": {
     "extensions": [
-      "./index.ts"
+      "./dist/index.js"
     ],
     "compat": {
       "pluginApi": ">=2026.3.24-beta.2",
       "minGatewayVersion": "2026.3.24-beta.2"
     }
   },
+  "peerDependencies": {
+    "openclaw": ">=2026.3.24-beta.2"
+  },
   "scripts": {
-    "build": "tsc",
+    "build": "tsc -p tsconfig.build.json",
     "check": "tsc --noEmit",
+    "prepack": "pnpm run build",
     "test": "vitest run",
     "test:watch": "vitest"
   },
