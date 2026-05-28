@@ -150,11 +150,38 @@ describe("Sbv2Client", () => {
     expect(url.pathname).toBe("/models/info");
     expect(result).toEqual([
       {
+        sourceId: "valentina01_bright",
         name: "valentina01_bright",
         id: 2,
         spk2id: { valentina01_bright: 0 },
         id2spk: { "0": "valentina01_bright" },
         style2id: { "00_Neutral": 0 },
+      },
+    ]);
+  });
+
+  it("preserves numeric models info keys as ids", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({
+        ok: true,
+        json: () =>
+          Promise.resolve({
+            "2": {
+              config_path: "model_assets/valentina01_bright/config.json",
+              spk2id: { valentina01_bright: 0 },
+            },
+          }),
+      }),
+    );
+
+    const client = new Sbv2Client({ baseUrl: "http://localhost:5000" });
+    await expect(client.getModelsInfo()).resolves.toEqual([
+      {
+        sourceId: "2",
+        id: 2,
+        config_path: "model_assets/valentina01_bright/config.json",
+        spk2id: { valentina01_bright: 0 },
       },
     ]);
   });

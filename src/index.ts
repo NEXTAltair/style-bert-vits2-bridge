@@ -14,8 +14,17 @@ function getModelName(model: Sbv2ModelInfo): string | undefined {
   return (
     trimToUndefined(model.modelName) ??
     trimToUndefined(model.model_name) ??
+    modelNameFromPath(trimToUndefined(model.configPath) ?? trimToUndefined(model.config_path)) ??
+    modelNameFromPath(trimToUndefined(model.modelPath) ?? trimToUndefined(model.model_path)) ??
     trimToUndefined(model.name)
   );
+}
+
+function modelNameFromPath(path: string | undefined): string | undefined {
+  if (!path) return undefined;
+  const segments = path.split(/[\\/]+/).filter(Boolean);
+  if (segments.length < 2) return undefined;
+  return segments[segments.length - 2];
 }
 
 function getSpeakerNames(model: Sbv2ModelInfo): string[] {
@@ -29,6 +38,22 @@ function getSpeakerNames(model: Sbv2ModelInfo): string[] {
 
 function buildVoiceId(modelName: string, speakerName: string): string {
   return `sbv2:${encodeURIComponent(modelName)}:${encodeURIComponent(speakerName)}`;
+}
+
+function parseVoiceId(value: unknown): { modelName: string; speakerName: string } | undefined {
+  const raw = trimToUndefined(value);
+  if (!raw?.startsWith("sbv2:")) return undefined;
+
+  const [, encodedModelName, encodedSpeakerName] = raw.split(":");
+  if (!encodedModelName || !encodedSpeakerName) return undefined;
+
+  try {
+    const modelName = decodeURIComponent(encodedModelName);
+    const speakerName = decodeURIComponent(encodedSpeakerName);
+    return modelName && speakerName ? { modelName, speakerName } : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 function buildSbv2SpeechProvider(): SpeechProviderPlugin {
@@ -69,6 +94,8 @@ function buildSbv2SpeechProvider(): SpeechProviderPlugin {
 
     synthesize: async (req) => {
       const config = req.providerConfig;
+      const selectedVoice =
+        parseVoiceId(req.providerOverrides?.voiceId) ?? parseVoiceId(req.providerOverrides?.voice);
       const baseUrl = trimToUndefined(config.baseUrl);
       if (!baseUrl) {
         throw new Error("Style-Bert-VITS2 baseUrl is not configured");
@@ -79,9 +106,9 @@ function buildSbv2SpeechProvider(): SpeechProviderPlugin {
 
       const audioBuffer = await client.synthesize({
         text: req.text,
-        modelName: trimToUndefined(config.modelName),
+        modelName: selectedVoice?.modelName ?? trimToUndefined(config.modelName),
         speakerId: asNumber(config.speakerId),
-        speakerName: trimToUndefined(config.speakerName),
+        speakerName: selectedVoice?.speakerName ?? trimToUndefined(config.speakerName),
         style: trimToUndefined(config.style) ?? "Neutral",
         language: (trimToUndefined(config.language) as "JP" | "EN" | "ZH") ?? "JP",
       });

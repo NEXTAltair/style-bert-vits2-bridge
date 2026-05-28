@@ -25,6 +25,7 @@ export interface Sbv2ClientOptions {
 
 export interface Sbv2ModelInfo {
   id?: number;
+  sourceId?: string;
   name?: string;
   modelName?: string;
   model_name?: string;
@@ -125,7 +126,15 @@ function normalizeModelsInfo(payload: unknown): Sbv2ModelInfo[] {
 
   return Object.entries(payload).flatMap(([name, value]) => {
     if (!isRecord(value)) return [];
-    return [{ name, ...value }];
+    const numericId = /^\d+$/.test(name) ? Number(name) : undefined;
+    return [
+      {
+        sourceId: name,
+        id: typeof value.id === "number" ? value.id : numericId,
+        ...(!numericId ? { name } : {}),
+        ...value,
+      },
+    ];
   });
 }
 
