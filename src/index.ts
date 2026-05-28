@@ -36,21 +36,34 @@ function getSpeakerNames(model: Sbv2ModelInfo): string[] {
   return Array.from(new Set([...fromSpk2id, ...fromId2spk].map((name) => name.trim()).filter(Boolean)));
 }
 
-function buildVoiceId(modelName: string, speakerName: string): string {
-  return `sbv2:${encodeURIComponent(modelName)}:${encodeURIComponent(speakerName)}`;
+function getDefaultStyle(model: Sbv2ModelInfo): string | undefined {
+  const styles =
+    model.style2id && typeof model.style2id === "object" ? Object.keys(model.style2id) : [];
+  return styles.includes("Neutral") ? "Neutral" : styles[0];
 }
 
-function parseVoiceId(value: unknown): { modelName: string; speakerName: string } | undefined {
+function buildVoiceId(modelName: string, speakerName: string, style?: string): string {
+  const parts = [
+    "sbv2",
+    encodeURIComponent(modelName),
+    encodeURIComponent(speakerName),
+  ];
+  if (style) parts.push(encodeURIComponent(style));
+  return parts.join(":");
+}
+
+function parseVoiceId(value: unknown): { modelName: string; speakerName: string; style?: string } | undefined {
   const raw = trimToUndefined(value);
   if (!raw?.startsWith("sbv2:")) return undefined;
 
-  const [, encodedModelName, encodedSpeakerName] = raw.split(":");
+  const [, encodedModelName, encodedSpeakerName, encodedStyle] = raw.split(":");
   if (!encodedModelName || !encodedSpeakerName) return undefined;
 
   try {
     const modelName = decodeURIComponent(encodedModelName);
     const speakerName = decodeURIComponent(encodedSpeakerName);
-    return modelName && speakerName ? { modelName, speakerName } : undefined;
+    const style = encodedStyle ? decodeURIComponent(encodedStyle) : undefined;
+    return modelName && speakerName ? { modelName, speakerName, style } : undefined;
   } catch {
     return undefined;
   }
@@ -79,13 +92,14 @@ function buildSbv2SpeechProvider(): SpeechProviderPlugin {
           const modelName = getModelName(model);
           if (!modelName) return [];
 
+          const style = getDefaultStyle(model);
           const speakerNames = getSpeakerNames(model);
           if (speakerNames.length === 0) {
-            return [{ id: buildVoiceId(modelName, modelName), name: modelName }];
+            return [{ id: buildVoiceId(modelName, modelName, style), name: modelName }];
           }
 
           return speakerNames.map((speakerName) => ({
-            id: buildVoiceId(modelName, speakerName),
+            id: buildVoiceId(modelName, speakerName, style),
             name: `${speakerName} (${modelName})`,
           }));
         })
@@ -109,7 +123,7 @@ function buildSbv2SpeechProvider(): SpeechProviderPlugin {
         modelName: selectedVoice?.modelName ?? trimToUndefined(config.modelName),
         speakerId: asNumber(config.speakerId),
         speakerName: selectedVoice?.speakerName ?? trimToUndefined(config.speakerName),
-        style: trimToUndefined(config.style) ?? "Neutral",
+        style: selectedVoice?.style ?? trimToUndefined(config.style) ?? "Neutral",
         language: (trimToUndefined(config.language) as "JP" | "EN" | "ZH") ?? "JP",
       });
 

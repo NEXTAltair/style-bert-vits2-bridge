@@ -42,9 +42,9 @@ describe("Style-Bert-VITS2 speech provider voices", () => {
     });
 
     expect(voices).toEqual([
-      { id: "sbv2:amitaro:amitaro", name: "amitaro (amitaro)" },
+      { id: "sbv2:amitaro:amitaro:Neutral", name: "amitaro (amitaro)" },
       {
-        id: "sbv2:valentina01_bright:valentina01_bright",
+        id: "sbv2:valentina01_bright:valentina01_bright:00_Neutral",
         name: "valentina01_bright (valentina01_bright)",
       },
     ]);
@@ -60,6 +60,7 @@ describe("Style-Bert-VITS2 speech provider voices", () => {
             "2": {
               config_path: "model_assets/valentina01_bright/config.json",
               spk2id: { valentina01_bright: 0 },
+              style2id: { "00_Neutral": 0 },
             },
           }),
       }),
@@ -76,7 +77,7 @@ describe("Style-Bert-VITS2 speech provider voices", () => {
       provider.listVoices({ providerConfig: { baseUrl: "http://localhost:5000" } }),
     ).resolves.toEqual([
       {
-        id: "sbv2:valentina01_bright:valentina01_bright",
+        id: "sbv2:valentina01_bright:valentina01_bright:00_Neutral",
         name: "valentina01_bright (valentina01_bright)",
       },
     ]);
@@ -109,13 +110,14 @@ describe("Style-Bert-VITS2 speech provider voices", () => {
         speakerName: "configured-speaker",
       },
       providerOverrides: {
-        voiceId: "sbv2:valentina01_bright:valentina01_bright",
+        voiceId: "sbv2:valentina01_bright:valentina01_bright:00_Neutral",
       },
     });
 
     const url = new URL(mockFetch.mock.calls[0][0]);
     expect(url.searchParams.get("model_name")).toBe("valentina01_bright");
     expect(url.searchParams.get("speaker_name")).toBe("valentina01_bright");
+    expect(url.searchParams.get("style")).toBe("00_Neutral");
   });
 
   it("requires a baseUrl to list voices", async () => {
