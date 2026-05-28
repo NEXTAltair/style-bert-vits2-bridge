@@ -88,13 +88,36 @@ function findModel(models, params) {
         return model;
     }
     if (params.modelId !== undefined) {
-        const model = models[params.modelId];
+        const model = models.find((candidate) => candidate.id === params.modelId || Number(candidate.sourceId) === params.modelId) ?? models[params.modelId];
         if (!model) {
             throw new Error(`SBV2 model id "${params.modelId}" was not found in /models/info`);
         }
         return model;
     }
     throw new Error("SBV2 model could not be resolved from the selected voice profile");
+}
+function hasVoiceIdentity(params) {
+    return (params.modelName !== undefined ||
+        params.modelId !== undefined ||
+        params.speakerName !== undefined ||
+        params.speakerId !== undefined);
+}
+function removeInheritedVoiceDefaults(resolved, source) {
+    if (!hasVoiceIdentity(source)) {
+        return;
+    }
+    if (source.modelId !== undefined && source.modelName === undefined) {
+        delete resolved.modelName;
+    }
+    if ((source.modelName !== undefined || source.modelId !== undefined) &&
+        source.speakerName === undefined &&
+        source.speakerId === undefined) {
+        delete resolved.speakerName;
+        delete resolved.speakerId;
+    }
+    if (source.style === undefined) {
+        delete resolved.style;
+    }
 }
 function assertSpeaker(model, params) {
     if (params.speakerName) {
@@ -136,6 +159,8 @@ export async function resolveVoiceProfile({ client, providerConfig, providerOver
         ...overrides,
         voiceId: overrides.voiceId ?? DEFAULT_VOICE_PROFILE.voiceId,
     };
+    removeInheritedVoiceDefaults(resolved, configDefaults);
+    removeInheritedVoiceDefaults(resolved, overrides);
     const models = await client.getModelsInfo();
     const model = findModel(models, resolved);
     assertSpeaker(model, resolved);
@@ -144,11 +169,12 @@ export async function resolveVoiceProfile({ client, providerConfig, providerOver
 }
 export function listVoiceProfiles(models) {
     return models.flatMap((model) => {
+        const styleSuffix = model.styles[0]?.name ? `:${encodeURIComponent(model.styles[0].name)}` : "";
         if (!model.speakers.length) {
-            return [{ id: model.name, name: model.name }];
+            return [{ id: `sbv2:${encodeURIComponent(model.name)}:${styleSuffix}`, name: model.name }];
         }
         return model.speakers.map((speaker) => ({
-            id: `sbv2:${encodeURIComponent(model.name)}:${encodeURIComponent(speaker.name)}${model.styles[0]?.name ? `:${encodeURIComponent(model.styles[0].name)}` : ""}`,
+            id: `sbv2:${encodeURIComponent(model.name)}:${encodeURIComponent(speaker.name)}${styleSuffix}`,
             name: `${speaker.name} (${model.name})`,
         }));
     }).sort((left, right) => (left.name ?? left.id).localeCompare(right.name ?? right.id));

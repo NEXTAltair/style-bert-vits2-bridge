@@ -20,12 +20,12 @@ function parseSbv2VoiceId(value: unknown): Record<string, unknown> | undefined {
   if (!raw?.startsWith("sbv2:")) return undefined;
 
   const [, encodedModelName, encodedSpeakerName, encodedStyle] = raw.split(":");
-  if (!encodedModelName || !encodedSpeakerName) return undefined;
+  if (!encodedModelName) return undefined;
 
   try {
     return {
       modelName: decodeURIComponent(encodedModelName),
-      speakerName: decodeURIComponent(encodedSpeakerName),
+      speakerName: encodedSpeakerName ? decodeURIComponent(encodedSpeakerName) : undefined,
       style: encodedStyle ? decodeURIComponent(encodedStyle) : undefined,
     };
   } catch {

@@ -95,6 +95,32 @@ describe("Style-Bert-VITS2 speech provider", () => {
     ]);
   });
 
+  it("lists selectable voices for speakerless and styleless models", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({
+        ok: true,
+        json: () =>
+          Promise.resolve({
+            speakerless: {
+              style2id: { Neutral: 0 },
+            },
+            styleless: {
+              spk2id: { alice: 0 },
+            },
+          }),
+      }),
+    );
+
+    const provider = buildSbv2SpeechProvider();
+    await expect(
+      provider.listVoices?.({ providerConfig: { baseUrl: "http://localhost:5000" } }),
+    ).resolves.toEqual([
+      { id: "sbv2:styleless:alice", name: "alice (styleless)" },
+      { id: "sbv2:speakerless::Neutral", name: "speakerless" },
+    ]);
+  });
+
   it("resolves voice params before calling /voice", async () => {
     const mockFetch = vi
       .fn()
@@ -159,6 +185,43 @@ describe("Style-Bert-VITS2 speech provider", () => {
     expect(url.searchParams.get("speaker_name")).toBe("valentina01_bright");
     expect(url.searchParams.get("speaker_id")).toBeNull();
     expect(url.searchParams.get("style")).toBe("00_Neutral");
+  });
+
+  it("uses speakerless voice ids without sending inherited speaker or style defaults", async () => {
+    const mockFetch = vi
+      .fn()
+      .mockResolvedValueOnce({
+        ok: true,
+        json: () =>
+          Promise.resolve({
+            speakerless: {
+              style2id: { Neutral: 0 },
+            },
+          }),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        arrayBuffer: () => Promise.resolve(wavBytes.buffer),
+      });
+    vi.stubGlobal("fetch", mockFetch);
+
+    const provider = buildSbv2SpeechProvider();
+    await provider.synthesize({
+      text: "こんにちは",
+      providerConfig: {
+        baseUrl: "http://localhost:5000",
+        defaultSpeakerName: "configured-speaker",
+        defaultStyle: "00_Neutral",
+      },
+      providerOverrides: {
+        voiceId: "sbv2:speakerless::Neutral",
+      },
+    });
+
+    const url = new URL(mockFetch.mock.calls[1][0]);
+    expect(url.searchParams.get("model_name")).toBe("speakerless");
+    expect(url.searchParams.get("speaker_name")).toBeNull();
+    expect(url.searchParams.get("style")).toBe("Neutral");
   });
 
   it("merges parsed directive overrides with current overrides", () => {

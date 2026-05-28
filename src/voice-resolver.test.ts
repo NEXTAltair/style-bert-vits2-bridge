@@ -98,6 +98,59 @@ describe("resolveVoiceProfile", () => {
     });
   });
 
+  it("honors modelId-only config without keeping the hard-default model name", async () => {
+    const result = await resolveVoiceProfile({
+      client: client([
+        {
+          id: 2,
+          sourceId: "2",
+          name: "numeric-model",
+          speakers: [{ id: 0, name: "numeric-speaker" }],
+          styles: [],
+          raw: {},
+        },
+      ]),
+      providerConfig: {
+        defaultModelId: 2,
+        defaultSpeakerName: "numeric-speaker",
+      },
+    });
+
+    expect(result).toMatchObject({
+      modelId: 2,
+      speakerName: "numeric-speaker",
+    });
+    expect(result.modelName).toBeUndefined();
+    expect(result.style).toBeUndefined();
+  });
+
+  it("matches modelId against normalized model ids and numeric source ids", async () => {
+    const result = await resolveVoiceProfile({
+      client: client([
+        {
+          id: 2,
+          sourceId: "2",
+          name: "sparse-model",
+          speakers: [{ id: 0, name: "sparse-speaker" }],
+          styles: [],
+          raw: {},
+        },
+      ]),
+      providerConfig: {},
+      providerOverrides: {
+        modelId: 2,
+        speakerName: "sparse-speaker",
+      },
+    });
+
+    expect(result).toMatchObject({
+      modelId: 2,
+      speakerName: "sparse-speaker",
+    });
+    expect(result.modelName).toBeUndefined();
+    expect(result.style).toBeUndefined();
+  });
+
   it("rejects unknown voice profiles", async () => {
     await expect(
       resolveVoiceProfile({
@@ -151,6 +204,28 @@ describe("voice resolver helpers", () => {
         id: "sbv2:valentina01_bright:valentina01_bright:00_Neutral",
         name: "valentina01_bright (valentina01_bright)",
       },
+    ]);
+  });
+
+  it("lists selectable SBV2 IDs for speakerless and styleless models", () => {
+    expect(
+      listVoiceProfiles([
+        {
+          name: "speakerless",
+          speakers: [],
+          styles: [{ id: 0, name: "Neutral" }],
+          raw: {},
+        },
+        {
+          name: "styleless",
+          speakers: [{ id: 0, name: "alice" }],
+          styles: [],
+          raw: {},
+        },
+      ]),
+    ).toEqual([
+      { id: "sbv2:styleless:alice", name: "alice (styleless)" },
+      { id: "sbv2:speakerless::Neutral", name: "speakerless" },
     ]);
   });
 
