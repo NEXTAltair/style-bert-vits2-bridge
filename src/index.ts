@@ -10,6 +10,26 @@ function asNumber(value: unknown): number | undefined {
   return typeof value === "number" && Number.isFinite(value) ? value : undefined;
 }
 
+function firstString(...values: unknown[]): string | undefined {
+  for (const value of values) {
+    const trimmed = trimToUndefined(value);
+    if (trimmed) return trimmed;
+  }
+  return undefined;
+}
+
+function firstNumber(...values: unknown[]): number | undefined {
+  for (const value of values) {
+    const number = asNumber(value);
+    if (number !== undefined) return number;
+  }
+  return undefined;
+}
+
+function normalizeLanguage(value: string | undefined): "JP" | "EN" | "ZH" | undefined {
+  return value === "JP" || value === "EN" || value === "ZH" ? value : undefined;
+}
+
 function getModelName(model: Sbv2ModelInfo): string | undefined {
   return (
     trimToUndefined(model.modelName) ??
@@ -69,7 +89,7 @@ function parseVoiceId(value: unknown): { modelName: string; speakerName: string;
   }
 }
 
-function buildSbv2SpeechProvider(): SpeechProviderPlugin {
+export function buildSbv2SpeechProvider(): SpeechProviderPlugin {
   return {
     id: "style-bert-vits2",
     label: "Style-Bert-VITS2",
@@ -120,11 +140,11 @@ function buildSbv2SpeechProvider(): SpeechProviderPlugin {
 
       const audioBuffer = await client.synthesize({
         text: req.text,
-        modelName: selectedVoice?.modelName ?? trimToUndefined(config.modelName),
-        speakerId: asNumber(config.speakerId),
-        speakerName: selectedVoice?.speakerName ?? trimToUndefined(config.speakerName),
-        style: selectedVoice?.style ?? trimToUndefined(config.style) ?? "Neutral",
-        language: (trimToUndefined(config.language) as "JP" | "EN" | "ZH") ?? "JP",
+        modelName: selectedVoice?.modelName ?? firstString(config.defaultModelName, config.modelName),
+        speakerId: selectedVoice ? undefined : firstNumber(config.defaultSpeakerId, config.speakerId),
+        speakerName: selectedVoice?.speakerName ?? firstString(config.defaultSpeakerName, config.speakerName),
+        style: selectedVoice?.style ?? firstString(config.defaultStyle, config.style) ?? "Neutral",
+        language: normalizeLanguage(firstString(config.defaultLanguage, config.language)) ?? "JP",
       });
 
       return {
