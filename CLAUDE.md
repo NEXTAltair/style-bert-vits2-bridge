@@ -18,7 +18,7 @@ pnpm run check        # type-check (tsc --noEmit)
 
 - **Packaged entry point is `dist/index.js`** — build with `pnpm run build` before link/install verification. Do not point `package.json#openclaw.extensions` at `src/index.ts`.
 - **Root `index.ts` is only a source-checkout shim** — it re-exports from `./src/index` for loaders that inspect the checkout directly.
-- **Import paths: no `.js` extension** — use `"./sbv2-client"` not `"./sbv2-client.js"`. The gateway's TS loader resolves by name. `tsconfig.json` uses `moduleResolution: "Bundler"`.
+- **Runtime import paths use `.js` extensions** — packaged runtime loads `dist/index.js` as Node ESM, so relative imports in source must compile to `.js` specifiers such as `"./sbv2-client.js"`.
 - **Silent failures** — the gateway swallows plugin load/register errors with no log output. Always add `api?.logger?.info?.(...)` in `register()` to confirm it runs.
 - **SBV2 requires `encoding=utf-8`** query param for non-ASCII text in URL.
 

@@ -1,6 +1,6 @@
 import { definePluginEntry } from "openclaw/plugin-sdk/plugin-entry";
 import type { SpeechProviderPlugin } from "openclaw/plugin-sdk/speech";
-import { Sbv2Client } from "./sbv2-client";
+import { Sbv2Client } from "./sbv2-client.js";
 
 function trimToUndefined(value: unknown): string | undefined {
   return typeof value === "string" && value.trim() ? value.trim() : undefined;
