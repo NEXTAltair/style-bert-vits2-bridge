@@ -131,7 +131,7 @@ function normalizeModelsInfo(payload: unknown): Sbv2ModelInfo[] {
       {
         sourceId: name,
         id: typeof value.id === "number" ? value.id : numericId,
-        ...(!numericId ? { name } : {}),
+        ...(numericId === undefined ? { name } : {}),
         ...value,
       },
     ];

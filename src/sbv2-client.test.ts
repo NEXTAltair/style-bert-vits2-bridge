@@ -186,6 +186,30 @@ describe("Sbv2Client", () => {
     ]);
   });
 
+  it("preserves zero models info key as an id without using it as a name", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({
+        ok: true,
+        json: () =>
+          Promise.resolve({
+            "0": {
+              spk2id: { amitaro: 0 },
+            },
+          }),
+      }),
+    );
+
+    const client = new Sbv2Client({ baseUrl: "http://localhost:5000" });
+    await expect(client.getModelsInfo()).resolves.toEqual([
+      {
+        sourceId: "0",
+        id: 0,
+        spk2id: { amitaro: 0 },
+      },
+    ]);
+  });
+
   it("throws a clear error when models info cannot be reached", async () => {
     vi.stubGlobal(
       "fetch",
