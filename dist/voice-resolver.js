@@ -102,8 +102,9 @@ function hasVoiceIdentity(params) {
         params.speakerName !== undefined ||
         params.speakerId !== undefined);
 }
-function removeInheritedVoiceDefaults(resolved, source) {
+function applyVoiceLayer(resolved, source) {
     if (!hasVoiceIdentity(source)) {
+        Object.assign(resolved, source);
         return;
     }
     if (source.modelId !== undefined && source.modelName === undefined) {
@@ -118,6 +119,7 @@ function removeInheritedVoiceDefaults(resolved, source) {
     if (source.style === undefined) {
         delete resolved.style;
     }
+    Object.assign(resolved, source);
 }
 function assertSpeaker(model, params) {
     if (params.speakerName) {
@@ -151,16 +153,14 @@ function assertStyle(model, params) {
 export async function resolveVoiceProfile({ client, providerConfig, providerOverrides, }) {
     const configDefaults = readProviderDefaults(providerConfig);
     const overrides = readOverrides(providerOverrides);
-    const explicitProfile = overrides.voiceId ? findProfile(overrides.voiceId) : {};
-    const resolved = {
-        ...DEFAULT_VOICE_PROFILE,
-        ...configDefaults,
-        ...explicitProfile,
-        ...overrides,
-        voiceId: overrides.voiceId ?? DEFAULT_VOICE_PROFILE.voiceId,
-    };
-    removeInheritedVoiceDefaults(resolved, configDefaults);
-    removeInheritedVoiceDefaults(resolved, overrides);
+    const explicitProfile = overrides.voiceId
+        ? findProfile(overrides.voiceId)
+        : {};
+    const resolved = { ...DEFAULT_VOICE_PROFILE };
+    applyVoiceLayer(resolved, configDefaults);
+    applyVoiceLayer(resolved, explicitProfile);
+    applyVoiceLayer(resolved, overrides);
+    resolved.voiceId = overrides.voiceId ?? explicitProfile.voiceId ?? DEFAULT_VOICE_PROFILE.voiceId;
     const models = await client.getModelsInfo();
     const model = findModel(models, resolved);
     assertSpeaker(model, resolved);

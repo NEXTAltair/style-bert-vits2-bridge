@@ -150,11 +150,12 @@ function hasVoiceIdentity(params: Partial<Sbv2ResolvedVoiceProfile>): boolean {
   );
 }
 
-function removeInheritedVoiceDefaults(
+function applyVoiceLayer(
   resolved: Sbv2ResolvedVoiceProfile,
   source: Partial<Sbv2ResolvedVoiceProfile>,
 ): void {
   if (!hasVoiceIdentity(source)) {
+    Object.assign(resolved, source);
     return;
   }
 
@@ -174,6 +175,8 @@ function removeInheritedVoiceDefaults(
   if (source.style === undefined) {
     delete resolved.style;
   }
+
+  Object.assign(resolved, source);
 }
 
 function assertSpeaker(model: Sbv2ModelInfo, params: Partial<Sbv2ResolvedVoiceProfile>): void {
@@ -223,17 +226,15 @@ export async function resolveVoiceProfile({
 }: ResolveVoiceProfileOptions): Promise<Sbv2ResolvedVoiceProfile> {
   const configDefaults = readProviderDefaults(providerConfig);
   const overrides = readOverrides(providerOverrides);
-  const explicitProfile = overrides.voiceId ? findProfile(overrides.voiceId) : {};
+  const explicitProfile: Partial<Sbv2ResolvedVoiceProfile> = overrides.voiceId
+    ? findProfile(overrides.voiceId)
+    : {};
 
-  const resolved: Sbv2ResolvedVoiceProfile = {
-    ...DEFAULT_VOICE_PROFILE,
-    ...configDefaults,
-    ...explicitProfile,
-    ...overrides,
-    voiceId: overrides.voiceId ?? DEFAULT_VOICE_PROFILE.voiceId,
-  };
-  removeInheritedVoiceDefaults(resolved, configDefaults);
-  removeInheritedVoiceDefaults(resolved, overrides);
+  const resolved: Sbv2ResolvedVoiceProfile = { ...DEFAULT_VOICE_PROFILE };
+  applyVoiceLayer(resolved, configDefaults);
+  applyVoiceLayer(resolved, explicitProfile);
+  applyVoiceLayer(resolved, overrides);
+  resolved.voiceId = overrides.voiceId ?? explicitProfile.voiceId ?? DEFAULT_VOICE_PROFILE.voiceId;
 
   const models = await client.getModelsInfo();
   const model = findModel(models, resolved);
