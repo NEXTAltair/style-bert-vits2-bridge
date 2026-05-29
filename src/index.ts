@@ -12,7 +12,22 @@ function trimToUndefined(value: unknown): string | undefined {
 }
 
 function asNumber(value: unknown): number | undefined {
-  return typeof value === "number" && Number.isFinite(value) ? value : undefined;
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  if (typeof value === "string" && value.trim()) {
+    const number = Number(value);
+    return Number.isFinite(number) ? number : undefined;
+  }
+  return undefined;
+}
+
+function clamp(value: number, min: number, max: number): number {
+  return Math.min(max, Math.max(min, value));
+}
+
+function rateWpmToLength(value: unknown): number | undefined {
+  const rateWpm = asNumber(value);
+  if (rateWpm === undefined || rateWpm <= 0) return undefined;
+  return clamp(180 / rateWpm, 0.5, 2);
 }
 
 function parseSbv2VoiceId(value: unknown): Record<string, unknown> | undefined {
@@ -38,7 +53,7 @@ function normalizeOverrides(overrides: Record<string, unknown> | undefined): Rec
   if (!selectedVoice) return overrides;
 
   const { voiceId: _voiceId, voice: _voice, ...rest } = overrides ?? {};
-  return { ...rest, ...selectedVoice };
+  return { ...selectedVoice, ...rest };
 }
 
 export function buildSbv2SpeechProvider(): SpeechProviderPlugin {
@@ -60,15 +75,42 @@ export function buildSbv2SpeechProvider(): SpeechProviderPlugin {
 
     resolveTalkOverrides: ({ params }) => {
       const overrides: Record<string, unknown> = {};
-      const voiceId = trimToUndefined(params.voiceId) ?? trimToUndefined(params.voice);
-      const modelId = asNumber(params.modelId);
-      const modelName = trimToUndefined(params.modelName) ?? trimToUndefined(params.model);
-      const speed = asNumber(params.speed) ?? asNumber(params.rate);
+      const voiceId =
+        trimToUndefined(params.voiceId) ??
+        trimToUndefined(params.voice_id) ??
+        trimToUndefined(params.voice);
+      const modelId = asNumber(params.modelId) ?? asNumber(params.model_id);
+      const modelName =
+        trimToUndefined(params.modelName) ??
+        trimToUndefined(params.model_name) ??
+        trimToUndefined(params.model);
+      const speakerId = asNumber(params.speakerId) ?? asNumber(params.speaker_id);
+      const speakerName =
+        trimToUndefined(params.speakerName) ??
+        trimToUndefined(params.speaker_name) ??
+        trimToUndefined(params.speaker);
+      const speed = asNumber(params.speed);
+      const length =
+        asNumber(params.length) ?? rateWpmToLength(params.rateWpm) ?? rateWpmToLength(params.rate_wpm) ?? rateWpmToLength(params.rate);
+      const style = trimToUndefined(params.style);
+      const styleWeight = asNumber(params.styleWeight) ?? asNumber(params.style_weight);
+      const assistText = trimToUndefined(params.assistText) ?? trimToUndefined(params.assist_text);
+      const assistTextWeight =
+        asNumber(params.assistTextWeight) ?? asNumber(params.assist_text_weight);
+      const language = trimToUndefined(params.language);
 
       if (voiceId) overrides.voiceId = voiceId;
       if (modelId !== undefined) overrides.modelId = modelId;
       if (modelName) overrides.modelName = modelName;
+      if (speakerId !== undefined) overrides.speakerId = speakerId;
+      if (speakerName) overrides.speakerName = speakerName;
       if (speed !== undefined) overrides.speed = speed;
+      if (length !== undefined) overrides.length = length;
+      if (style) overrides.style = style;
+      if (styleWeight !== undefined) overrides.styleWeight = styleWeight;
+      if (assistText) overrides.assistText = assistText;
+      if (assistTextWeight !== undefined) overrides.assistTextWeight = assistTextWeight;
+      if (language) overrides.language = language;
 
       return overrides;
     },

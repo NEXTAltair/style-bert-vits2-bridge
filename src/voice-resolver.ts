@@ -163,6 +163,14 @@ function applyVoiceLayer(
     delete resolved.modelName;
   }
 
+  if (source.speakerId !== undefined && source.speakerName === undefined) {
+    delete resolved.speakerName;
+  }
+
+  if (source.speakerName !== undefined && source.speakerId === undefined) {
+    delete resolved.speakerId;
+  }
+
   if (
     (source.modelName !== undefined || source.modelId !== undefined) &&
     source.speakerName === undefined &&
@@ -172,7 +180,7 @@ function applyVoiceLayer(
     delete resolved.speakerId;
   }
 
-  if (source.style === undefined) {
+  if ((source.modelName !== undefined || source.modelId !== undefined) && source.style === undefined) {
     delete resolved.style;
   }
 
@@ -246,7 +254,8 @@ export async function resolveVoiceProfile({
 
 export function listVoiceProfiles(models: Sbv2ModelInfo[]): Array<{ id: string; name?: string }> {
   return models.flatMap((model) => {
-    const styleSuffix = model.styles[0]?.name ? `:${encodeURIComponent(model.styles[0].name)}` : "";
+    const style = pickDefaultStyle(model.styles);
+    const styleSuffix = style ? `:${encodeURIComponent(style.name)}` : "";
 
     if (!model.speakers.length) {
       return [{ id: `sbv2:${encodeURIComponent(model.name)}:${styleSuffix}`, name: model.name }];
@@ -257,6 +266,14 @@ export function listVoiceProfiles(models: Sbv2ModelInfo[]): Array<{ id: string; 
       name: `${speaker.name} (${model.name})`,
     }));
   }).sort((left, right) => (left.name ?? left.id).localeCompare(right.name ?? right.id));
+}
+
+function pickDefaultStyle(styles: Sbv2ModelInfo["styles"]): Sbv2ModelInfo["styles"][number] | undefined {
+  return (
+    styles.find((style) => style.name === "Neutral") ??
+    styles.find((style) => style.name === "00_Neutral") ??
+    styles[0]
+  );
 }
 
 export function parseVoiceDirectiveToken(ctx: {
@@ -277,6 +294,7 @@ export function parseVoiceDirectiveToken(ctx: {
   switch (key) {
     case "voice":
     case "voice_id":
+    case "voiceid":
       return allowVoice ? { voiceId: value } : undefined;
     case "speaker":
     case "speaker_name":

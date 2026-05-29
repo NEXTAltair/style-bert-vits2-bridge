@@ -198,6 +198,24 @@ describe("Sbv2Client", () => {
     ]);
   });
 
+  it("prefers canonical model_name over display names", () => {
+    expect(
+      normalizeModelsInfo({
+        display_key: {
+          name: "Pretty Display Name",
+          model_name: "canonical-model",
+          spk2id: { alice: 0 },
+        },
+      }),
+    ).toMatchObject([
+      {
+        sourceId: "display_key",
+        name: "canonical-model",
+        speakers: [{ id: 0, name: "alice" }],
+      },
+    ]);
+  });
+
   it("normalizes SBV2 spk2id and id2style maps", () => {
     expect(
       normalizeModelsInfo({

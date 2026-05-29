@@ -124,6 +124,49 @@ describe("resolveVoiceProfile", () => {
     expect(result.style).toBeUndefined();
   });
 
+  it("honors speakerId-only overrides without keeping stale speaker names", async () => {
+    const result = await resolveVoiceProfile({
+      client: client([
+        {
+          name: "valentina01_bright",
+          speakers: [
+            { id: 0, name: "valentina01_bright" },
+            { id: 1, name: "second-speaker" },
+          ],
+          styles: [{ id: 0, name: "00_Neutral" }],
+          raw: {},
+        },
+      ]),
+      providerConfig: {},
+      providerOverrides: {
+        speakerId: 1,
+      },
+    });
+
+    expect(result.speakerId).toBe(1);
+    expect(result.speakerName).toBeUndefined();
+    expect(result.style).toBe("00_Neutral");
+  });
+
+  it("preserves style when only the speaker changes", async () => {
+    await expect(
+      resolveVoiceProfile({
+        client: client(),
+        providerConfig: {
+          defaultModelName: "custom-model",
+          defaultStyle: "Neutral",
+        },
+        providerOverrides: {
+          speakerName: "custom-speaker",
+        },
+      }),
+    ).resolves.toMatchObject({
+      modelName: "custom-model",
+      speakerName: "custom-speaker",
+      style: "Neutral",
+    });
+  });
+
   it("matches modelId against normalized model ids and numeric source ids", async () => {
     const result = await resolveVoiceProfile({
       client: client([
@@ -229,6 +272,22 @@ describe("voice resolver helpers", () => {
     ]);
   });
 
+  it("prefers Neutral styles when building selectable voice ids", () => {
+    expect(
+      listVoiceProfiles([
+        {
+          name: "demo",
+          speakers: [{ id: 0, name: "alice" }],
+          styles: [
+            { id: 1, name: "Happy" },
+            { id: 0, name: "Neutral" },
+          ],
+          raw: {},
+        },
+      ]),
+    ).toEqual([{ id: "sbv2:demo:alice:Neutral", name: "alice (demo)" }]);
+  });
+
   it("parses whitelisted directive tokens under policy controls", () => {
     expect(
       parseVoiceDirectiveToken({
@@ -245,5 +304,13 @@ describe("voice resolver helpers", () => {
         policy: { allowModelId: false },
       }),
     ).toBeUndefined();
+
+    expect(
+      parseVoiceDirectiveToken({
+        key: "voiceId",
+        value: "sbv2:demo:alice:Neutral",
+        policy: { allowVoice: true },
+      }),
+    ).toEqual({ voiceId: "sbv2:demo:alice:Neutral" });
   });
 });

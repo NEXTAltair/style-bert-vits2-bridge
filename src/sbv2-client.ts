@@ -155,11 +155,11 @@ function normalizeModelInfoEntry(nameHint: string | undefined, value: unknown): 
 
   const numericId = nameHint && /^\d+$/.test(nameHint) ? Number(nameHint) : undefined;
   const modelName =
-    asNonEmptyString(value.name) ??
     asNonEmptyString(value.model_name) ??
     asNonEmptyString(value.modelName) ??
     modelNameFromPath(asNonEmptyString(value.configPath) ?? asNonEmptyString(value.config_path)) ??
     modelNameFromPath(asNonEmptyString(value.modelPath) ?? asNonEmptyString(value.model_path)) ??
+    asNonEmptyString(value.name) ??
     (numericId === undefined ? nameHint : undefined);
 
   if (!modelName) {

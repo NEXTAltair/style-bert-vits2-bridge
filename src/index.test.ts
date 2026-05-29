@@ -187,6 +187,39 @@ describe("Style-Bert-VITS2 speech provider", () => {
     expect(url.searchParams.get("style")).toBe("00_Neutral");
   });
 
+  it("lets explicit overrides refine a selected SBV2 voice id", async () => {
+    const mockFetch = vi
+      .fn()
+      .mockResolvedValueOnce({
+        ok: true,
+        json: () =>
+          Promise.resolve({
+            valentina01_bright: {
+              spk2id: { valentina01_bright: 0 },
+              style2id: { "00_Neutral": 0, Happy: 1 },
+            },
+          }),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        arrayBuffer: () => Promise.resolve(wavBytes.buffer),
+      });
+    vi.stubGlobal("fetch", mockFetch);
+
+    const provider = buildSbv2SpeechProvider();
+    await provider.synthesize({
+      text: "こんにちは",
+      providerConfig: { baseUrl: "http://localhost:5000" },
+      providerOverrides: {
+        voiceId: "sbv2:valentina01_bright:valentina01_bright:00_Neutral",
+        style: "Happy",
+      },
+    });
+
+    const url = new URL(mockFetch.mock.calls[1][0]);
+    expect(url.searchParams.get("style")).toBe("Happy");
+  });
+
   it("uses speakerless voice ids without sending inherited speaker or style defaults", async () => {
     const mockFetch = vi
       .fn()
@@ -237,6 +270,50 @@ describe("Style-Bert-VITS2 speech provider", () => {
     ).toEqual({
       style: "00_Neutral",
       assistText: "happy",
+    });
+  });
+
+  it("maps Talk snake_case voice fields, WPM rate, and style settings", () => {
+    const provider = buildSbv2SpeechProvider();
+
+    expect(
+      provider.resolveTalkOverrides?.({
+        params: {
+          voice_id: "sbv2:model:speaker:Neutral",
+          model_id: "2",
+          speaker_id: "3",
+          rate: 180,
+          style: "Happy",
+          style_weight: "0.7",
+          assist_text: "cheerful",
+          assist_text_weight: "0.8",
+        },
+      }),
+    ).toEqual({
+      voiceId: "sbv2:model:speaker:Neutral",
+      modelId: 2,
+      speakerId: 3,
+      length: 1,
+      style: "Happy",
+      styleWeight: 0.7,
+      assistText: "cheerful",
+      assistTextWeight: 0.8,
+    });
+  });
+
+  it("keeps Talk speed separate from WPM rate", () => {
+    const provider = buildSbv2SpeechProvider();
+
+    expect(
+      provider.resolveTalkOverrides?.({
+        params: {
+          speed: 1.25,
+          rate: 180,
+        },
+      }),
+    ).toMatchObject({
+      speed: 1.25,
+      length: 1,
     });
   });
 
