@@ -40,10 +40,30 @@ SBV2 は `model_assets/` 内のディレクトリ名でモデルを指定しま�
 - `assist_text`: 感情の参考にするテキスト
 - `assist_text_weight`: 補助テキストの影響度（デフォルト 1.0）
 
+`assist_text` は常用しません。短い文脈だけでは意図した tone が出ない場合に、短い補助文を一時的に足します。説明文のような長い補助テキストや、本文と矛盾する感情は避けてください。
+
+## Valentina style / emotion 選択
+
+Valentina 系モデルの style は SBV2 共通の emotion taxonomy ではなく、モデルごとの `style2id` に定義された style 名です。`/docs` は API 仕様確認用であり、ロード済みモデル情報は `/models/info` で確認できます。
+
+`clear`、`soft`、`serious`、`alert` などの tone は、エージェントが文脈に応じて style を選ぶための分類名であり、SBV2 に送る style 名ではありません。
+
+### 選択ルール
+
+1. `/models/info` の `style2id` に含まれる style 名だけを `/voice` に渡す。
+2. tone 分類は固定 mapping ではなく、エージェントが文脈と `style2id` を見て判断する。
+3. style を分類する場合は、必要に応じて以下の用途で考える。
+   - `clear`: 明るく聞き取りやすい説明
+   - `soft`: 柔らかい応答、落ち着いた相槌
+   - `serious`: 注意、事務的な確認、低めの温度感
+   - `alert`: 短い警告、割り込み、重要通知
+4. `style_weight` はエージェントまたは呼び出し側が文脈に応じて決める。スキル内で tone ごとの固定値を持たない。
+5. `assist_text` は style だけで足りない場合にだけ使う。
+
 ## 選択の指針
 
 1. まず `/models/info` でロード済みモデルとスピーカーを確認する
 2. ユーザーの要望に近い声色のモデル・スピーカーを選ぶ
-3. スタイルは "Neutral" から始め、必要に応じて変更する
-4. `style_weight` は控えめに（0.5〜1.0 推奨）
+3. Valentina 系は `style2id` に存在する style だけを候補にする
+4. `style_weight` はエージェントまたは呼び出し側が文脈に応じて決める
 5. 話速は 0.8〜1.2 の範囲が自然
