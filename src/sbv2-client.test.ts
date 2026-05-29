@@ -179,6 +179,36 @@ describe("Sbv2Client", () => {
     }
   });
 
+  it("truncates long formatted validation details", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({
+        ok: false,
+        status: 422,
+        statusText: "Unprocessable Entity",
+        text: () =>
+          Promise.resolve(
+            JSON.stringify({
+              detail: [{ loc: ["query", "model_name"], msg: `${"x".repeat(600)}secret-tail` }],
+            }),
+          ),
+      }),
+    );
+
+    const client = new Sbv2Client({ baseUrl: "http://localhost:5000" });
+
+    try {
+      await client.synthesize({ text: "テスト" });
+      throw new Error("expected synthesize to fail");
+    } catch (error) {
+      expect(error).toBeInstanceOf(Error);
+      const message = (error as Error).message;
+      expect(message).toContain("Validation error: model_name:");
+      expect(message).toContain("... [truncated]");
+      expect(message).not.toContain("secret-tail");
+    }
+  });
+
   it("formats plain-text SBV2 validation responses", async () => {
     vi.stubGlobal(
       "fetch",

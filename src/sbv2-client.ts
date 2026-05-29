@@ -160,7 +160,7 @@ function formatResponseBody(body: string): string | undefined {
     if (isRecord(parsed)) {
       const detail = formatValidationDetail(parsed.detail);
       if (detail) {
-        return `Validation error: ${detail}`;
+        return truncateErrorBody(`Validation error: ${detail}`);
       }
 
       const message = asNonEmptyString(parsed.detail) ?? asNonEmptyString(parsed.message);
