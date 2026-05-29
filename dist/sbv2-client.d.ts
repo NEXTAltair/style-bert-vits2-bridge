@@ -21,10 +21,14 @@ export interface Sbv2ClientOptions {
     baseUrl: string;
     timeoutMs?: number;
 }
+export interface Sbv2NamedItem {
+    id?: number;
+    name: string;
+}
 export interface Sbv2ModelInfo {
     id?: number;
     sourceId?: string;
-    name?: string;
+    name: string;
     modelName?: string;
     model_name?: string;
     configPath?: string;
@@ -33,13 +37,25 @@ export interface Sbv2ModelInfo {
     model_path?: string;
     spk2id?: Record<string, number>;
     id2spk?: Record<string, string>;
+    speaker2id?: Record<string, number>;
+    speaker2Id?: Record<string, number>;
+    speaker_map?: Record<string, number>;
+    speakerMap?: Record<string, number>;
     style2id?: Record<string, number>;
+    style2Id?: Record<string, number>;
+    id2style?: Record<string, string>;
+    style_map?: Record<string, number>;
+    styleMap?: Record<string, number>;
+    speakers: Sbv2NamedItem[];
+    styles: Sbv2NamedItem[];
+    raw: unknown;
     [key: string]: unknown;
 }
+export declare function normalizeModelsInfo(value: unknown): Sbv2ModelInfo[];
 export declare class Sbv2Client {
     private readonly baseUrl;
     private readonly timeoutMs;
     constructor(options: Sbv2ClientOptions);
-    synthesize(params: Sbv2SynthesizeParams): Promise<Buffer>;
     getModelsInfo(): Promise<Sbv2ModelInfo[]>;
+    synthesize(params: Sbv2SynthesizeParams): Promise<Buffer>;
 }

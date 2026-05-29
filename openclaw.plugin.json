@@ -12,16 +12,26 @@
     "properties": {
       "baseUrl": { "type": "string", "minLength": 1 },
       "timeoutMs": { "type": "integer", "minimum": 1000 },
-      "defaultModelName": { "type": "string" },
-      "defaultSpeakerId": { "type": "integer" },
-      "defaultSpeakerName": { "type": "string" },
-      "defaultStyle": { "type": "string" },
-      "defaultLanguage": { "type": "string", "enum": ["JP", "EN", "ZH"] },
       "modelName": { "type": "string" },
+      "modelId": { "type": "integer" },
       "speakerId": { "type": "integer" },
       "speakerName": { "type": "string" },
       "style": { "type": "string" },
-      "language": { "type": "string", "enum": ["JP", "EN", "ZH"] }
+      "styleWeight": { "type": "number" },
+      "length": { "type": "number" },
+      "language": { "type": "string", "enum": ["JP", "EN", "ZH"] },
+      "assistText": { "type": "string" },
+      "assistTextWeight": { "type": "number" },
+      "defaultModelName": { "type": "string" },
+      "defaultModelId": { "type": "integer" },
+      "defaultSpeakerId": { "type": "integer" },
+      "defaultSpeakerName": { "type": "string" },
+      "defaultStyle": { "type": "string" },
+      "defaultStyleWeight": { "type": "number" },
+      "defaultLength": { "type": "number" },
+      "defaultLanguage": { "type": "string", "enum": ["JP", "EN", "ZH"] },
+      "defaultAssistText": { "type": "string" },
+      "defaultAssistTextWeight": { "type": "number" }
     }
   },
   "uiHints": {
@@ -33,9 +43,21 @@
       "label": "Request Timeout (ms)",
       "placeholder": "30000"
     },
+    "modelName": {
+      "label": "Model Name",
+      "placeholder": "Legacy alias for Default Model Name"
+    },
+    "speakerName": {
+      "label": "Speaker Name",
+      "placeholder": "Legacy alias for Default Speaker Name"
+    },
+    "style": {
+      "label": "Style",
+      "placeholder": "Legacy alias for Default Style"
+    },
     "defaultModelName": {
       "label": "Default Model Name",
-      "placeholder": "Optional default model_assets directory name"
+      "placeholder": "valentina01_bright"
     },
     "defaultSpeakerId": {
       "label": "Default Speaker ID",
@@ -43,11 +65,11 @@
     },
     "defaultSpeakerName": {
       "label": "Default Speaker Name",
-      "placeholder": "Optional default speaker name"
+      "placeholder": "valentina01_bright"
     },
     "defaultStyle": {
       "label": "Default Style",
-      "placeholder": "Neutral"
+      "placeholder": "00_Neutral"
     },
     "defaultLanguage": {
       "label": "Default Language",

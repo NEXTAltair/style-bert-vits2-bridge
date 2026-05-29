@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { Sbv2Client } from "./sbv2-client.js";
+import { Sbv2Client, normalizeModelsInfo } from "./sbv2-client.js";
 
 const wavBytes = new Uint8Array([
   0x52, 0x49, 0x46, 0x46, // "RIFF"
@@ -127,7 +127,7 @@ describe("Sbv2Client", () => {
     expect(url.origin).toBe("http://localhost:5000");
   });
 
-  it("fetches models info from SBV2", async () => {
+  it("fetches and normalizes /models/info", async () => {
     const mockFetch = vi.fn().mockResolvedValue({
       ok: true,
       json: () =>
@@ -136,7 +136,7 @@ describe("Sbv2Client", () => {
             id: 2,
             spk2id: { valentina01_bright: 0 },
             id2spk: { "0": "valentina01_bright" },
-            style2id: { "00_Neutral": 0 },
+            style2id: { "00_Neutral": 0, Happy: 1 },
           },
         }),
     });
@@ -148,64 +148,87 @@ describe("Sbv2Client", () => {
     expect(mockFetch).toHaveBeenCalledOnce();
     const url = new URL(mockFetch.mock.calls[0][0]);
     expect(url.pathname).toBe("/models/info");
-    expect(result).toEqual([
+    expect(result).toMatchObject([
       {
         sourceId: "valentina01_bright",
         name: "valentina01_bright",
         id: 2,
-        spk2id: { valentina01_bright: 0 },
-        id2spk: { "0": "valentina01_bright" },
-        style2id: { "00_Neutral": 0 },
+        speakers: [{ id: 0, name: "valentina01_bright" }],
+        styles: [
+          { id: 0, name: "00_Neutral" },
+          { id: 1, name: "Happy" },
+        ],
       },
     ]);
   });
 
-  it("preserves numeric models info keys as ids", async () => {
-    vi.stubGlobal(
-      "fetch",
-      vi.fn().mockResolvedValue({
-        ok: true,
-        json: () =>
-          Promise.resolve({
-            "2": {
-              config_path: "model_assets/valentina01_bright/config.json",
-              spk2id: { valentina01_bright: 0 },
-            },
-          }),
-      }),
-    );
+  it("normalizes array-shaped /models/info payloads", () => {
+    expect(
+      normalizeModelsInfo([
+        {
+          model_name: "demo",
+          speakers: ["alice"],
+          styles: [{ name: "Neutral", id: 2 }],
+        },
+      ]),
+    ).toMatchObject([
+      {
+        name: "demo",
+        speakers: [{ id: 0, name: "alice" }],
+        styles: [{ id: 2, name: "Neutral" }],
+      },
+    ]);
+  });
 
-    const client = new Sbv2Client({ baseUrl: "http://localhost:5000" });
-    await expect(client.getModelsInfo()).resolves.toEqual([
+  it("preserves numeric models info keys as ids while deriving model names from paths", () => {
+    expect(
+      normalizeModelsInfo({
+        "2": {
+          config_path: "model_assets/valentina01_bright/config.json",
+          spk2id: { valentina01_bright: 0 },
+        },
+      }),
+    ).toMatchObject([
       {
         sourceId: "2",
         id: 2,
-        config_path: "model_assets/valentina01_bright/config.json",
-        spk2id: { valentina01_bright: 0 },
+        name: "valentina01_bright",
+        speakers: [{ id: 0, name: "valentina01_bright" }],
       },
     ]);
   });
 
-  it("preserves zero models info key as an id without using it as a name", async () => {
-    vi.stubGlobal(
-      "fetch",
-      vi.fn().mockResolvedValue({
-        ok: true,
-        json: () =>
-          Promise.resolve({
-            "0": {
-              spk2id: { amitaro: 0 },
-            },
-          }),
+  it("prefers canonical model_name over display names", () => {
+    expect(
+      normalizeModelsInfo({
+        display_key: {
+          name: "Pretty Display Name",
+          model_name: "canonical-model",
+          spk2id: { alice: 0 },
+        },
       }),
-    );
-
-    const client = new Sbv2Client({ baseUrl: "http://localhost:5000" });
-    await expect(client.getModelsInfo()).resolves.toEqual([
+    ).toMatchObject([
       {
-        sourceId: "0",
-        id: 0,
-        spk2id: { amitaro: 0 },
+        sourceId: "display_key",
+        name: "canonical-model",
+        speakers: [{ id: 0, name: "alice" }],
+      },
+    ]);
+  });
+
+  it("normalizes SBV2 spk2id and id2style maps", () => {
+    expect(
+      normalizeModelsInfo({
+        demo: {
+          spk2id: { alice: 3 },
+          id2style: { "0": "Neutral" },
+        },
+      }),
+    ).toMatchObject([
+      {
+        name: "demo",
+        speakers: [{ id: 3, name: "alice" }],
+        styles: [{ id: 0, name: "Neutral" }],
       },
     ]);
   });

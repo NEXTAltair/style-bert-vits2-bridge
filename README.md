@@ -52,14 +52,15 @@ openclaw plugins inspect style-bert-vits2-bridge --runtime --json
 }
 ```
 
-`baseUrl` が設定されていればプロバイダーは有効になります。
+`baseUrl` が設定されていればプロバイダーは有効になります。明示指定がない場合、bridge は `valentina01_bright` / `valentina01_bright` / `00_Neutral` を既定 profile として解決します。
 
 ## 仕組み
 
 1. OpenClaw が `/tts audio` コマンド等で音声生成をリクエスト
-2. プラグインが SBV2 の `POST /voice` にテキストを送信
-3. SBV2 が WAV 音声 (PCM 16bit mono 44100Hz) を返却
-4. チャネル（Discord 等）が必要に応じてフォーマット変換して配信
+2. プラグインが SBV2 の `GET /models/info` で model / speaker / style を検証
+3. プラグインが解決済みパラメーターで SBV2 の `POST /voice` にテキストを送信
+4. SBV2 が WAV 音声 (PCM 16bit mono 44100Hz) を返却
+5. チャネル（Discord 等）が必要に応じてフォーマット変換して配信
 
 ## 設定項目
 
@@ -67,15 +68,35 @@ openclaw plugins inspect style-bert-vits2-bridge --runtime --json
 |------|------|------|
 | `baseUrl` | string | **必須** — SBV2 API の URL |
 | `timeoutMs` | integer | リクエストタイムアウト (ms)。デフォルト 30000 |
-| `defaultModelName` | string | デフォルトのモデル名（`model_assets/` 内のディレクトリ名） |
-| `defaultSpeakerId` | integer | デフォルトのスピーカー ID（0 始まり） |
-| `defaultSpeakerName` | string | デフォルトのスピーカー名（`defaultSpeakerId` より優先） |
-| `defaultStyle` | string | デフォルトのスタイル。デフォルト `"Neutral"` |
-| `defaultLanguage` | string | 言語 (`JP` / `EN` / `ZH`)。デフォルト `JP` |
+| `defaultModelName` / `modelName` | string | デフォルトのモデル名（`model_assets/` 内のディレクトリ名） |
+| `defaultModelId` / `modelId` | integer | デフォルトのモデル ID（0 始まり） |
+| `defaultSpeakerId` / `speakerId` | integer | デフォルトのスピーカー ID（0 始まり） |
+| `defaultSpeakerName` / `speakerName` | string | デフォルトのスピーカー名（`speakerId` より優先） |
+| `defaultStyle` / `style` | string | デフォルトのスタイル。bridge 既定は `"00_Neutral"` |
+| `defaultStyleWeight` / `styleWeight` | number | スタイルの強さ |
+| `defaultLength` / `length` | number | 話速相当。大きいほど遅く、小さいほど速い |
+| `defaultAssistText` / `assistText` | string | 感情補助テキスト |
+| `defaultAssistTextWeight` / `assistTextWeight` | number | 感情補助テキストの影響度 |
+| `defaultLanguage` / `language` | string | 言語 (`JP` / `EN` / `ZH`)。デフォルト `JP` |
 
-`default*` キーが未指定の場合、bridge は SBV2 側の既定値に近い挙動になります。特定の声を安定して使うには、`defaultModelName` と `defaultSpeakerName`、必要に応じて `defaultStyle` を明示してください。
+`default*` キーを優先します。既存設定との互換性のため、従来の `modelName`、`speakerId`、`speakerName`、`style`、`language` なども fallback として読み取ります。新規設定では `default*` キーを使ってください。
 
-既存設定との互換性のため、`modelName` / `speakerId` / `speakerName` / `style` / `language` も fallback として読みます。新規設定では `default*` キーを使ってください。
+## Voice profile と directive
+
+bridge は OpenClaw の generic default TTS ではなく、bridge 側で SBV2 固有の voice profile を解決します。`/models/info` に存在しない model / speaker / style が指定された場合、SBV2 の 422 応答をそのまま返すのではなく、どの指定が利用できないかを示すエラーに変換します。
+
+OpenClaw の policy が許可している場合、directive や Talk params から以下を override できます。
+
+| キー | 説明 |
+|------|------|
+| `voice`, `voice_id` | bridge の固定 voice profile ID |
+| `model`, `model_name`, `model_id` | SBV2 model override |
+| `speaker`, `speaker_name`, `speaker_id` | SBV2 speaker override |
+| `style`, `style_weight` | SBV2 style override |
+| `speed`, `length` | 話速 override。`speed` は `length = 1 / speed` に変換 |
+| `assist_text`, `assist_text_weight` | 感情補助テキスト override |
+
+低レベルの `sdp_ratio`、`noise`、`noisew`、`auto_split`、`split_interval` は directive からは受け付けません。
 
 ## 開発
 

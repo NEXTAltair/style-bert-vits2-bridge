@@ -23,10 +23,15 @@ export interface Sbv2ClientOptions {
   timeoutMs?: number;
 }
 
+export interface Sbv2NamedItem {
+  id?: number;
+  name: string;
+}
+
 export interface Sbv2ModelInfo {
   id?: number;
   sourceId?: string;
-  name?: string;
+  name: string;
   modelName?: string;
   model_name?: string;
   configPath?: string;
@@ -35,7 +40,18 @@ export interface Sbv2ModelInfo {
   model_path?: string;
   spk2id?: Record<string, number>;
   id2spk?: Record<string, string>;
+  speaker2id?: Record<string, number>;
+  speaker2Id?: Record<string, number>;
+  speaker_map?: Record<string, number>;
+  speakerMap?: Record<string, number>;
   style2id?: Record<string, number>;
+  style2Id?: Record<string, number>;
+  id2style?: Record<string, string>;
+  style_map?: Record<string, number>;
+  styleMap?: Record<string, number>;
+  speakers: Sbv2NamedItem[];
+  styles: Sbv2NamedItem[];
+  raw: unknown;
   [key: string]: unknown;
 }
 
@@ -53,6 +69,154 @@ const PARAM_KEY_MAP: Record<string, string> = {
   styleWeight: "style_weight",
 };
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function asFiniteNumber(value: unknown): number | undefined {
+  return typeof value === "number" && Number.isFinite(value) ? value : undefined;
+}
+
+function asNonEmptyString(value: unknown): string | undefined {
+  return typeof value === "string" && value.trim() ? value.trim() : undefined;
+}
+
+function formatError(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
+function modelNameFromPath(path: string | undefined): string | undefined {
+  if (!path) return undefined;
+  const segments = path.split(/[\\/]+/).filter(Boolean);
+  if (segments.length < 2) return undefined;
+  return segments[segments.length - 2];
+}
+
+function normalizeNamedCollection(value: unknown): Sbv2NamedItem[] {
+  if (Array.isArray(value)) {
+    return value.flatMap((item, index): Sbv2NamedItem[] => {
+      if (typeof item === "string" && item.trim()) {
+        return [{ id: index, name: item.trim() }];
+      }
+
+      if (!isRecord(item)) {
+        return [];
+      }
+
+      const name =
+        asNonEmptyString(item.name) ??
+        asNonEmptyString(item.speaker_name) ??
+        asNonEmptyString(item.speakerName) ??
+        asNonEmptyString(item.style_name) ??
+        asNonEmptyString(item.styleName);
+
+      if (!name) {
+        return [];
+      }
+
+      const id =
+        asFiniteNumber(item.id) ??
+        asFiniteNumber(item.speaker_id) ??
+        asFiniteNumber(item.speakerId) ??
+        asFiniteNumber(item.style_id) ??
+        asFiniteNumber(item.styleId) ??
+        index;
+
+      return [{ id, name }];
+    });
+  }
+
+  if (isRecord(value)) {
+    return Object.entries(value).flatMap(([name, id]): Sbv2NamedItem[] => {
+      const trimmed = name.trim();
+
+      if (typeof id === "string" && id.trim()) {
+        const numericId = Number(trimmed);
+        return [{ id: Number.isFinite(numericId) ? numericId : undefined, name: id.trim() }];
+      }
+
+      if (!trimmed) {
+        return [];
+      }
+
+      return [{ id: asFiniteNumber(id), name: trimmed }];
+    });
+  }
+
+  return [];
+}
+
+function normalizeModelInfoEntry(nameHint: string | undefined, value: unknown): Sbv2ModelInfo | undefined {
+  if (!isRecord(value)) {
+    return nameHint
+      ? { name: nameHint, sourceId: nameHint, speakers: [], styles: [], raw: value }
+      : undefined;
+  }
+
+  const numericId = nameHint && /^\d+$/.test(nameHint) ? Number(nameHint) : undefined;
+  const modelName =
+    asNonEmptyString(value.model_name) ??
+    asNonEmptyString(value.modelName) ??
+    modelNameFromPath(asNonEmptyString(value.configPath) ?? asNonEmptyString(value.config_path)) ??
+    modelNameFromPath(asNonEmptyString(value.modelPath) ?? asNonEmptyString(value.model_path)) ??
+    asNonEmptyString(value.name) ??
+    (numericId === undefined ? nameHint : undefined);
+
+  if (!modelName) {
+    return undefined;
+  }
+
+  const speakers = normalizeNamedCollection(
+    value.speakers ??
+      value.speaker2id ??
+      value.speaker2Id ??
+      value.spk2id ??
+      value.id2speaker ??
+      value.id2spk ??
+      value.speaker_map ??
+      value.speakerMap,
+  );
+  const styles = normalizeNamedCollection(
+    value.styles ??
+      value.style2id ??
+      value.style2Id ??
+      value.id2style ??
+      value.style_map ??
+      value.styleMap,
+  );
+
+  return {
+    sourceId: nameHint,
+    id: asFiniteNumber(value.id) ?? numericId,
+    ...(value as Record<string, unknown>),
+    name: modelName,
+    speakers,
+    styles,
+    raw: value,
+  } as Sbv2ModelInfo;
+}
+
+export function normalizeModelsInfo(value: unknown): Sbv2ModelInfo[] {
+  const modelsValue = isRecord(value) && Array.isArray(value.models) ? value.models : value;
+  const models = Array.isArray(modelsValue)
+    ? modelsValue.flatMap((item): Sbv2ModelInfo[] => {
+        const model = normalizeModelInfoEntry(undefined, item);
+        return model ? [model] : [];
+      })
+    : isRecord(modelsValue)
+      ? Object.entries(modelsValue).flatMap(([name, item]): Sbv2ModelInfo[] => {
+          const model = normalizeModelInfoEntry(name, item);
+          return model ? [model] : [];
+        })
+      : [];
+
+  if (!models.length) {
+    throw new Error("SBV2 /models/info returned an unsupported model list shape");
+  }
+
+  return models;
+}
+
 export class Sbv2Client {
   private readonly baseUrl: string;
   private readonly timeoutMs: number;
@@ -60,6 +224,29 @@ export class Sbv2Client {
   constructor(options: Sbv2ClientOptions) {
     this.baseUrl = options.baseUrl.replace(/\/+$/, "");
     this.timeoutMs = options.timeoutMs ?? 30_000;
+  }
+
+  async getModelsInfo(): Promise<Sbv2ModelInfo[]> {
+    const url = new URL("/models/info", this.baseUrl);
+
+    let response: Response;
+    try {
+      response = await fetch(url, {
+        method: "GET",
+        signal: AbortSignal.timeout(this.timeoutMs),
+      });
+    } catch (error) {
+      throw new Error(`SBV2 /models/info request failed: ${formatError(error)}`);
+    }
+
+    if (!response.ok) {
+      const body = await response.text().catch(() => "");
+      throw new Error(
+        `SBV2 /models/info failed: ${response.status} ${response.statusText} - ${body}`,
+      );
+    }
+
+    return normalizeModelsInfo(await response.json());
   }
 
   async synthesize(params: Sbv2SynthesizeParams): Promise<Buffer> {
@@ -82,66 +269,10 @@ export class Sbv2Client {
     if (!response.ok) {
       const body = await response.text().catch(() => "");
       throw new Error(
-        `SBV2 /voice failed: ${response.status} ${response.statusText} – ${body}`,
+        `SBV2 /voice failed: ${response.status} ${response.statusText} - ${body}`,
       );
     }
 
     return Buffer.from(await response.arrayBuffer());
   }
-
-  async getModelsInfo(): Promise<Sbv2ModelInfo[]> {
-    const url = new URL("/models/info", this.baseUrl);
-
-    let response: Response;
-    try {
-      response = await fetch(url, {
-        method: "GET",
-        signal: AbortSignal.timeout(this.timeoutMs),
-      });
-    } catch (error) {
-      throw new Error(`SBV2 /models/info request failed: ${formatError(error)}`);
-    }
-
-    if (!response.ok) {
-      const body = await response.text().catch(() => "");
-      throw new Error(
-        `SBV2 /models/info failed: ${response.status} ${response.statusText} – ${body}`,
-      );
-    }
-
-    const payload = await response.json();
-    return normalizeModelsInfo(payload);
-  }
-}
-
-function normalizeModelsInfo(payload: unknown): Sbv2ModelInfo[] {
-  if (Array.isArray(payload)) {
-    const models = payload.filter(isRecord);
-    return models.map((model) => ({ ...model }));
-  }
-
-  if (!isRecord(payload)) {
-    throw new Error("SBV2 /models/info returned an unexpected payload");
-  }
-
-  return Object.entries(payload).flatMap(([name, value]) => {
-    if (!isRecord(value)) return [];
-    const numericId = /^\d+$/.test(name) ? Number(name) : undefined;
-    return [
-      {
-        sourceId: name,
-        id: typeof value.id === "number" ? value.id : numericId,
-        ...(numericId === undefined ? { name } : {}),
-        ...value,
-      },
-    ];
-  });
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
-function formatError(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
 }
