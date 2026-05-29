@@ -23,6 +23,11 @@ function asNonEmptyString(value) {
 function formatError(error) {
     return error instanceof Error ? error.message : String(error);
 }
+function isWavBuffer(value) {
+    return (value.length >= 12 &&
+        value.toString("ascii", 0, 4) === "RIFF" &&
+        value.toString("ascii", 8, 12) === "WAVE");
+}
 function modelNameFromPath(path) {
     if (!path)
         return undefined;
@@ -173,6 +178,10 @@ export class Sbv2Client {
             const body = await response.text().catch(() => "");
             throw new Error(`SBV2 /voice failed: ${response.status} ${response.statusText} - ${body}`);
         }
-        return Buffer.from(await response.arrayBuffer());
+        const audio = Buffer.from(await response.arrayBuffer());
+        if (!isWavBuffer(audio)) {
+            throw new Error(`SBV2 /voice returned a non-WAV response (${audio.length} bytes)`);
+        }
+        return audio;
     }
 }

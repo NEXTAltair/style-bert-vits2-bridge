@@ -107,6 +107,14 @@ pnpm test             # テスト実行
 pnpm run build        # dist/ に配布用 entrypoint を生成
 ```
 
+SBV2 API が起動している環境では、`SBV2_BASE_URL` を渡すと live smoke test も実行されます。未指定時は skip されます。
+
+```bash
+SBV2_BASE_URL=http://127.0.0.1:5000 pnpm test
+```
+
+live smoke test は `/status`、`/models/info`、短文 `/voice`、WAV header、invalid model 指定時の失敗を確認します。
+
 配布・検証時の entrypoint は `package.json#openclaw.extensions` の `./dist/index.js` です。git install でも runtime が読めるように `dist/` は git 管理します。source checkout で作業した後は `pnpm run build` を実行してから `openclaw plugins install --link .` または runtime inspection を行ってください。
 
 manifest と runtime registration の確認:

@@ -85,6 +85,14 @@ function formatError(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
+function isWavBuffer(value: Buffer): boolean {
+  return (
+    value.length >= 12 &&
+    value.toString("ascii", 0, 4) === "RIFF" &&
+    value.toString("ascii", 8, 12) === "WAVE"
+  );
+}
+
 function modelNameFromPath(path: string | undefined): string | undefined {
   if (!path) return undefined;
   const segments = path.split(/[\\/]+/).filter(Boolean);
@@ -273,6 +281,11 @@ export class Sbv2Client {
       );
     }
 
-    return Buffer.from(await response.arrayBuffer());
+    const audio = Buffer.from(await response.arrayBuffer());
+    if (!isWavBuffer(audio)) {
+      throw new Error(`SBV2 /voice returned a non-WAV response (${audio.length} bytes)`);
+    }
+
+    return audio;
   }
 }

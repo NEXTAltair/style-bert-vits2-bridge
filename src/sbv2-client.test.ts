@@ -50,6 +50,21 @@ describe("Sbv2Client", () => {
     expect(result.slice(0, 4).toString("ascii")).toBe("RIFF");
   });
 
+  it("rejects successful non-WAV responses", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({
+        ok: true,
+        arrayBuffer: () => Promise.resolve(new TextEncoder().encode("not audio").buffer),
+      }),
+    );
+
+    const client = new Sbv2Client({ baseUrl: "http://localhost:5000" });
+    await expect(client.synthesize({ text: "テスト" })).rejects.toThrow(
+      /SBV2 \/voice returned a non-WAV response/,
+    );
+  });
+
   it("maps camelCase params to snake_case query keys", async () => {
     const mockFetch = vi.fn().mockResolvedValue({
       ok: true,
