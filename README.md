@@ -28,6 +28,10 @@ openclaw plugins inspect style-bert-vits2-bridge --runtime --json
 
 成功時は `speechProviderIds` に `style-bert-vits2` が含まれます。bundled skill は `openclaw.plugin.json` の `skills` から discovery されます。
 
+`--runtime` を付けない cold inspect や plugin list では、OpenClaw runtime を起動せず manifest だけを見るため、speech provider registration が表示されないことがあります。この plugin の capability 確認には runtime inspection を使ってください。
+
+`openclaw plugins install --link .` はローカル checkout をそのまま参照する開発用インストールです。source を編集した場合は `pnpm run build` を実行して `dist/` を更新すると、リンク先 runtime に反映されます。通常配布や git/package 経由の `openclaw plugins install` では、同梱された `dist/index.js` と `openclaw.plugin.json` が読み込まれます。
+
 ## OpenClaw 設定
 
 `openclaw.json` の `messages.tts.providers` に以下を追加:
@@ -53,6 +57,8 @@ openclaw plugins inspect style-bert-vits2-bridge --runtime --json
 ```
 
 `baseUrl` が設定されていればプロバイダーは有効になります。明示指定がない場合、bridge は `valentina01_bright` / `valentina01_bright` / `00_Neutral` を既定 profile として解決します。
+
+SBV2 側の暗黙既定に任せると `model_id=0` に落ちます。観測環境では `model_id=0` が `amitaro` だったため、Valentina 系を使いたい場合は上のように `defaultModelName`、`defaultSpeakerName`、`defaultStyle` を明示してください。
 
 ## 仕組み
 
@@ -98,6 +104,41 @@ OpenClaw の policy が許可している場合、directive や Talk params か�
 
 低レベルの `sdp_ratio`、`noise`、`noisew`、`auto_split`、`split_interval` は directive からは受け付けません。
 
+## 動作確認
+
+SBV2 API が起動していることを先に確認します。
+
+```bash
+curl -fsS http://127.0.0.1:5000/status
+curl -fsS http://127.0.0.1:5000/models/info
+```
+
+OpenClaw 側では runtime inspection で provider registration を確認します。
+
+```bash
+openclaw plugins inspect style-bert-vits2-bridge --runtime --json
+```
+
+`speechProviderIds` に `style-bert-vits2` が含まれれば、OpenClaw runtime から provider が見えています。`dist/index.js` は OpenClaw plugin runtime から読み込まれる前提の entrypoint です。通常の Node.js script から直接 import すると、`openclaw/plugin-sdk/*` 解決や runtime mock が無いため失敗することがあります。
+
+`/tts audio` では、通常合成と voice override の両方を確認します。
+
+```text
+/tts audio こんにちは。これは Style-Bert-VITS2 の確認です。
+/tts voice=sbv2:valentina01_bright:valentina01_bright:00_Neutral audio こんにちは。Valentina 指定の確認です。
+/tts model_name=valentina01_bright speaker_name=valentina01_bright style=00_Neutral audio こんにちは。
+```
+
+Talk mode では provider config の既定値に加えて、Talk params から `voice_id`、`model_name`、`speaker_name`、`style`、`rate`、`style_weight`、`assist_text` などを渡せます。`rate` は WPM として扱われ、SBV2 の `length` に変換されます。指定した model / speaker / style が `/models/info` に無い場合は、operator 向けに整形された validation error が返ります。
+
+SBV2 API が起動しているローカル環境では live smoke test も実行できます。
+
+```bash
+SBV2_BASE_URL=http://127.0.0.1:5000 pnpm test
+```
+
+live smoke test は `/status`、`/models/info`、短文 `/voice`、WAV header、invalid model 指定時の失敗を確認します。
+
 ## 開発
 
 ```bash
@@ -106,14 +147,6 @@ pnpm run check        # 型チェック
 pnpm test             # テスト実行
 pnpm run build        # dist/ に配布用 entrypoint を生成
 ```
-
-SBV2 API が起動している環境では、`SBV2_BASE_URL` を渡すと live smoke test も実行されます。未指定時は skip されます。
-
-```bash
-SBV2_BASE_URL=http://127.0.0.1:5000 pnpm test
-```
-
-live smoke test は `/status`、`/models/info`、短文 `/voice`、WAV header、invalid model 指定時の失敗を確認します。
 
 配布・検証時の entrypoint は `package.json#openclaw.extensions` の `./dist/index.js` です。git install でも runtime が読めるように `dist/` は git 管理します。source checkout で作業した後は `pnpm run build` を実行してから `openclaw plugins install --link .` または runtime inspection を行ってください。
 
