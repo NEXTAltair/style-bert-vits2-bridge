@@ -124,7 +124,105 @@ describe("Sbv2Client", () => {
 
     const client = new Sbv2Client({ baseUrl: "http://localhost:5000" });
     await expect(client.synthesize({ text: "" })).rejects.toThrow(
-      /SBV2 \/voice failed: 422/,
+      /SBV2 \/voice validation failed: 422/,
+    );
+  });
+
+  it("formats SBV2 validation details for operators", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({
+        ok: false,
+        status: 422,
+        statusText: "Unprocessable Entity",
+        text: () =>
+          Promise.resolve(
+            JSON.stringify({
+              detail: [
+                { loc: ["query", "model_name"], msg: "model was not found" },
+                { loc: ["query", "speaker_name"], msg: "speaker was not found" },
+                { loc: ["query", "style"], msg: "style was not found" },
+              ],
+            }),
+          ),
+      }),
+    );
+
+    const client = new Sbv2Client({ baseUrl: "http://localhost:5000" });
+    await expect(client.synthesize({ text: "テスト" })).rejects.toThrow(
+      /Validation error: model_name: model was not found; speaker_name: speaker was not found; style: style was not found/,
+    );
+  });
+
+  it("truncates long SBV2 error bodies", async () => {
+    const longBody = `${"x".repeat(600)}secret-tail`;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({
+        ok: false,
+        status: 500,
+        statusText: "Internal Server Error",
+        text: () => Promise.resolve(longBody),
+      }),
+    );
+
+    const client = new Sbv2Client({ baseUrl: "http://localhost:5000" });
+
+    try {
+      await client.synthesize({ text: "テスト" });
+      throw new Error("expected synthesize to fail");
+    } catch (error) {
+      expect(error).toBeInstanceOf(Error);
+      const message = (error as Error).message;
+      expect(message).toContain("... [truncated]");
+      expect(message).not.toContain("secret-tail");
+    }
+  });
+
+  it("truncates long formatted validation details", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({
+        ok: false,
+        status: 422,
+        statusText: "Unprocessable Entity",
+        text: () =>
+          Promise.resolve(
+            JSON.stringify({
+              detail: [{ loc: ["query", "model_name"], msg: `${"x".repeat(600)}secret-tail` }],
+            }),
+          ),
+      }),
+    );
+
+    const client = new Sbv2Client({ baseUrl: "http://localhost:5000" });
+
+    try {
+      await client.synthesize({ text: "テスト" });
+      throw new Error("expected synthesize to fail");
+    } catch (error) {
+      expect(error).toBeInstanceOf(Error);
+      const message = (error as Error).message;
+      expect(message).toContain("Validation error: model_name:");
+      expect(message).toContain("... [truncated]");
+      expect(message).not.toContain("secret-tail");
+    }
+  });
+
+  it("formats plain-text SBV2 validation responses", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({
+        ok: false,
+        status: 422,
+        statusText: "Unprocessable Entity",
+        text: () => Promise.resolve("model_name is invalid"),
+      }),
+    );
+
+    const client = new Sbv2Client({ baseUrl: "http://localhost:5000" });
+    await expect(client.synthesize({ text: "テスト" })).rejects.toThrow(
+      /SBV2 \/voice validation failed: 422 Unprocessable Entity\. model_name is invalid/,
     );
   });
 
@@ -256,7 +354,41 @@ describe("Sbv2Client", () => {
 
     const client = new Sbv2Client({ baseUrl: "http://localhost:5000" });
     await expect(client.getModelsInfo()).rejects.toThrow(
-      /SBV2 \/models\/info request failed: connect ECONNREFUSED/,
+      /SBV2 \/models\/info request failed for http:\/\/localhost:5000/,
+    );
+    await expect(client.getModelsInfo()).rejects.toThrow(
+      /Check that the SBV2 API is running and reachable at http:\/\/localhost:5000\/status/,
+    );
+  });
+
+  it("formats /voice connection failures with baseUrl and status guidance", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockRejectedValue(
+        Object.assign(new TypeError("fetch failed"), {
+          cause: { code: "ECONNREFUSED", message: "connect ECONNREFUSED 127.0.0.1:5000" },
+        }),
+      ),
+    );
+
+    const client = new Sbv2Client({ baseUrl: "http://localhost:5000" });
+    await expect(client.synthesize({ text: "テスト" })).rejects.toThrow(
+      /SBV2 \/voice request failed for http:\/\/localhost:5000/,
+    );
+    await expect(client.synthesize({ text: "テスト" })).rejects.toThrow(
+      /GET|status|ECONNREFUSED/,
+    );
+  });
+
+  it("includes timeoutMs when requests time out", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockRejectedValue(new DOMException("The operation timed out", "TimeoutError")),
+    );
+
+    const client = new Sbv2Client({ baseUrl: "http://localhost:5000", timeoutMs: 1234 });
+    await expect(client.getModelsInfo()).rejects.toThrow(
+      /SBV2 \/models\/info request timed out after 1234ms/,
     );
   });
 });

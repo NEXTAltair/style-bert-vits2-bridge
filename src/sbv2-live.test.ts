@@ -40,6 +40,6 @@ describeLive("SBV2 live smoke", () => {
         language: "JP",
         modelName: "__openclaw_missing_model__",
       }),
-    ).rejects.toThrow(/SBV2 \/voice failed|non-WAV response/);
+    ).rejects.toThrow(/SBV2 \/voice validation failed|SBV2 \/voice failed|non-WAV response/);
   });
 });

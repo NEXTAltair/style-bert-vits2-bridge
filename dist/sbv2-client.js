@@ -11,6 +11,7 @@ const PARAM_KEY_MAP = {
     splitInterval: "split_interval",
     styleWeight: "style_weight",
 };
+const MAX_ERROR_BODY_CHARS = 500;
 function isRecord(value) {
     return typeof value === "object" && value !== null && !Array.isArray(value);
 }
@@ -21,7 +22,84 @@ function asNonEmptyString(value) {
     return typeof value === "string" && value.trim() ? value.trim() : undefined;
 }
 function formatError(error) {
-    return error instanceof Error ? error.message : String(error);
+    if (!(error instanceof Error)) {
+        return String(error);
+    }
+    const cause = isRecord(error.cause) ? error.cause : undefined;
+    const causeCode = asNonEmptyString(cause?.code);
+    const causeMessage = asNonEmptyString(cause?.message);
+    const causeText = causeCode || causeMessage ? ` (${[causeCode, causeMessage].filter(Boolean).join(": ")})` : "";
+    return `${error.message}${causeText}`;
+}
+function looksLikeTimeout(error) {
+    if (!(error instanceof Error)) {
+        return false;
+    }
+    const text = `${error.name} ${error.message}`.toLowerCase();
+    return text.includes("timeout") || text.includes("timed out");
+}
+function formatRequestError(endpoint, baseUrl, timeoutMs, error) {
+    const statusUrl = new URL("/status", baseUrl).toString();
+    const detail = formatError(error);
+    if (looksLikeTimeout(error)) {
+        return new Error(`SBV2 ${endpoint} request timed out after ${timeoutMs}ms for ${baseUrl}. ` +
+            `Check that the SBV2 API responds at ${statusUrl}, or increase timeoutMs. ` +
+            `Original error: ${detail}`);
+    }
+    return new Error(`SBV2 ${endpoint} request failed for ${baseUrl}. ` +
+        `Check that the SBV2 API is running and reachable at ${statusUrl}. ` +
+        `Original error: ${detail}`);
+}
+function truncateErrorBody(value) {
+    return value.length > MAX_ERROR_BODY_CHARS
+        ? `${value.slice(0, MAX_ERROR_BODY_CHARS)}... [truncated]`
+        : value;
+}
+function formatValidationDetail(value) {
+    if (!Array.isArray(value)) {
+        return undefined;
+    }
+    const details = value.flatMap((item) => {
+        if (!isRecord(item)) {
+            return [];
+        }
+        const loc = Array.isArray(item.loc) ? item.loc.map(String) : [];
+        const field = loc.findLast((part) => part !== "query" && part !== "body");
+        const message = asNonEmptyString(item.msg) ?? asNonEmptyString(item.message);
+        return field && message ? [`${field}: ${message}`] : [];
+    });
+    return details.length ? details.join("; ") : undefined;
+}
+function formatResponseBody(body) {
+    const trimmed = body.trim();
+    if (!trimmed) {
+        return undefined;
+    }
+    try {
+        const parsed = JSON.parse(trimmed);
+        if (isRecord(parsed)) {
+            const detail = formatValidationDetail(parsed.detail);
+            if (detail) {
+                return truncateErrorBody(`Validation error: ${detail}`);
+            }
+            const message = asNonEmptyString(parsed.detail) ?? asNonEmptyString(parsed.message);
+            if (message) {
+                return truncateErrorBody(message);
+            }
+        }
+    }
+    catch {
+        // Fall through to plain text formatting.
+    }
+    return truncateErrorBody(trimmed);
+}
+function formatHttpError(endpoint, response, body) {
+    const bodyText = formatResponseBody(body);
+    const status = `${response.status} ${response.statusText}`.trim();
+    const prefix = response.status === 422
+        ? `SBV2 ${endpoint} validation failed: ${status}`
+        : `SBV2 ${endpoint} failed: ${status}`;
+    return new Error(bodyText ? `${prefix}. ${bodyText}` : prefix);
 }
 function isWavBuffer(value) {
     return (value.length >= 12 &&
@@ -152,11 +230,11 @@ export class Sbv2Client {
             });
         }
         catch (error) {
-            throw new Error(`SBV2 /models/info request failed: ${formatError(error)}`);
+            throw formatRequestError("/models/info", this.baseUrl, this.timeoutMs, error);
         }
         if (!response.ok) {
             const body = await response.text().catch(() => "");
-            throw new Error(`SBV2 /models/info failed: ${response.status} ${response.statusText} - ${body}`);
+            throw formatHttpError("/models/info", response, body);
         }
         return normalizeModelsInfo(await response.json());
     }
@@ -170,13 +248,19 @@ export class Sbv2Client {
             const queryKey = PARAM_KEY_MAP[key] ?? key;
             url.searchParams.set(queryKey, String(value));
         }
-        const response = await fetch(url, {
-            method: "POST",
-            signal: AbortSignal.timeout(this.timeoutMs),
-        });
+        let response;
+        try {
+            response = await fetch(url, {
+                method: "POST",
+                signal: AbortSignal.timeout(this.timeoutMs),
+            });
+        }
+        catch (error) {
+            throw formatRequestError("/voice", this.baseUrl, this.timeoutMs, error);
+        }
         if (!response.ok) {
             const body = await response.text().catch(() => "");
-            throw new Error(`SBV2 /voice failed: ${response.status} ${response.statusText} - ${body}`);
+            throw formatHttpError("/voice", response, body);
         }
         const audio = Buffer.from(await response.arrayBuffer());
         if (!isWavBuffer(audio)) {
