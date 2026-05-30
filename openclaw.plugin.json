@@ -21,6 +21,9 @@
       "speakerName": { "type": "string" },
       "style": { "type": "string" },
       "styleWeight": { "type": "number" },
+      "sdpRatio": { "type": "number" },
+      "noise": { "type": "number" },
+      "noisew": { "type": "number" },
       "length": { "type": "number" },
       "language": { "type": "string", "enum": ["JP", "EN", "ZH"] },
       "assistText": { "type": "string" },
@@ -31,6 +34,9 @@
       "defaultSpeakerName": { "type": "string" },
       "defaultStyle": { "type": "string" },
       "defaultStyleWeight": { "type": "number" },
+      "defaultSdpRatio": { "type": "number" },
+      "defaultNoise": { "type": "number" },
+      "defaultNoisew": { "type": "number" },
       "defaultLength": { "type": "number" },
       "defaultLanguage": { "type": "string", "enum": ["JP", "EN", "ZH"] },
       "defaultAssistText": { "type": "string" },
@@ -77,6 +83,18 @@
     "defaultStyle": {
       "label": "Default Style",
       "placeholder": "00_Neutral"
+    },
+    "defaultNoise": {
+      "label": "Default Noise",
+      "placeholder": "0.45"
+    },
+    "defaultNoisew": {
+      "label": "Default SDP Noise",
+      "placeholder": "0.55"
+    },
+    "defaultSdpRatio": {
+      "label": "Default SDP Ratio",
+      "placeholder": "0.2"
     },
     "defaultLanguage": {
       "label": "Default Language",

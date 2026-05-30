@@ -46,12 +46,18 @@ describe("resolveVoiceProfile", () => {
           defaultModelName: "custom-model",
           defaultSpeakerName: "custom-speaker",
           defaultStyle: "Neutral",
+          defaultSdpRatio: 0.15,
+          defaultNoise: 0.45,
+          defaultNoisew: 0.55,
         },
       }),
     ).resolves.toMatchObject({
       modelName: "custom-model",
       speakerName: "custom-speaker",
       style: "Neutral",
+      sdpRatio: 0.15,
+      noise: 0.45,
+      noisew: 0.55,
     });
   });
 
@@ -69,6 +75,9 @@ describe("resolveVoiceProfile", () => {
           speakerName: "valentina01_bright",
           style: "00_Neutral",
           styleWeight: 0.7,
+          sdpRatio: 0.1,
+          noise: 0.35,
+          noisew: 0.45,
           assistText: "bright",
         },
       }),
@@ -77,6 +86,9 @@ describe("resolveVoiceProfile", () => {
       speakerName: "valentina01_bright",
       style: "00_Neutral",
       styleWeight: 0.7,
+      sdpRatio: 0.1,
+      noise: 0.35,
+      noisew: 0.45,
       assistText: "bright",
     });
   });
@@ -301,11 +313,11 @@ describe("voice resolver helpers", () => {
   it("parses whitelisted directive tokens under policy controls", () => {
     expect(
       parseVoiceDirectiveToken({
-        key: "style_weight",
-        value: "0.75",
+        key: "noise",
+        value: "0.45",
         policy: { allowVoiceSettings: true },
       }),
-    ).toEqual({ styleWeight: 0.75 });
+    ).toEqual({ noise: 0.45 });
 
     expect(
       parseVoiceDirectiveToken({

@@ -153,6 +153,36 @@ describe("Style-Bert-VITS2 speech provider", () => {
     expect(voiceUrl.searchParams.get("language")).toBe("JP");
   });
 
+  it("passes SBV2 generation tuning defaults through to /voice", async () => {
+    const mockFetch = vi
+      .fn()
+      .mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.resolve(valentinaModelsInfo),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        arrayBuffer: () => Promise.resolve(wavBytes.buffer),
+      });
+    vi.stubGlobal("fetch", mockFetch);
+
+    const provider = buildSbv2SpeechProvider();
+    await provider.synthesize({
+      text: "こんにちは",
+      providerConfig: {
+        baseUrl: "http://localhost:5000",
+        defaultSdpRatio: 0.15,
+        defaultNoise: 0.45,
+        defaultNoisew: 0.55,
+      },
+    });
+
+    const voiceUrl = new URL(mockFetch.mock.calls[1][0]);
+    expect(voiceUrl.searchParams.get("sdp_ratio")).toBe("0.15");
+    expect(voiceUrl.searchParams.get("noise")).toBe("0.45");
+    expect(voiceUrl.searchParams.get("noisew")).toBe("0.55");
+  });
+
   it("returns OpenClaw directive parse results for style overrides", () => {
     const provider = buildSbv2SpeechProvider();
 
@@ -161,13 +191,14 @@ describe("Style-Bert-VITS2 speech provider", () => {
         key: "style",
         value: "01_Happy",
         policy: { allowVoiceSettings: true },
-        currentOverrides: { styleWeight: 0.65 },
+        currentOverrides: { styleWeight: 0.65, noise: 0.45 },
       }),
     ).toEqual({
       handled: true,
       overrides: {
         style: "01_Happy",
         styleWeight: 0.65,
+        noise: 0.45,
       },
     });
   });
@@ -192,6 +223,9 @@ describe("Style-Bert-VITS2 speech provider", () => {
       providerConfig: {
         baseUrl: "http://user:secret@localhost:5000/api?token=hidden#fragment",
         defaultStyleWeight: 0.7,
+        defaultSdpRatio: 0.15,
+        defaultNoise: 0.45,
+        defaultNoisew: 0.55,
         defaultLength: 1.1,
         defaultAssistText: "ログに出してはいけない補助テキスト",
       },
@@ -205,6 +239,9 @@ describe("Style-Bert-VITS2 speech provider", () => {
       speakerName: "valentina01_bright",
       style: "00_Neutral",
       styleWeight: 0.7,
+      sdpRatio: 0.15,
+      noise: 0.45,
+      noisew: 0.55,
       length: 1.1,
       language: "JP",
       outputFormat: "wav",
@@ -377,6 +414,9 @@ describe("Style-Bert-VITS2 speech provider", () => {
           rate: 180,
           style: "Happy",
           style_weight: "0.7",
+          sdp_ratio: "0.15",
+          noise: "0.45",
+          noisew: "0.55",
           assist_text: "cheerful",
           assist_text_weight: "0.8",
         },
@@ -388,6 +428,9 @@ describe("Style-Bert-VITS2 speech provider", () => {
       length: 1,
       style: "Happy",
       styleWeight: 0.7,
+      sdpRatio: 0.15,
+      noise: 0.45,
+      noisew: 0.55,
       assistText: "cheerful",
       assistTextWeight: 0.8,
     });

@@ -90,6 +90,15 @@ function readVoiceContext(config, overrides) {
         styleWeight: asNumber(overrides?.styleWeight) ??
             asNumber(config.defaultStyleWeight) ??
             asNumber(config.styleWeight),
+        sdpRatio: asNumber(overrides?.sdpRatio) ??
+            asNumber(config.defaultSdpRatio) ??
+            asNumber(config.sdpRatio),
+        noise: asNumber(overrides?.noise) ??
+            asNumber(config.defaultNoise) ??
+            asNumber(config.noise),
+        noisew: asNumber(overrides?.noisew) ??
+            asNumber(config.defaultNoisew) ??
+            asNumber(config.noisew),
         length: asNumber(overrides?.length) ??
             asNumber(config.defaultLength) ??
             asNumber(config.length),
@@ -110,6 +119,9 @@ function buildTelemetryMetadata(args) {
         speakerId: resolvedVoice.speakerId,
         style: resolvedVoice.style,
         styleWeight: resolvedVoice.styleWeight,
+        sdpRatio: resolvedVoice.sdpRatio,
+        noise: resolvedVoice.noise,
+        noisew: resolvedVoice.noisew,
         length: resolvedVoice.length,
         language: resolvedVoice.language,
         outputFormat: "wav",
@@ -154,6 +166,9 @@ export function buildSbv2SpeechProvider(options = {}) {
             const length = asNumber(params.length) ?? rateWpmToLength(params.rateWpm) ?? rateWpmToLength(params.rate_wpm) ?? rateWpmToLength(params.rate);
             const style = trimToUndefined(params.style);
             const styleWeight = asNumber(params.styleWeight) ?? asNumber(params.style_weight);
+            const sdpRatio = asNumber(params.sdpRatio) ?? asNumber(params.sdp_ratio);
+            const noise = asNumber(params.noise);
+            const noisew = asNumber(params.noisew) ?? asNumber(params.noise_w);
             const assistText = trimToUndefined(params.assistText) ?? trimToUndefined(params.assist_text);
             const assistTextWeight = asNumber(params.assistTextWeight) ?? asNumber(params.assist_text_weight);
             const language = trimToUndefined(params.language);
@@ -175,6 +190,12 @@ export function buildSbv2SpeechProvider(options = {}) {
                 overrides.style = style;
             if (styleWeight !== undefined)
                 overrides.styleWeight = styleWeight;
+            if (sdpRatio !== undefined)
+                overrides.sdpRatio = sdpRatio;
+            if (noise !== undefined)
+                overrides.noise = noise;
+            if (noisew !== undefined)
+                overrides.noisew = noisew;
             if (assistText)
                 overrides.assistText = assistText;
             if (assistTextWeight !== undefined)
@@ -226,6 +247,9 @@ export function buildSbv2SpeechProvider(options = {}) {
                     speakerName: resolvedVoice.speakerName,
                     style: resolvedVoice.style,
                     styleWeight: resolvedVoice.styleWeight,
+                    sdpRatio: resolvedVoice.sdpRatio,
+                    noise: resolvedVoice.noise,
+                    noisew: resolvedVoice.noisew,
                     length: resolvedVoice.length,
                     assistText: resolvedVoice.assistText,
                     assistTextWeight: resolvedVoice.assistTextWeight,
