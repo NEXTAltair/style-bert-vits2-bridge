@@ -2,6 +2,7 @@
 
 import { readFile } from "node:fs/promises";
 import { homedir } from "node:os";
+import JSON5 from "json5";
 import { normalizeModelsInfo } from "../dist/sbv2-client.js";
 import { resolveVoiceProfile } from "../dist/voice-resolver.js";
 
@@ -74,7 +75,7 @@ function isRecord(value) {
 async function readOpenClawConfig(configPath) {
   try {
     const text = await readFile(configPath, "utf8");
-    const parsed = JSON.parse(text);
+    const parsed = JSON5.parse(text);
     return { ok: true, path: configPath, value: parsed };
   } catch (error) {
     return { ok: false, path: configPath, error: error instanceof Error ? error.message : String(error) };
@@ -83,16 +84,18 @@ async function readOpenClawConfig(configPath) {
 
 function getProviderConfig(config) {
   if (!isRecord(config)) {
-    return {};
+    return { configuredProviderIds: [] };
   }
 
   const messages = isRecord(config.messages) ? config.messages : {};
   const tts = isRecord(messages.tts) ? messages.tts : {};
   const providers = isRecord(tts.providers) ? tts.providers : {};
   const provider = isRecord(providers["style-bert-vits2"]) ? providers["style-bert-vits2"] : undefined;
+  const configuredProviderIds = Object.keys(providers);
 
   return {
     selectedProvider: typeof tts.provider === "string" ? tts.provider : undefined,
+    configuredProviderIds,
     hasProviderConfig: Boolean(provider),
     provider,
   };
@@ -208,6 +211,9 @@ function printTextReport(report) {
   console.log(statusLine(report.openclaw.hasProviderConfig, "provider config: messages.tts.providers.style-bert-vits2"));
   console.log(statusLine(report.openclaw.hasBaseUrl, "provider baseUrl configured"));
   console.log(statusLine(report.openclaw.selected, `selected provider: ${report.openclaw.selectedProvider ?? "(not set)"}`));
+  if (report.openclaw.configuredProviderIds.length) {
+    console.log(`OK  configured providers: ${report.openclaw.configuredProviderIds.join(", ")}`);
+  }
   console.log(`OK  SBV2 baseUrl: ${report.baseUrl}`);
 
   console.log(statusLine(report.status.ok, "GET /status"));
@@ -328,8 +334,11 @@ async function main() {
   const presentExpectedStyles = expectedStyles.filter((style) =>
     configuredVoiceTargetModels.some((model) => model.styles.includes(style)),
   );
-  const openclawSelected =
-    providerConfig.selectedProvider === undefined || providerConfig.selectedProvider === "style-bert-vits2";
+  const autoSelectsOnlySbv2 =
+    providerConfig.selectedProvider === undefined &&
+    providerConfig.configuredProviderIds.length === 1 &&
+    providerConfig.configuredProviderIds[0] === "style-bert-vits2";
+  const openclawSelected = providerConfig.selectedProvider === "style-bert-vits2" || autoSelectsOnlySbv2;
 
   const report = {
     ok:
@@ -358,6 +367,7 @@ async function main() {
       hasBaseUrl: Boolean(providerBaseUrl),
       selected: openclawSelected,
       selectedProvider: providerConfig.selectedProvider,
+      configuredProviderIds: providerConfig.configuredProviderIds,
     },
     status,
     modelsInfo: {
