@@ -83,19 +83,6 @@ function asNonEmptyString(value: unknown): string | undefined {
   return typeof value === "string" && value.trim() ? value.trim() : undefined;
 }
 
-function formatError(error: unknown): string {
-  if (!(error instanceof Error)) {
-    return String(error);
-  }
-
-  const cause = isRecord(error.cause) ? error.cause : undefined;
-  const causeCode = asNonEmptyString(cause?.code);
-  const causeMessage = asNonEmptyString(cause?.message);
-  const causeText = causeCode || causeMessage ? ` (${[causeCode, causeMessage].filter(Boolean).join(": ")})` : "";
-
-  return `${error.message}${causeText}`;
-}
-
 function sanitizeUrl(value: string): string {
   try {
     const url = new URL(value);
@@ -107,6 +94,26 @@ function sanitizeUrl(value: string): string {
   } catch {
     return "<invalid url>";
   }
+}
+
+function sanitizeTextUrls(value: string): string {
+  return value.replace(/https?:\/\/[^\s)>,]+/g, (match) => sanitizeUrl(match));
+}
+
+function formatError(error: unknown): string {
+  if (!(error instanceof Error)) {
+    return sanitizeTextUrls(String(error));
+  }
+
+  const cause = isRecord(error.cause) ? error.cause : undefined;
+  const causeCode = asNonEmptyString(cause?.code);
+  const causeMessage = asNonEmptyString(cause?.message);
+  const causeText =
+    causeCode || causeMessage
+      ? ` (${[causeCode, causeMessage ? sanitizeTextUrls(causeMessage) : undefined].filter(Boolean).join(": ")})`
+      : "";
+
+  return `${sanitizeTextUrls(error.message)}${causeText}`;
 }
 
 function looksLikeTimeout(error: unknown): boolean {

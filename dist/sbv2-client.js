@@ -21,16 +21,6 @@ function asFiniteNumber(value) {
 function asNonEmptyString(value) {
     return typeof value === "string" && value.trim() ? value.trim() : undefined;
 }
-function formatError(error) {
-    if (!(error instanceof Error)) {
-        return String(error);
-    }
-    const cause = isRecord(error.cause) ? error.cause : undefined;
-    const causeCode = asNonEmptyString(cause?.code);
-    const causeMessage = asNonEmptyString(cause?.message);
-    const causeText = causeCode || causeMessage ? ` (${[causeCode, causeMessage].filter(Boolean).join(": ")})` : "";
-    return `${error.message}${causeText}`;
-}
 function sanitizeUrl(value) {
     try {
         const url = new URL(value);
@@ -43,6 +33,21 @@ function sanitizeUrl(value) {
     catch {
         return "<invalid url>";
     }
+}
+function sanitizeTextUrls(value) {
+    return value.replace(/https?:\/\/[^\s)>,]+/g, (match) => sanitizeUrl(match));
+}
+function formatError(error) {
+    if (!(error instanceof Error)) {
+        return sanitizeTextUrls(String(error));
+    }
+    const cause = isRecord(error.cause) ? error.cause : undefined;
+    const causeCode = asNonEmptyString(cause?.code);
+    const causeMessage = asNonEmptyString(cause?.message);
+    const causeText = causeCode || causeMessage
+        ? ` (${[causeCode, causeMessage ? sanitizeTextUrls(causeMessage) : undefined].filter(Boolean).join(": ")})`
+        : "";
+    return `${sanitizeTextUrls(error.message)}${causeText}`;
 }
 function looksLikeTimeout(error) {
     if (!(error instanceof Error)) {
