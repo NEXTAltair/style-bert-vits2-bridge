@@ -60,6 +60,17 @@ openclaw plugins inspect style-bert-vits2-bridge --runtime --json
 
 SBV2 側の暗黙既定に任せると `model_id=0` に落ちます。観測環境では `model_id=0` が `amitaro` だったため、Valentina 系を使いたい場合は上のように `defaultModelName`、`defaultSpeakerName`、`defaultStyle` を明示してください。
 
+Valentina 系の推奨開始点は次の通りです。
+
+| キー | 推奨値 | 備考 |
+|------|------|------|
+| `defaultModelName` | `valentina01_bright` | `/models/info` の model name と一致させる |
+| `defaultSpeakerName` | `valentina01_bright` | speaker name を優先して指定する |
+| `defaultStyle` | `00_Neutral` | まず neutral で確認してから style を変える |
+| `defaultLanguage` | `JP` | 日本語入力の通常値 |
+| `defaultStyleWeight` | 未指定または控えめな値 | 強くしすぎると音声が崩れやすい |
+| `defaultLength` | 未指定または `1` 前後 | 大きいほど遅く、小さいほど速い |
+
 ## 仕組み
 
 1. OpenClaw が `/tts audio` コマンド等で音声生成をリクエスト
@@ -106,7 +117,15 @@ OpenClaw の policy が許可している場合、directive や Talk params か�
 
 ## 動作確認
 
-SBV2 API が起動していることを先に確認します。
+「音が出ない」「別の声になる」「fallback provider に切り替わった可能性がある」場合は、次の順で確認します。
+
+1. `pnpm run check:sbv2` で SBV2 server、OpenClaw provider config、期待モデルの有無を確認する。
+2. `openclaw plugins inspect style-bert-vits2-bridge --runtime --json` で `speechProviderIds` に `style-bert-vits2` が含まれることを確認する。
+3. `/models/info` の model / speaker / style と、OpenClaw config の `defaultModelName` / `defaultSpeakerName` / `defaultStyle` が一致していることを確認する。
+4. `/tts audio`、voice override、Talk mode の順で実際の合成経路を確認する。
+5. `/tts status` と OpenClaw の debug log で `style-bert-vits2` 以外の provider が選ばれていないか、または SBV2 validation error が出ていないか確認する。
+
+SBV2 API 単体の起動確認:
 
 ```bash
 curl -fsS http://127.0.0.1:5000/status
@@ -130,7 +149,7 @@ pnpm run check:sbv2 -- --base-url http://127.0.0.1:5000 --expect-model valentina
 
 出力が `GET /status` で失敗する場合は SBV2 server 未起動または `baseUrl` 誤りです。`GET /models/info` だけ失敗する場合は SBV2 API 側のモデルロード状態を確認してください。期待モデルだけが失敗する場合は、SBV2 の `model_assets/`、ロード済みモデル、または OpenClaw の default model 設定がずれています。provider config や selected provider が失敗する場合は OpenClaw config 側の provider 選択ミスです。
 
-OpenClaw 側では runtime inspection で provider registration を確認します。
+OpenClaw 側では runtime inspection で provider registration を確認します。cold inspect や plugin list では runtime registration が表示されないことがあるため、capability 確認には `--runtime` を使います。
 
 ```bash
 openclaw plugins inspect style-bert-vits2-bridge --runtime --json
@@ -148,6 +167,8 @@ openclaw plugins inspect style-bert-vits2-bridge --runtime --json
 
 Talk mode では provider config の既定値に加えて、Talk params から `voice_id`、`model_name`、`speaker_name`、`style`、`rate`、`style_weight`、`assist_text` などを渡せます。`rate` は WPM として扱われ、SBV2 の `length` に変換されます。指定した model / speaker / style が `/models/info` に無い場合は、operator 向けに整形された validation error が返ります。
 
+Control UI / webchat で音声 artifact が見えない場合でも、Discord など別 channel で配信でき、`/tts status` と debug telemetry が成功しているなら bridge の合成自体は成功しています。UI 表示、添付、再生、channel 変換は OpenClaw 本体または surface 側の責務として切り分けます。
+
 SBV2 API が起動しているローカル環境では live smoke test も実行できます。
 
 ```bash
@@ -160,13 +181,30 @@ live smoke test は `/status`、`/models/info`、短文 `/voice`、WAV header、
 
 この bridge は SBV2 FastAPI server manager ではありません。SBV2 server の起動、停止、GPU/backend 選択、モデルファイルの配置、モデルロードは SBV2 側または運用スクリプトの責務です。bridge は設定済みの `baseUrl` に対して `/models/info` と `/voice` を呼び、失敗時に operator が切り分けやすいエラーを返します。
 
-「音声品質が期待と違う」「読み上げ内容が不自然」「fallback provider に切り替わった可能性がある」場合は、次の順で確認します。
+### Telemetry / debug
 
-1. `pnpm run check:sbv2` で SBV2 server、OpenClaw provider config、期待モデルの有無を確認する。
-2. `openclaw plugins inspect style-bert-vits2-bridge --runtime --json` で `speechProviderIds` に `style-bert-vits2` が含まれることを確認する。
-3. `/models/info` の model / speaker / style と、OpenClaw config の `defaultModelName` / `defaultSpeakerName` / `defaultStyle` が一致していることを確認する。
-4. OpenClaw の debug log で `style-bert-vits2` 以外の provider が選ばれていないか、または SBV2 validation error が出ていないか確認する。
-5. server 未起動、モデル未ロード、provider 選択ミスのどれでもない場合に、読み上げ本文、style、`assist_text`、話速などの品質調整として扱う。
+OpenClaw の `/tts status` は、直近の TTS 試行について fallback と attempted providers を表示します。SBV2 を使ったつもりで別 provider が使われた疑いがある場合は、まず `/tts status` の `Fallback`、`Attempts`、provider detail を確認してください。
+
+bridge 側では合成成功時に、安全な telemetry metadata と debug log へ resolved profile を出します。確認できる主な項目は `provider=style-bert-vits2`、sanitized `baseUrl`、`voiceId`、`modelName`、`modelId`、`speakerName`、`speakerId`、`style`、`styleWeight`、`length`、`language`、`outputFormat=wav`、`audioBytes` です。
+
+エラー時も同じ安全な context をエラーメッセージ末尾に付けます。`/models/info` の model / speaker / style 不一致、SBV2 server 未起動、`baseUrl` 誤りを切り分ける用途です。
+
+debug log と telemetry には、読み上げ本文、`assistText`、音声バイナリ、base64、URL の user/password/query/hash は出しません。secret を `baseUrl` の query や userinfo に入れている場合でも、ログ上は除去されます。
+
+### Troubleshooting
+
+| 症状 | 主な確認点 | 対応 |
+|------|------|------|
+| `GET /status` が失敗する | SBV2 server 未起動、`baseUrl` 誤り、port違い | SBV2 FastAPI server を起動し、`baseUrl` を `http://127.0.0.1:5000` など実際のURLに合わせる |
+| `GET /models/info` が失敗する | モデル未ロード、SBV2 API 側のエラー | SBV2 側でモデル配置とロード状態を確認する |
+| `style-bert-vits2` が使われない | OpenClaw provider config、selected provider、fallback | `pnpm run check:sbv2` と `/tts status` の `Fallback` / `Attempts` を確認する |
+| Valentina のつもりが別声になる | SBV2 の `model_id=0` fallback、default profile 未指定 | `defaultModelName` / `defaultSpeakerName` / `defaultStyle` を明示する |
+| model / speaker / style validation error | `/models/info` と config / directive の不一致 | 実在する model / speaker / style 名に合わせる。style は agent が選ぶため bridge 側で重み付けしない |
+| 音声が不自然、感情が強すぎる | `style_weight`、`length`、`assist_text`、入力文 | まず `00_Neutral` と控えめな `style_weight` で確認し、その後に style や補助テキストを調整する |
+| `/tts audio` は成功するが Control UI で見えない | OpenClaw surface 側の audio artifact 表示 | bridge ではなく OpenClaw 本体または surface 側 issue として扱う |
+| channel によって再生可否が違う | channel delivery、codec変換、voice-compatible artifact | bridge は `wav` を返し、必要な変換は OpenClaw channel 側で扱う |
+
+OpenClaw 本体側 issue として扱うものは、Control UI / webchat の audio artifact 表示、fallback / provider attempts の UI 改善、channel ごとの codec 変換、voice note / mobile / telephony 向けの voice-compatible artifact 対応です。この repo では SBV2 `/models/info` / `/voice` 呼び出し、voice profile 解決、directive / Talk override、安全な error / telemetry までを扱います。
 
 ## 開発
 

@@ -153,6 +153,54 @@ describe("Style-Bert-VITS2 speech provider", () => {
     expect(voiceUrl.searchParams.get("language")).toBe("JP");
   });
 
+  it("returns safe telemetry metadata for the resolved SBV2 profile", async () => {
+    const mockFetch = vi
+      .fn()
+      .mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.resolve(valentinaModelsInfo),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        arrayBuffer: () => Promise.resolve(wavBytes.buffer),
+      });
+    vi.stubGlobal("fetch", mockFetch);
+
+    const debug = vi.fn();
+    const provider = buildSbv2SpeechProvider({ logger: { debug } });
+    const result = await provider.synthesize({
+      text: "ログに出してはいけない本文",
+      providerConfig: {
+        baseUrl: "http://user:secret@localhost:5000/api?token=hidden#fragment",
+        defaultStyleWeight: 0.7,
+        defaultLength: 1.1,
+        defaultAssistText: "ログに出してはいけない補助テキスト",
+      },
+    });
+
+    expect(result.metadata).toEqual({
+      provider: "style-bert-vits2",
+      baseUrl: "http://localhost:5000/api",
+      voiceId: "valentina01_bright",
+      modelName: "valentina01_bright",
+      speakerName: "valentina01_bright",
+      style: "00_Neutral",
+      styleWeight: 0.7,
+      length: 1.1,
+      language: "JP",
+      outputFormat: "wav",
+      audioBytes: wavBytes.byteLength,
+    });
+    expect(debug).toHaveBeenCalledWith("style-bert-vits2 synthesis resolved", result.metadata);
+
+    const loggedPayload = JSON.stringify(debug.mock.calls);
+    expect(loggedPayload).not.toContain("ログに出してはいけない本文");
+    expect(loggedPayload).not.toContain("ログに出してはいけない補助テキスト");
+    expect(loggedPayload).not.toContain("secret");
+    expect(loggedPayload).not.toContain("token=hidden");
+    expect(loggedPayload).not.toContain(Buffer.from(wavBytes).toString("base64"));
+  });
+
   it("uses selected SBV2 voice overrides before configured defaults", async () => {
     const mockFetch = vi
       .fn()
@@ -239,7 +287,7 @@ describe("Style-Bert-VITS2 speech provider", () => {
     vi.stubGlobal("fetch", mockFetch);
 
     const provider = buildSbv2SpeechProvider();
-    await provider.synthesize({
+    const result = await provider.synthesize({
       text: "こんにちは",
       providerConfig: {
         baseUrl: "http://localhost:5000",
@@ -255,6 +303,28 @@ describe("Style-Bert-VITS2 speech provider", () => {
     expect(url.searchParams.get("model_name")).toBe("speakerless");
     expect(url.searchParams.get("speaker_name")).toBeNull();
     expect(url.searchParams.get("style")).toBe("Neutral");
+    expect(result.metadata).toMatchObject({
+      voiceId: "sbv2:speakerless::Neutral",
+      modelName: "speakerless",
+      speakerName: undefined,
+      style: "Neutral",
+    });
+  });
+
+  it("rejects malformed selectable SBV2 voice ids before synthesis", async () => {
+    const mockFetch = vi.fn();
+    vi.stubGlobal("fetch", mockFetch);
+
+    const provider = buildSbv2SpeechProvider();
+    await expect(
+      provider.synthesize({
+        text: "こんにちは",
+        providerConfig: { baseUrl: "http://localhost:5000" },
+        providerOverrides: { voiceId: "sbv2:%E0%A4%A" },
+      }),
+    ).rejects.toThrow('Malformed SBV2 voice ID "sbv2:%E0%A4%A"');
+
+    expect(mockFetch).not.toHaveBeenCalled();
   });
 
   it("merges parsed directive overrides with current overrides", () => {
@@ -322,6 +392,81 @@ describe("Style-Bert-VITS2 speech provider", () => {
 
     await expect(provider.listVoices?.({ providerConfig: {} })).rejects.toThrow(
       /baseUrl is not configured/,
+    );
+  });
+
+  it("adds safe profile context to SBV2 resolve errors", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({
+        ok: true,
+        json: () => Promise.resolve(valentinaModelsInfo),
+      }),
+    );
+
+    const provider = buildSbv2SpeechProvider();
+    await expect(
+      provider.synthesize({
+        text: "ログに出してはいけない本文",
+        providerConfig: {
+          baseUrl: "http://user:secret@localhost:5000?token=hidden",
+          defaultModelName: "missing-model",
+          defaultSpeakerName: "missing-speaker",
+          defaultStyle: "MissingStyle",
+          defaultAssistText: "ログに出してはいけない補助テキスト",
+        },
+      }),
+    ).rejects.toThrow(
+      /SBV2 telemetry context: provider=style-bert-vits2, baseUrl=http:\/\/localhost:5000, modelName=missing-model, speakerName=missing-speaker, style=MissingStyle/,
+    );
+
+    try {
+      await provider.synthesize({
+        text: "ログに出してはいけない本文",
+        providerConfig: {
+          baseUrl: "http://user:secret@localhost:5000?token=hidden",
+          defaultModelName: "missing-model",
+          defaultAssistText: "ログに出してはいけない補助テキスト",
+        },
+      });
+      throw new Error("expected synthesize to fail");
+    } catch (error) {
+      expect(error).toBeInstanceOf(Error);
+      const message = (error as Error).message;
+      expect(message).not.toContain("ログに出してはいけない本文");
+      expect(message).not.toContain("ログに出してはいけない補助テキスト");
+      expect(message).not.toContain("secret");
+      expect(message).not.toContain("token=hidden");
+    }
+  });
+
+  it("adds safe profile context to SBV2 voice request errors", async () => {
+    const mockFetch = vi
+      .fn()
+      .mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.resolve(valentinaModelsInfo),
+      })
+      .mockResolvedValueOnce({
+        ok: false,
+        status: 500,
+        statusText: "Internal Server Error",
+        text: () => Promise.resolve("upstream failed"),
+      });
+    vi.stubGlobal("fetch", mockFetch);
+
+    const provider = buildSbv2SpeechProvider();
+
+    await expect(
+      provider.synthesize({
+        text: "ログに出してはいけない本文",
+        providerConfig: {
+          baseUrl: "http://user:secret@localhost:5000?token=hidden",
+          defaultAssistText: "ログに出してはいけない補助テキスト",
+        },
+      }),
+    ).rejects.toThrow(
+      /SBV2 telemetry context: provider=style-bert-vits2, baseUrl=http:\/\/localhost:5000, voiceId=valentina01_bright, modelName=valentina01_bright, speakerName=valentina01_bright, style=00_Neutral/,
     );
   });
 });

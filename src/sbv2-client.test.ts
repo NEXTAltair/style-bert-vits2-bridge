@@ -380,6 +380,65 @@ describe("Sbv2Client", () => {
     );
   });
 
+  it("sanitizes secret-bearing baseUrl values in request-layer errors", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockRejectedValue(new Error("connect ECONNREFUSED 127.0.0.1:5000")),
+    );
+
+    const client = new Sbv2Client({
+      baseUrl: "http://user:secret@localhost:5000/api?token=hidden#fragment",
+    });
+
+    try {
+      await client.getModelsInfo();
+      throw new Error("expected getModelsInfo to fail");
+    } catch (error) {
+      expect(error).toBeInstanceOf(Error);
+      const message = (error as Error).message;
+      expect(message).toContain("http://localhost:5000/api");
+      expect(message).toContain("http://localhost:5000/status");
+      expect(message).not.toContain("user:secret");
+      expect(message).not.toContain("token=hidden");
+      expect(message).not.toContain("#fragment");
+    }
+  });
+
+  it("sanitizes URLs embedded in fetch error details", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockRejectedValue(
+        Object.assign(
+          new TypeError(
+            "Request cannot be constructed from a URL that includes credentials: http://user:secret@localhost:5000/models/info?token=hidden#fragment",
+          ),
+          {
+            cause: {
+              code: "ERR_INVALID_URL",
+              message:
+                "Rejected credential URL http://user:secret@localhost:5000/status?token=hidden#fragment",
+            },
+          },
+        ),
+      ),
+    );
+
+    const client = new Sbv2Client({ baseUrl: "http://user:secret@localhost:5000" });
+
+    try {
+      await client.getModelsInfo();
+      throw new Error("expected getModelsInfo to fail");
+    } catch (error) {
+      expect(error).toBeInstanceOf(Error);
+      const message = (error as Error).message;
+      expect(message).toContain("http://localhost:5000/models/info");
+      expect(message).toContain("http://localhost:5000/status");
+      expect(message).not.toContain("user:secret");
+      expect(message).not.toContain("token=hidden");
+      expect(message).not.toContain("#fragment");
+    }
+  });
+
   it("includes timeoutMs when requests time out", async () => {
     vi.stubGlobal(
       "fetch",

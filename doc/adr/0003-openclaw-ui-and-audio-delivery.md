@@ -1,7 +1,7 @@
 # ADR 0003: OpenClaw UI And Audio Delivery
 
 - **日付**: 2026-05-28
-- **ステータス**: Proposed
+- **ステータス**: Accepted
 
 ## Context
 
@@ -22,6 +22,8 @@ Bridge は SBV2 `/voice` から WAV を受け取り、OpenClaw に `audioBuffer`
 ## Decision
 
 Bridge は UI を直接提供しない。OpenClaw の speech provider contract に従って audio artifact と metadata を返し、UI 表示・添付・再生・channel 変換は OpenClaw surface 側に委ねる。
+
+この境界は第二段階の healthcheck、WAV 固定出力、safe telemetry、Control UI / channel delivery の切り分けで採用済みとする。
 
 Bridge が提供する UI-facing 情報は次の範囲に限定する。
 

@@ -83,17 +83,37 @@ function asNonEmptyString(value: unknown): string | undefined {
   return typeof value === "string" && value.trim() ? value.trim() : undefined;
 }
 
+function sanitizeUrl(value: string): string {
+  try {
+    const url = new URL(value);
+    url.username = "";
+    url.password = "";
+    url.search = "";
+    url.hash = "";
+    return url.toString().replace(/\/$/, "");
+  } catch {
+    return "<invalid url>";
+  }
+}
+
+function sanitizeTextUrls(value: string): string {
+  return value.replace(/https?:\/\/[^\s)>,]+/g, (match) => sanitizeUrl(match));
+}
+
 function formatError(error: unknown): string {
   if (!(error instanceof Error)) {
-    return String(error);
+    return sanitizeTextUrls(String(error));
   }
 
   const cause = isRecord(error.cause) ? error.cause : undefined;
   const causeCode = asNonEmptyString(cause?.code);
   const causeMessage = asNonEmptyString(cause?.message);
-  const causeText = causeCode || causeMessage ? ` (${[causeCode, causeMessage].filter(Boolean).join(": ")})` : "";
+  const causeText =
+    causeCode || causeMessage
+      ? ` (${[causeCode, causeMessage ? sanitizeTextUrls(causeMessage) : undefined].filter(Boolean).join(": ")})`
+      : "";
 
-  return `${error.message}${causeText}`;
+  return `${sanitizeTextUrls(error.message)}${causeText}`;
 }
 
 function looksLikeTimeout(error: unknown): boolean {
@@ -107,19 +127,21 @@ function looksLikeTimeout(error: unknown): boolean {
 
 function formatRequestError(endpoint: string, baseUrl: string, timeoutMs: number, error: unknown): Error {
   const statusUrl = new URL("/status", baseUrl).toString();
+  const safeBaseUrl = sanitizeUrl(baseUrl);
+  const safeStatusUrl = sanitizeUrl(statusUrl);
   const detail = formatError(error);
 
   if (looksLikeTimeout(error)) {
     return new Error(
-      `SBV2 ${endpoint} request timed out after ${timeoutMs}ms for ${baseUrl}. ` +
-        `Check that the SBV2 API responds at ${statusUrl}, or increase timeoutMs. ` +
+      `SBV2 ${endpoint} request timed out after ${timeoutMs}ms for ${safeBaseUrl}. ` +
+        `Check that the SBV2 API responds at ${safeStatusUrl}, or increase timeoutMs. ` +
         `Original error: ${detail}`,
     );
   }
 
   return new Error(
-    `SBV2 ${endpoint} request failed for ${baseUrl}. ` +
-      `Check that the SBV2 API is running and reachable at ${statusUrl}. ` +
+    `SBV2 ${endpoint} request failed for ${safeBaseUrl}. ` +
+      `Check that the SBV2 API is running and reachable at ${safeStatusUrl}. ` +
       `Original error: ${detail}`,
   );
 }

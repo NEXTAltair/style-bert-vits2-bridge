@@ -159,7 +159,13 @@ function assertStyle(model, params) {
 export async function resolveVoiceProfile({ client, providerConfig, providerOverrides, }) {
     const configDefaults = readProviderDefaults(providerConfig);
     const overrides = readOverrides(providerOverrides);
-    const explicitProfile = overrides.voiceId
+    const selectedSbv2VoiceId = overrides.voiceId?.startsWith("sbv2:") ? overrides.voiceId : undefined;
+    if (selectedSbv2VoiceId &&
+        overrides.modelName === undefined &&
+        overrides.modelId === undefined) {
+        throw new Error(`Malformed SBV2 voice ID "${selectedSbv2VoiceId}"`);
+    }
+    const explicitProfile = overrides.voiceId && !selectedSbv2VoiceId
         ? findProfile(overrides.voiceId)
         : {};
     const resolved = { ...DEFAULT_VOICE_PROFILE };

@@ -1,7 +1,7 @@
 # ADR 0002: SBV2 Voice Profile And Parameter Resolution
 
 - **日付**: 2026-05-28
-- **ステータス**: Proposed
+- **ステータス**: Accepted
 
 ## Context
 
@@ -28,6 +28,8 @@ OpenClaw の config や directive からこれらを直接すべて露出する�
 ## Decision
 
 Bridge は SBV2 parameter を直接公開するのではなく、voice profile resolver を中心に解決する。
+
+この方針は第二段階の `/models/info` 検証、Valentina 既定 profile、directive whitelist、Talk params override 実装で採用済みとする。
 
 Voice profile は、OpenClaw 側から扱いやすい `voice` または `voiceId` を、SBV2 の具体的な model/speaker/style defaults に変換する単位とする。
 
@@ -88,7 +90,7 @@ Voice profile resolver を中心にすると、`/tts` directive、Talk mode、UI
 
 `model_name` と `speaker_name` は人間に読みやすく、環境差分の debug に向く。`model_id` と `speaker_id` は SBV2 の内部順序に依存するため、profile と検証がない場所では優先しない。
 
-`style_weight` は 1.0 を超えると音声が崩れやすいため、bridge 側で推奨範囲と validation warning を持つ。
+`style_weight` は強くしすぎると音声が崩れやすいため、operator 向け docs と bundled skill で控えめな利用を促す。bridge は実在 style の選択を検証するが、style 選択そのものの重み付けや自動補正は行わない。
 
 ## Consequences
 
