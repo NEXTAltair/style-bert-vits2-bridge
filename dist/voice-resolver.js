@@ -160,6 +160,11 @@ export async function resolveVoiceProfile({ client, providerConfig, providerOver
     const configDefaults = readProviderDefaults(providerConfig);
     const overrides = readOverrides(providerOverrides);
     const selectedSbv2VoiceId = overrides.voiceId?.startsWith("sbv2:") ? overrides.voiceId : undefined;
+    if (selectedSbv2VoiceId &&
+        overrides.modelName === undefined &&
+        overrides.modelId === undefined) {
+        throw new Error(`Malformed SBV2 voice ID "${selectedSbv2VoiceId}"`);
+    }
     const explicitProfile = overrides.voiceId && !selectedSbv2VoiceId
         ? findProfile(overrides.voiceId)
         : {};

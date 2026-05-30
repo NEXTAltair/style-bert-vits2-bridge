@@ -311,6 +311,22 @@ describe("Style-Bert-VITS2 speech provider", () => {
     });
   });
 
+  it("rejects malformed selectable SBV2 voice ids before synthesis", async () => {
+    const mockFetch = vi.fn();
+    vi.stubGlobal("fetch", mockFetch);
+
+    const provider = buildSbv2SpeechProvider();
+    await expect(
+      provider.synthesize({
+        text: "こんにちは",
+        providerConfig: { baseUrl: "http://localhost:5000" },
+        providerOverrides: { voiceId: "sbv2:%E0%A4%A" },
+      }),
+    ).rejects.toThrow('Malformed SBV2 voice ID "sbv2:%E0%A4%A"');
+
+    expect(mockFetch).not.toHaveBeenCalled();
+  });
+
   it("merges parsed directive overrides with current overrides", () => {
     const provider = buildSbv2SpeechProvider();
 

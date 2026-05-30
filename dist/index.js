@@ -47,6 +47,9 @@ function parseSbv2VoiceId(value) {
 function normalizeOverrides(overrides) {
     const selectedVoiceId = trimToUndefined(overrides?.voiceId) ?? trimToUndefined(overrides?.voice);
     const selectedVoice = parseSbv2VoiceId(selectedVoiceId);
+    if (selectedVoiceId?.startsWith("sbv2:") && !selectedVoice) {
+        throw new Error(`Malformed SBV2 voice ID "${selectedVoiceId}"`);
+    }
     if (!selectedVoice)
         return overrides;
     const { voiceId: _voiceId, voice: _voice, ...rest } = overrides ?? {};

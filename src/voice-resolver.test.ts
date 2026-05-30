@@ -204,6 +204,16 @@ describe("resolveVoiceProfile", () => {
     ).rejects.toThrow('SBV2 voice profile "missing" is not available');
   });
 
+  it("rejects malformed selectable SBV2 voice ids", async () => {
+    await expect(
+      resolveVoiceProfile({
+        client: client(),
+        providerConfig: {},
+        providerOverrides: { voiceId: "sbv2:" },
+      }),
+    ).rejects.toThrow('Malformed SBV2 voice ID "sbv2:"');
+  });
+
   it("rejects unavailable model, speaker, and style values", async () => {
     await expect(
       resolveVoiceProfile({
