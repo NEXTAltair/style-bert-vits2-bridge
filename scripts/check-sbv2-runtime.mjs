@@ -8,6 +8,7 @@ import { resolveVoiceProfile } from "../dist/voice-resolver.js";
 const DEFAULT_BASE_URL = "http://127.0.0.1:5000";
 const DEFAULT_CONFIG_PATH = `${homedir()}/.openclaw/openclaw.json`;
 const DEFAULT_EXPECTED_MODELS = ["valentina01_bright"];
+const DEFAULT_TIMEOUT_MS = 30_000;
 
 function parseArgs(argv) {
   const options = {
@@ -60,7 +61,7 @@ Options:
   --config <path>           OpenClaw config path. Defaults to ${DEFAULT_CONFIG_PATH}
   --expect-model <name>     Model name expected in /models/info. Repeatable or comma-separated.
                             Defaults to ${DEFAULT_EXPECTED_MODELS.join(", ")}
-  --timeout-ms <ms>         Request timeout in milliseconds. Defaults to 5000.
+  --timeout-ms <ms>         Request timeout in milliseconds. Defaults to ${DEFAULT_TIMEOUT_MS}.
   --json                    Print machine-readable JSON.
   -h, --help                Show this help.
 `);
@@ -163,8 +164,9 @@ async function fetchJson(baseUrl, path, timeoutMs) {
 
 function summarizeModelsInfo(value) {
   try {
-    const models = normalizeModelsInfo(value).map((model) => ({
+    const models = normalizeModelsInfo(value).map((model, index) => ({
       id: model.id,
+      index,
       sourceId: model.sourceId,
       name: model.name,
       speakers: model.speakers.map((speaker) => speaker.name),
@@ -226,9 +228,10 @@ function printTextReport(report) {
   if (report.models.length) {
     console.log("OK  loaded models:");
     for (const model of report.models) {
+      const modelId = model.id ?? model.sourceId ?? model.index;
       const speakerText = model.speakers.length ? model.speakers.join(", ") : "(none)";
       const styleText = model.styles.length ? model.styles.join(", ") : "(none)";
-      console.log(`    [${model.id}] ${model.name}`);
+      console.log(`    [${modelId}] ${model.name}`);
       console.log(`        speakers: ${speakerText}`);
       console.log(`        styles: ${styleText}`);
     }
@@ -268,7 +271,7 @@ async function main() {
   const providerConfig = getProviderConfig(config.value);
   const providerBaseUrl = normalizeBaseUrl(providerConfig.provider?.baseUrl);
   const baseUrl = normalizeBaseUrl(options.baseUrl) ?? providerBaseUrl ?? DEFAULT_BASE_URL;
-  const timeoutMs = options.timeoutMs ?? asPositiveInteger(providerConfig.provider?.timeoutMs) ?? 5_000;
+  const timeoutMs = options.timeoutMs ?? asPositiveInteger(providerConfig.provider?.timeoutMs) ?? DEFAULT_TIMEOUT_MS;
   const configModelName =
     trimToUndefined(providerConfig.provider?.defaultModelName) ??
     trimToUndefined(providerConfig.provider?.modelName);
@@ -303,27 +306,28 @@ async function main() {
     : { ok: false, error: modelsSummary.error };
   const modelNames = new Set(models.map((model) => model.name));
   const modelIds = new Set(
-    models.flatMap((model) => [asModelId(model.id), asModelId(model.sourceId)].filter(Boolean)),
+    models.flatMap((model) => [asModelId(model.id), asModelId(model.sourceId), asModelId(model.index)].filter(Boolean)),
   );
   const presentExpectedModels = effectiveExpectedModels.filter((name) => modelNames.has(name));
   const presentExpectedModelIds = expectedModelIds.filter((id) => modelIds.has(id));
-  const targetModels = models.filter(
+  const configuredVoiceTargetModels = models.filter(
     (model) =>
-      effectiveExpectedModels.includes(model.name) ||
-      expectedModelIds.includes(String(model.id)) ||
-      expectedModelIds.includes(String(model.sourceId)),
+      voice.resolved?.modelName === model.name ||
+      String(voice.resolved?.modelId) === String(model.id) ||
+      String(voice.resolved?.modelId) === String(model.sourceId) ||
+      String(voice.resolved?.modelId) === String(model.index),
   );
   const expectedSpeakers = [configSpeakerName].filter(Boolean);
   const expectedSpeakerIds = [configSpeakerId].filter(Boolean);
   const expectedStyles = [configStyle].filter(Boolean);
   const presentExpectedSpeakers = expectedSpeakers.filter((speaker) =>
-    targetModels.some((model) => model.speakers.includes(speaker)),
+    configuredVoiceTargetModels.some((model) => model.speakers.includes(speaker)),
   );
   const presentExpectedSpeakerIds = expectedSpeakerIds.filter((speakerId) =>
-    targetModels.some((model) => model.speakerIds.includes(speakerId)),
+    configuredVoiceTargetModels.some((model) => model.speakerIds.includes(speakerId)),
   );
   const presentExpectedStyles = expectedStyles.filter((style) =>
-    targetModels.some((model) => model.styles.includes(style)),
+    configuredVoiceTargetModels.some((model) => model.styles.includes(style)),
   );
   const openclawSelected =
     providerConfig.selectedProvider === undefined || providerConfig.selectedProvider === "style-bert-vits2";
