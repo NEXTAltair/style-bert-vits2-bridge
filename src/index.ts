@@ -1,5 +1,6 @@
 import { definePluginEntry } from "openclaw/plugin-sdk/plugin-entry";
 import type { SpeechProviderPlugin } from "openclaw/plugin-sdk/speech";
+import { applyPronunciationReplacements } from "./pronunciation.js";
 import { Sbv2Client } from "./sbv2-client.js";
 import {
   listVoiceProfiles,
@@ -185,7 +186,7 @@ export function buildSbv2SpeechProvider(options: Sbv2SpeechProviderOptions = {})
 
     parseDirectiveToken: (ctx) => {
       const parsed = parseVoiceDirectiveToken(ctx);
-      return parsed ? { ...ctx.currentOverrides, ...parsed } : undefined;
+      return parsed ? { handled: true, overrides: { ...ctx.currentOverrides, ...parsed } } : undefined;
     },
 
     resolveTalkConfig: ({ baseTtsConfig, talkProviderConfig }) => ({
@@ -278,7 +279,7 @@ export function buildSbv2SpeechProvider(options: Sbv2SpeechProviderOptions = {})
       let audioBuffer: Buffer;
       try {
         audioBuffer = await client.synthesize({
-          text: req.text,
+          text: applyPronunciationReplacements(req.text, config.pronunciationReplacements),
           modelName: resolvedVoice.modelName,
           modelId: resolvedVoice.modelId,
           speakerId: resolvedVoice.speakerId,

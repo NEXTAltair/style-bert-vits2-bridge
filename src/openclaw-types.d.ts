@@ -57,13 +57,21 @@ declare module "openclaw/plugin-sdk/speech" {
     currentOverrides?: SpeechProviderOverrides;
   }
 
+  export interface SpeechDirectiveTokenParseResult {
+    handled: boolean;
+    overrides?: SpeechProviderOverrides;
+    warnings?: string[];
+  }
+
   export interface SpeechProviderPlugin {
     id: string;
     label: string;
     autoSelectOrder?: number;
     models?: readonly string[];
     resolveConfig?: (ctx: { rawConfig: Record<string, unknown> }) => unknown;
-    parseDirectiveToken?: (ctx: SpeechDirectiveTokenParseContext) => unknown;
+    parseDirectiveToken?: (
+      ctx: SpeechDirectiveTokenParseContext,
+    ) => SpeechDirectiveTokenParseResult | undefined;
     resolveTalkConfig?: (ctx: {
       baseTtsConfig: Record<string, unknown>;
       talkProviderConfig: Record<string, unknown>;

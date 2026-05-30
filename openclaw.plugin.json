@@ -3,6 +3,9 @@
   "name": "Style-Bert-VITS2 Bridge",
   "description": "Bridge OpenClaw to a Style-Bert-VITS2 API server for speech generation.",
   "version": "0.0.1",
+  "contracts": {
+    "speechProviders": ["style-bert-vits2"]
+  },
   "skills": [
     "./skills/voice"
   ],
@@ -31,7 +34,11 @@
       "defaultLength": { "type": "number" },
       "defaultLanguage": { "type": "string", "enum": ["JP", "EN", "ZH"] },
       "defaultAssistText": { "type": "string" },
-      "defaultAssistTextWeight": { "type": "number" }
+      "defaultAssistTextWeight": { "type": "number" },
+      "pronunciationReplacements": {
+        "type": "object",
+        "additionalProperties": { "type": "string" }
+      }
     }
   },
   "uiHints": {

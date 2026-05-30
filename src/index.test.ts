@@ -153,6 +153,25 @@ describe("Style-Bert-VITS2 speech provider", () => {
     expect(voiceUrl.searchParams.get("language")).toBe("JP");
   });
 
+  it("returns OpenClaw directive parse results for style overrides", () => {
+    const provider = buildSbv2SpeechProvider();
+
+    expect(
+      provider.parseDirectiveToken?.({
+        key: "style",
+        value: "01_Happy",
+        policy: { allowVoiceSettings: true },
+        currentOverrides: { styleWeight: 0.65 },
+      }),
+    ).toEqual({
+      handled: true,
+      overrides: {
+        style: "01_Happy",
+        styleWeight: 0.65,
+      },
+    });
+  });
+
   it("returns safe telemetry metadata for the resolved SBV2 profile", async () => {
     const mockFetch = vi
       .fn()
@@ -338,8 +357,11 @@ describe("Style-Bert-VITS2 speech provider", () => {
         currentOverrides: { style: "00_Neutral" },
       }),
     ).toEqual({
-      style: "00_Neutral",
-      assistText: "happy",
+      handled: true,
+      overrides: {
+        style: "00_Neutral",
+        assistText: "happy",
+      },
     });
   });
 

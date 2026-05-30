@@ -1,4 +1,5 @@
 import { definePluginEntry } from "openclaw/plugin-sdk/plugin-entry";
+import { applyPronunciationReplacements } from "./pronunciation.js";
 import { Sbv2Client } from "./sbv2-client.js";
 import { listVoiceProfiles, parseVoiceDirectiveToken, resolveVoiceProfile, } from "./voice-resolver.js";
 function trimToUndefined(value) {
@@ -130,7 +131,7 @@ export function buildSbv2SpeechProvider(options = {}) {
         isConfigured: ({ providerConfig }) => Boolean(trimToUndefined(providerConfig.baseUrl)),
         parseDirectiveToken: (ctx) => {
             const parsed = parseVoiceDirectiveToken(ctx);
-            return parsed ? { ...ctx.currentOverrides, ...parsed } : undefined;
+            return parsed ? { handled: true, overrides: { ...ctx.currentOverrides, ...parsed } } : undefined;
         },
         resolveTalkConfig: ({ baseTtsConfig, talkProviderConfig }) => ({
             ...baseTtsConfig,
@@ -218,7 +219,7 @@ export function buildSbv2SpeechProvider(options = {}) {
             let audioBuffer;
             try {
                 audioBuffer = await client.synthesize({
-                    text: req.text,
+                    text: applyPronunciationReplacements(req.text, config.pronunciationReplacements),
                     modelName: resolvedVoice.modelName,
                     modelId: resolvedVoice.modelId,
                     speakerId: resolvedVoice.speakerId,
