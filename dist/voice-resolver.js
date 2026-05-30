@@ -159,7 +159,8 @@ function assertStyle(model, params) {
 export async function resolveVoiceProfile({ client, providerConfig, providerOverrides, }) {
     const configDefaults = readProviderDefaults(providerConfig);
     const overrides = readOverrides(providerOverrides);
-    const explicitProfile = overrides.voiceId
+    const selectedSbv2VoiceId = overrides.voiceId?.startsWith("sbv2:") ? overrides.voiceId : undefined;
+    const explicitProfile = overrides.voiceId && !selectedSbv2VoiceId
         ? findProfile(overrides.voiceId)
         : {};
     const resolved = { ...DEFAULT_VOICE_PROFILE };

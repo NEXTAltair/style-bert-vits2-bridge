@@ -287,7 +287,7 @@ describe("Style-Bert-VITS2 speech provider", () => {
     vi.stubGlobal("fetch", mockFetch);
 
     const provider = buildSbv2SpeechProvider();
-    await provider.synthesize({
+    const result = await provider.synthesize({
       text: "こんにちは",
       providerConfig: {
         baseUrl: "http://localhost:5000",
@@ -303,6 +303,12 @@ describe("Style-Bert-VITS2 speech provider", () => {
     expect(url.searchParams.get("model_name")).toBe("speakerless");
     expect(url.searchParams.get("speaker_name")).toBeNull();
     expect(url.searchParams.get("style")).toBe("Neutral");
+    expect(result.metadata).toMatchObject({
+      voiceId: "sbv2:speakerless::Neutral",
+      modelName: "speakerless",
+      speakerName: undefined,
+      style: "Neutral",
+    });
   });
 
   it("merges parsed directive overrides with current overrides", () => {

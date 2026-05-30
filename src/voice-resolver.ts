@@ -234,7 +234,8 @@ export async function resolveVoiceProfile({
 }: ResolveVoiceProfileOptions): Promise<Sbv2ResolvedVoiceProfile> {
   const configDefaults = readProviderDefaults(providerConfig);
   const overrides = readOverrides(providerOverrides);
-  const explicitProfile: Partial<Sbv2ResolvedVoiceProfile> = overrides.voiceId
+  const selectedSbv2VoiceId = overrides.voiceId?.startsWith("sbv2:") ? overrides.voiceId : undefined;
+  const explicitProfile: Partial<Sbv2ResolvedVoiceProfile> = overrides.voiceId && !selectedSbv2VoiceId
     ? findProfile(overrides.voiceId)
     : {};
 
