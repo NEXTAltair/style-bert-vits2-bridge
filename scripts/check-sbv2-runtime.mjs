@@ -176,10 +176,12 @@ function summarizeModelsInfo(value) {
 
     const style2id = isRecord(item.style2id) ? item.style2id : {};
     const spk2id = isRecord(item.spk2id) ? item.spk2id : {};
+    const id = asModelId(item.id) ?? sourceId;
 
     return [
       {
-        id: sourceId,
+        id,
+        sourceId,
         name,
         speakers: Object.keys(spk2id),
         styles: Object.keys(style2id),
@@ -244,20 +246,21 @@ async function main() {
   const providerConfig = getProviderConfig(config.value);
   const providerBaseUrl = normalizeBaseUrl(providerConfig.provider?.baseUrl);
   const baseUrl = normalizeBaseUrl(options.baseUrl) ?? providerBaseUrl ?? DEFAULT_BASE_URL;
+  const configModelName =
+    normalizeBaseUrl(providerConfig.provider?.defaultModelName) ??
+    normalizeBaseUrl(providerConfig.provider?.modelName);
+  const configModelId =
+    configModelName === undefined
+      ? asModelId(providerConfig.provider?.defaultModelId) ?? asModelId(providerConfig.provider?.modelId)
+      : undefined;
   const expectedModels =
     options.expectedModels.length > 0
       ? options.expectedModels
-      : [
-          normalizeBaseUrl(providerConfig.provider?.defaultModelName),
-          normalizeBaseUrl(providerConfig.provider?.modelName),
-        ].filter(Boolean);
+      : [configModelName].filter(Boolean);
   const expectedModelIds =
     options.expectedModels.length > 0
       ? []
-      : [
-          asModelId(providerConfig.provider?.defaultModelId),
-          asModelId(providerConfig.provider?.modelId),
-        ].filter(Boolean);
+      : [configModelId].filter(Boolean);
 
   const effectiveExpectedModels =
     expectedModels.length || expectedModelIds.length ? expectedModels : DEFAULT_EXPECTED_MODELS;
@@ -265,7 +268,9 @@ async function main() {
   const modelsInfo = await fetchJson(baseUrl, "/models/info", options.timeoutMs);
   const models = modelsInfo.ok ? summarizeModelsInfo(modelsInfo.body) : [];
   const modelNames = new Set(models.map((model) => model.name));
-  const modelIds = new Set(models.map((model) => String(model.id)));
+  const modelIds = new Set(
+    models.flatMap((model) => [asModelId(model.id), asModelId(model.sourceId)].filter(Boolean)),
+  );
   const presentExpectedModels = effectiveExpectedModels.filter((name) => modelNames.has(name));
   const presentExpectedModelIds = expectedModelIds.filter((id) => modelIds.has(id));
   const openclawSelected =
