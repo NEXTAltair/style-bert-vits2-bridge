@@ -113,6 +113,23 @@ curl -fsS http://127.0.0.1:5000/status
 curl -fsS http://127.0.0.1:5000/models/info
 ```
 
+まとめて切り分ける場合は read-only 診断スクリプトを使います。
+
+```bash
+pnpm run check:sbv2
+pnpm run check:sbv2 -- --base-url http://127.0.0.1:5000 --expect-model valentina01_bright
+```
+
+このスクリプトは以下を確認します。
+
+- OpenClaw config の `messages.tts.providers.style-bert-vits2`
+- `messages.tts.provider` が未指定、または `style-bert-vits2` であること
+- SBV2 の `GET /status`
+- SBV2 の `GET /models/info`
+- `/models/info` に期待するモデル名が含まれること
+
+出力が `GET /status` で失敗する場合は SBV2 server 未起動または `baseUrl` 誤りです。`GET /models/info` だけ失敗する場合は SBV2 API 側のモデルロード状態を確認してください。期待モデルだけが失敗する場合は、SBV2 の `model_assets/`、ロード済みモデル、または OpenClaw の default model 設定がずれています。provider config や selected provider が失敗する場合は OpenClaw config 側の provider 選択ミスです。
+
 OpenClaw 側では runtime inspection で provider registration を確認します。
 
 ```bash
@@ -138,6 +155,18 @@ SBV2_BASE_URL=http://127.0.0.1:5000 pnpm test
 ```
 
 live smoke test は `/status`、`/models/info`、短文 `/voice`、WAV header、invalid model 指定時の失敗を確認します。
+
+### Healthcheck / lifecycle 境界
+
+この bridge は SBV2 FastAPI server manager ではありません。SBV2 server の起動、停止、GPU/backend 選択、モデルファイルの配置、モデルロードは SBV2 側または運用スクリプトの責務です。bridge は設定済みの `baseUrl` に対して `/models/info` と `/voice` を呼び、失敗時に operator が切り分けやすいエラーを返します。
+
+「音声品質が期待と違う」「読み上げ内容が不自然」「fallback provider に切り替わった可能性がある」場合は、次の順で確認します。
+
+1. `pnpm run check:sbv2` で SBV2 server、OpenClaw provider config、期待モデルの有無を確認する。
+2. `openclaw plugins inspect style-bert-vits2-bridge --runtime --json` で `speechProviderIds` に `style-bert-vits2` が含まれることを確認する。
+3. `/models/info` の model / speaker / style と、OpenClaw config の `defaultModelName` / `defaultSpeakerName` / `defaultStyle` が一致していることを確認する。
+4. OpenClaw の debug log で `style-bert-vits2` 以外の provider が選ばれていないか、または SBV2 validation error が出ていないか確認する。
+5. server 未起動、モデル未ロード、provider 選択ミスのどれでもない場合に、読み上げ本文、style、`assist_text`、話速などの品質調整として扱う。
 
 ## 開発
 
