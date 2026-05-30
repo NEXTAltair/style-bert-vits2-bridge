@@ -99,6 +99,18 @@ function normalizeBaseUrl(value) {
   return typeof value === "string" && value.trim() ? value.trim().replace(/\/+$/, "") : undefined;
 }
 
+function asModelId(value) {
+  if (typeof value === "number" && Number.isInteger(value) && value >= 0) {
+    return String(value);
+  }
+
+  if (typeof value === "string" && /^\d+$/.test(value.trim())) {
+    return value.trim();
+  }
+
+  return undefined;
+}
+
 async function fetchJson(baseUrl, path, timeoutMs) {
   const url = new URL(path, baseUrl);
 
@@ -140,10 +152,11 @@ function modelNameFromPath(path) {
 }
 
 function summarizeModelsInfo(value) {
-  const entries = Array.isArray(value)
-    ? value.map((item, index) => [String(index), item])
-    : isRecord(value)
-      ? Object.entries(value)
+  const modelsValue = isRecord(value) && Array.isArray(value.models) ? value.models : value;
+  const entries = Array.isArray(modelsValue)
+    ? modelsValue.map((item, index) => [String(index), item])
+    : isRecord(modelsValue)
+      ? Object.entries(modelsValue)
       : [];
 
   return entries.flatMap(([sourceId, item]) => {
@@ -213,6 +226,9 @@ function printTextReport(report) {
   for (const expected of report.expectedModels) {
     console.log(statusLine(report.presentExpectedModels.includes(expected), `expected model: ${expected}`));
   }
+  for (const expectedId of report.expectedModelIds) {
+    console.log(statusLine(report.presentExpectedModelIds.includes(expectedId), `expected model id: ${expectedId}`));
+  }
 
   console.log(statusLine(report.ok, "overall healthcheck"));
 }
@@ -235,13 +251,23 @@ async function main() {
           normalizeBaseUrl(providerConfig.provider?.defaultModelName),
           normalizeBaseUrl(providerConfig.provider?.modelName),
         ].filter(Boolean);
+  const expectedModelIds =
+    options.expectedModels.length > 0
+      ? []
+      : [
+          asModelId(providerConfig.provider?.defaultModelId),
+          asModelId(providerConfig.provider?.modelId),
+        ].filter(Boolean);
 
-  const effectiveExpectedModels = expectedModels.length ? expectedModels : DEFAULT_EXPECTED_MODELS;
+  const effectiveExpectedModels =
+    expectedModels.length || expectedModelIds.length ? expectedModels : DEFAULT_EXPECTED_MODELS;
   const status = await fetchJson(baseUrl, "/status", options.timeoutMs);
   const modelsInfo = await fetchJson(baseUrl, "/models/info", options.timeoutMs);
   const models = modelsInfo.ok ? summarizeModelsInfo(modelsInfo.body) : [];
   const modelNames = new Set(models.map((model) => model.name));
+  const modelIds = new Set(models.map((model) => String(model.id)));
   const presentExpectedModels = effectiveExpectedModels.filter((name) => modelNames.has(name));
+  const presentExpectedModelIds = expectedModelIds.filter((id) => modelIds.has(id));
   const openclawSelected =
     providerConfig.selectedProvider === undefined || providerConfig.selectedProvider === "style-bert-vits2";
 
@@ -252,7 +278,8 @@ async function main() {
       openclawSelected &&
       status.ok &&
       modelsInfo.ok &&
-      presentExpectedModels.length === effectiveExpectedModels.length,
+      presentExpectedModels.length === effectiveExpectedModels.length &&
+      presentExpectedModelIds.length === expectedModelIds.length,
     baseUrl,
     config: {
       readable: config.ok,
@@ -273,7 +300,9 @@ async function main() {
     },
     models,
     expectedModels: effectiveExpectedModels,
+    expectedModelIds,
     presentExpectedModels,
+    presentExpectedModelIds,
   };
 
   if (options.json) {
