@@ -132,9 +132,8 @@ function asPositiveInteger(value) {
 }
 
 async function fetchJson(baseUrl, path, timeoutMs) {
-  const url = new URL(path, baseUrl);
-
   try {
+    const url = new URL(path, baseUrl);
     const response = await fetch(url, {
       method: "GET",
       signal: AbortSignal.timeout(timeoutMs),
