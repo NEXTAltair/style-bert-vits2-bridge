@@ -2,6 +2,8 @@
 
 import { readFile } from "node:fs/promises";
 import { homedir } from "node:os";
+import { normalizeModelsInfo } from "../dist/sbv2-client.js";
+import { resolveVoiceProfile } from "../dist/voice-resolver.js";
 
 const DEFAULT_BASE_URL = "http://127.0.0.1:5000";
 const DEFAULT_CONFIG_PATH = `${homedir()}/.openclaw/openclaw.json`;
@@ -159,57 +161,37 @@ async function fetchJson(baseUrl, path, timeoutMs) {
   }
 }
 
-function modelNameFromPath(path) {
-  if (typeof path !== "string" || !path.trim()) {
-    return undefined;
-  }
+function summarizeModelsInfo(value) {
+  try {
+    const models = normalizeModelsInfo(value).map((model) => ({
+      id: model.id,
+      sourceId: model.sourceId,
+      name: model.name,
+      speakers: model.speakers.map((speaker) => speaker.name),
+      speakerIds: model.speakers.flatMap((speaker) => {
+        const speakerId = asModelId(speaker.id);
+        return speakerId ? [speakerId] : [];
+      }),
+      styles: model.styles.map((style) => style.name),
+    }));
 
-  const segments = path.split(/[\\/]+/).filter(Boolean);
-  return segments.length >= 2 ? segments.at(-2) : undefined;
+    return { ok: true, models };
+  } catch (error) {
+    return { ok: false, error: error instanceof Error ? error.message : String(error), models: [] };
+  }
 }
 
-function summarizeModelsInfo(value) {
-  const modelsValue = isRecord(value) && Array.isArray(value.models) ? value.models : value;
-  const entries = Array.isArray(modelsValue)
-    ? modelsValue.map((item, index) => [String(index), item])
-    : isRecord(modelsValue)
-      ? Object.entries(modelsValue)
-      : [];
-
-  return entries.flatMap(([sourceId, item]) => {
-    if (!isRecord(item)) {
-      return [];
-    }
-
-    const name =
-      (typeof item.model_name === "string" && item.model_name.trim()) ||
-      (typeof item.modelName === "string" && item.modelName.trim()) ||
-      modelNameFromPath(item.config_path) ||
-      modelNameFromPath(item.configPath) ||
-      modelNameFromPath(item.model_path) ||
-      modelNameFromPath(item.modelPath) ||
-      (typeof item.name === "string" && item.name.trim()) ||
-      sourceId;
-
-    const style2id = isRecord(item.style2id) ? item.style2id : {};
-    const spk2id = isRecord(item.spk2id) ? item.spk2id : {};
-    const id = asModelId(item.id) ?? sourceId;
-    const speakerIds = Object.values(spk2id).flatMap((value) => {
-      const speakerId = asModelId(value);
-      return speakerId ? [speakerId] : [];
+async function validateResolvedVoice(models, providerConfig) {
+  try {
+    const resolved = await resolveVoiceProfile({
+      client: { getModelsInfo: async () => models },
+      providerConfig,
     });
 
-    return [
-      {
-        id,
-        sourceId,
-        name,
-        speakers: Object.keys(spk2id),
-        speakerIds,
-        styles: Object.keys(style2id),
-      },
-    ];
-  });
+    return { ok: true, resolved };
+  } catch (error) {
+    return { ok: false, error: error instanceof Error ? error.message : String(error) };
+  }
 }
 
 function statusLine(ok, message) {
@@ -223,6 +205,7 @@ function printTextReport(report) {
   }
 
   console.log(statusLine(report.openclaw.hasProviderConfig, "provider config: messages.tts.providers.style-bert-vits2"));
+  console.log(statusLine(report.openclaw.hasBaseUrl, "provider baseUrl configured"));
   console.log(statusLine(report.openclaw.selected, `selected provider: ${report.openclaw.selectedProvider ?? "(not set)"}`));
   console.log(`OK  SBV2 baseUrl: ${report.baseUrl}`);
 
@@ -234,6 +217,10 @@ function printTextReport(report) {
   console.log(statusLine(report.modelsInfo.ok, "GET /models/info"));
   if (!report.modelsInfo.ok && report.modelsInfo.error) {
     console.log(`    ${report.modelsInfo.error}`);
+  }
+  console.log(statusLine(report.modelsInfo.normalized, "normalize /models/info"));
+  if (!report.modelsInfo.normalized && report.modelsInfo.normalizeError) {
+    console.log(`    ${report.modelsInfo.normalizeError}`);
   }
 
   if (report.models.length) {
@@ -261,6 +248,10 @@ function printTextReport(report) {
   }
   for (const expected of report.expectedStyles) {
     console.log(statusLine(report.presentExpectedStyles.includes(expected), `expected style: ${expected}`));
+  }
+  console.log(statusLine(report.voice.ok, "resolve configured voice"));
+  if (!report.voice.ok && report.voice.error) {
+    console.log(`    ${report.voice.error}`);
   }
 
   console.log(statusLine(report.ok, "overall healthcheck"));
@@ -305,7 +296,11 @@ async function main() {
     expectedModels.length || expectedModelIds.length ? expectedModels : DEFAULT_EXPECTED_MODELS;
   const status = await fetchJson(baseUrl, "/status", timeoutMs);
   const modelsInfo = await fetchJson(baseUrl, "/models/info", timeoutMs);
-  const models = modelsInfo.ok ? summarizeModelsInfo(modelsInfo.body) : [];
+  const modelsSummary = modelsInfo.ok ? summarizeModelsInfo(modelsInfo.body) : { ok: false, models: [] };
+  const models = modelsSummary.models;
+  const voice = modelsSummary.ok
+    ? await validateResolvedVoice(normalizeModelsInfo(modelsInfo.body), providerConfig.provider ?? {})
+    : { ok: false, error: modelsSummary.error };
   const modelNames = new Set(models.map((model) => model.name));
   const modelIds = new Set(
     models.flatMap((model) => [asModelId(model.id), asModelId(model.sourceId)].filter(Boolean)),
@@ -337,9 +332,12 @@ async function main() {
     ok:
       config.ok &&
       providerConfig.hasProviderConfig &&
+      Boolean(providerBaseUrl) &&
       openclawSelected &&
       status.ok &&
       modelsInfo.ok &&
+      modelsSummary.ok &&
+      voice.ok &&
       presentExpectedModels.length === effectiveExpectedModels.length &&
       presentExpectedModelIds.length === expectedModelIds.length &&
       presentExpectedSpeakers.length === expectedSpeakers.length &&
@@ -354,6 +352,7 @@ async function main() {
     },
     openclaw: {
       hasProviderConfig: providerConfig.hasProviderConfig,
+      hasBaseUrl: Boolean(providerBaseUrl),
       selected: openclawSelected,
       selectedProvider: providerConfig.selectedProvider,
     },
@@ -363,7 +362,10 @@ async function main() {
       status: modelsInfo.status,
       statusText: modelsInfo.statusText,
       error: modelsInfo.error,
+      normalized: modelsSummary.ok,
+      normalizeError: modelsSummary.error,
     },
+    voice,
     models,
     expectedModels: effectiveExpectedModels,
     expectedModelIds,
