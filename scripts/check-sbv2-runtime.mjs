@@ -12,7 +12,7 @@ function parseArgs(argv) {
     configPath: process.env.OPENCLAW_CONFIG ?? DEFAULT_CONFIG_PATH,
     baseUrl: process.env.SBV2_BASE_URL,
     expectedModels: [],
-    timeoutMs: 5_000,
+    timeoutMs: undefined,
     json: false,
   };
 
@@ -99,6 +99,10 @@ function normalizeBaseUrl(value) {
   return typeof value === "string" && value.trim() ? value.trim().replace(/\/+$/, "") : undefined;
 }
 
+function trimToUndefined(value) {
+  return typeof value === "string" && value.trim() ? value.trim() : undefined;
+}
+
 function asModelId(value) {
   if (typeof value === "number" && Number.isInteger(value) && value >= 0) {
     return String(value);
@@ -106,6 +110,19 @@ function asModelId(value) {
 
   if (typeof value === "string" && /^\d+$/.test(value.trim())) {
     return value.trim();
+  }
+
+  return undefined;
+}
+
+function asPositiveInteger(value) {
+  if (typeof value === "number" && Number.isInteger(value) && value > 0) {
+    return value;
+  }
+
+  if (typeof value === "string" && /^\d+$/.test(value.trim())) {
+    const parsed = Number(value.trim());
+    return parsed > 0 ? parsed : undefined;
   }
 
   return undefined;
@@ -177,6 +194,10 @@ function summarizeModelsInfo(value) {
     const style2id = isRecord(item.style2id) ? item.style2id : {};
     const spk2id = isRecord(item.spk2id) ? item.spk2id : {};
     const id = asModelId(item.id) ?? sourceId;
+    const speakerIds = Object.values(spk2id).flatMap((value) => {
+      const speakerId = asModelId(value);
+      return speakerId ? [speakerId] : [];
+    });
 
     return [
       {
@@ -184,6 +205,7 @@ function summarizeModelsInfo(value) {
         sourceId,
         name,
         speakers: Object.keys(spk2id),
+        speakerIds,
         styles: Object.keys(style2id),
       },
     ];
@@ -231,6 +253,15 @@ function printTextReport(report) {
   for (const expectedId of report.expectedModelIds) {
     console.log(statusLine(report.presentExpectedModelIds.includes(expectedId), `expected model id: ${expectedId}`));
   }
+  for (const expected of report.expectedSpeakers) {
+    console.log(statusLine(report.presentExpectedSpeakers.includes(expected), `expected speaker: ${expected}`));
+  }
+  for (const expectedId of report.expectedSpeakerIds) {
+    console.log(statusLine(report.presentExpectedSpeakerIds.includes(expectedId), `expected speaker id: ${expectedId}`));
+  }
+  for (const expected of report.expectedStyles) {
+    console.log(statusLine(report.presentExpectedStyles.includes(expected), `expected style: ${expected}`));
+  }
 
   console.log(statusLine(report.ok, "overall healthcheck"));
 }
@@ -246,13 +277,21 @@ async function main() {
   const providerConfig = getProviderConfig(config.value);
   const providerBaseUrl = normalizeBaseUrl(providerConfig.provider?.baseUrl);
   const baseUrl = normalizeBaseUrl(options.baseUrl) ?? providerBaseUrl ?? DEFAULT_BASE_URL;
+  const timeoutMs = options.timeoutMs ?? asPositiveInteger(providerConfig.provider?.timeoutMs) ?? 5_000;
   const configModelName =
-    normalizeBaseUrl(providerConfig.provider?.defaultModelName) ??
-    normalizeBaseUrl(providerConfig.provider?.modelName);
+    trimToUndefined(providerConfig.provider?.defaultModelName) ??
+    trimToUndefined(providerConfig.provider?.modelName);
   const configModelId =
     configModelName === undefined
       ? asModelId(providerConfig.provider?.defaultModelId) ?? asModelId(providerConfig.provider?.modelId)
       : undefined;
+  const configSpeakerName =
+    trimToUndefined(providerConfig.provider?.defaultSpeakerName) ??
+    trimToUndefined(providerConfig.provider?.speakerName);
+  const configSpeakerId = asModelId(providerConfig.provider?.defaultSpeakerId) ?? asModelId(providerConfig.provider?.speakerId);
+  const configStyle =
+    trimToUndefined(providerConfig.provider?.defaultStyle) ??
+    trimToUndefined(providerConfig.provider?.style);
   const expectedModels =
     options.expectedModels.length > 0
       ? options.expectedModels
@@ -264,8 +303,8 @@ async function main() {
 
   const effectiveExpectedModels =
     expectedModels.length || expectedModelIds.length ? expectedModels : DEFAULT_EXPECTED_MODELS;
-  const status = await fetchJson(baseUrl, "/status", options.timeoutMs);
-  const modelsInfo = await fetchJson(baseUrl, "/models/info", options.timeoutMs);
+  const status = await fetchJson(baseUrl, "/status", timeoutMs);
+  const modelsInfo = await fetchJson(baseUrl, "/models/info", timeoutMs);
   const models = modelsInfo.ok ? summarizeModelsInfo(modelsInfo.body) : [];
   const modelNames = new Set(models.map((model) => model.name));
   const modelIds = new Set(
@@ -273,6 +312,24 @@ async function main() {
   );
   const presentExpectedModels = effectiveExpectedModels.filter((name) => modelNames.has(name));
   const presentExpectedModelIds = expectedModelIds.filter((id) => modelIds.has(id));
+  const targetModels = models.filter(
+    (model) =>
+      effectiveExpectedModels.includes(model.name) ||
+      expectedModelIds.includes(String(model.id)) ||
+      expectedModelIds.includes(String(model.sourceId)),
+  );
+  const expectedSpeakers = [configSpeakerName].filter(Boolean);
+  const expectedSpeakerIds = [configSpeakerId].filter(Boolean);
+  const expectedStyles = [configStyle].filter(Boolean);
+  const presentExpectedSpeakers = expectedSpeakers.filter((speaker) =>
+    targetModels.some((model) => model.speakers.includes(speaker)),
+  );
+  const presentExpectedSpeakerIds = expectedSpeakerIds.filter((speakerId) =>
+    targetModels.some((model) => model.speakerIds.includes(speakerId)),
+  );
+  const presentExpectedStyles = expectedStyles.filter((style) =>
+    targetModels.some((model) => model.styles.includes(style)),
+  );
   const openclawSelected =
     providerConfig.selectedProvider === undefined || providerConfig.selectedProvider === "style-bert-vits2";
 
@@ -284,8 +341,12 @@ async function main() {
       status.ok &&
       modelsInfo.ok &&
       presentExpectedModels.length === effectiveExpectedModels.length &&
-      presentExpectedModelIds.length === expectedModelIds.length,
+      presentExpectedModelIds.length === expectedModelIds.length &&
+      presentExpectedSpeakers.length === expectedSpeakers.length &&
+      presentExpectedSpeakerIds.length === expectedSpeakerIds.length &&
+      presentExpectedStyles.length === expectedStyles.length,
     baseUrl,
+    timeoutMs,
     config: {
       readable: config.ok,
       path: config.path,
@@ -306,8 +367,14 @@ async function main() {
     models,
     expectedModels: effectiveExpectedModels,
     expectedModelIds,
+    expectedSpeakers,
+    expectedSpeakerIds,
+    expectedStyles,
     presentExpectedModels,
     presentExpectedModelIds,
+    presentExpectedSpeakers,
+    presentExpectedSpeakerIds,
+    presentExpectedStyles,
   };
 
   if (options.json) {
