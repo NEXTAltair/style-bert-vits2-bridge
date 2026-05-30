@@ -31,6 +31,19 @@ function formatError(error) {
     const causeText = causeCode || causeMessage ? ` (${[causeCode, causeMessage].filter(Boolean).join(": ")})` : "";
     return `${error.message}${causeText}`;
 }
+function sanitizeUrl(value) {
+    try {
+        const url = new URL(value);
+        url.username = "";
+        url.password = "";
+        url.search = "";
+        url.hash = "";
+        return url.toString().replace(/\/$/, "");
+    }
+    catch {
+        return "<invalid url>";
+    }
+}
 function looksLikeTimeout(error) {
     if (!(error instanceof Error)) {
         return false;
@@ -40,14 +53,16 @@ function looksLikeTimeout(error) {
 }
 function formatRequestError(endpoint, baseUrl, timeoutMs, error) {
     const statusUrl = new URL("/status", baseUrl).toString();
+    const safeBaseUrl = sanitizeUrl(baseUrl);
+    const safeStatusUrl = sanitizeUrl(statusUrl);
     const detail = formatError(error);
     if (looksLikeTimeout(error)) {
-        return new Error(`SBV2 ${endpoint} request timed out after ${timeoutMs}ms for ${baseUrl}. ` +
-            `Check that the SBV2 API responds at ${statusUrl}, or increase timeoutMs. ` +
+        return new Error(`SBV2 ${endpoint} request timed out after ${timeoutMs}ms for ${safeBaseUrl}. ` +
+            `Check that the SBV2 API responds at ${safeStatusUrl}, or increase timeoutMs. ` +
             `Original error: ${detail}`);
     }
-    return new Error(`SBV2 ${endpoint} request failed for ${baseUrl}. ` +
-        `Check that the SBV2 API is running and reachable at ${statusUrl}. ` +
+    return new Error(`SBV2 ${endpoint} request failed for ${safeBaseUrl}. ` +
+        `Check that the SBV2 API is running and reachable at ${safeStatusUrl}. ` +
         `Original error: ${detail}`);
 }
 function truncateErrorBody(value) {

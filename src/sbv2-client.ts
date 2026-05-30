@@ -96,6 +96,19 @@ function formatError(error: unknown): string {
   return `${error.message}${causeText}`;
 }
 
+function sanitizeUrl(value: string): string {
+  try {
+    const url = new URL(value);
+    url.username = "";
+    url.password = "";
+    url.search = "";
+    url.hash = "";
+    return url.toString().replace(/\/$/, "");
+  } catch {
+    return "<invalid url>";
+  }
+}
+
 function looksLikeTimeout(error: unknown): boolean {
   if (!(error instanceof Error)) {
     return false;
@@ -107,19 +120,21 @@ function looksLikeTimeout(error: unknown): boolean {
 
 function formatRequestError(endpoint: string, baseUrl: string, timeoutMs: number, error: unknown): Error {
   const statusUrl = new URL("/status", baseUrl).toString();
+  const safeBaseUrl = sanitizeUrl(baseUrl);
+  const safeStatusUrl = sanitizeUrl(statusUrl);
   const detail = formatError(error);
 
   if (looksLikeTimeout(error)) {
     return new Error(
-      `SBV2 ${endpoint} request timed out after ${timeoutMs}ms for ${baseUrl}. ` +
-        `Check that the SBV2 API responds at ${statusUrl}, or increase timeoutMs. ` +
+      `SBV2 ${endpoint} request timed out after ${timeoutMs}ms for ${safeBaseUrl}. ` +
+        `Check that the SBV2 API responds at ${safeStatusUrl}, or increase timeoutMs. ` +
         `Original error: ${detail}`,
     );
   }
 
   return new Error(
-    `SBV2 ${endpoint} request failed for ${baseUrl}. ` +
-      `Check that the SBV2 API is running and reachable at ${statusUrl}. ` +
+    `SBV2 ${endpoint} request failed for ${safeBaseUrl}. ` +
+      `Check that the SBV2 API is running and reachable at ${safeStatusUrl}. ` +
       `Original error: ${detail}`,
   );
 }
