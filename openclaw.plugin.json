@@ -41,6 +41,7 @@
       "defaultLanguage": { "type": "string", "enum": ["JP", "EN", "ZH"] },
       "defaultAssistText": { "type": "string" },
       "defaultAssistTextWeight": { "type": "number" },
+      "pronunciationReplacementsPath": { "type": "string" },
       "pronunciationReplacements": {
         "type": "object",
         "additionalProperties": { "type": "string" }
@@ -95,6 +96,10 @@
     "defaultSdpRatio": {
       "label": "Default SDP Ratio",
       "placeholder": "0.2"
+    },
+    "pronunciationReplacementsPath": {
+      "label": "Pronunciation Dictionary Path",
+      "placeholder": "~/.openclaw/settings/sbv2-pronunciation.json"
     },
     "defaultLanguage": {
       "label": "Default Language",

@@ -1,6 +1,9 @@
 import { definePluginEntry } from "openclaw/plugin-sdk/plugin-entry";
 import type { SpeechProviderPlugin } from "openclaw/plugin-sdk/speech";
-import { applyPronunciationReplacements } from "./pronunciation.js";
+import {
+  applyPronunciationReplacements,
+  resolvePronunciationReplacements,
+} from "./pronunciation.js";
 import { Sbv2Client } from "./sbv2-client.js";
 import {
   listVoiceProfiles,
@@ -302,8 +305,9 @@ export function buildSbv2SpeechProvider(options: Sbv2SpeechProviderOptions = {})
 
       let audioBuffer: Buffer;
       try {
+        const pronunciationReplacements = resolvePronunciationReplacements(config);
         audioBuffer = await client.synthesize({
-          text: applyPronunciationReplacements(req.text, config.pronunciationReplacements),
+          text: applyPronunciationReplacements(req.text, pronunciationReplacements),
           modelName: resolvedVoice.modelName,
           modelId: resolvedVoice.modelId,
           speakerId: resolvedVoice.speakerId,
