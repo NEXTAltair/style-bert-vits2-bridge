@@ -13,6 +13,10 @@ function asNumber(value) {
     }
     return undefined;
 }
+function asSbv2Language(value) {
+    const language = trimToUndefined(value);
+    return language === "JP" || language === "EN" || language === "ZH" ? language : undefined;
+}
 function clamp(value, min, max) {
     return Math.min(max, Math.max(min, value));
 }
@@ -47,7 +51,75 @@ function normalizeOverrides(overrides) {
     const { voiceId: _voiceId, voice: _voice, ...rest } = overrides ?? {};
     return { ...selectedVoice, ...rest };
 }
-export function buildSbv2SpeechProvider() {
+function sanitizeBaseUrl(value) {
+    try {
+        const url = new URL(value);
+        url.username = "";
+        url.password = "";
+        url.search = "";
+        url.hash = "";
+        return url.toString().replace(/\/$/, "");
+    }
+    catch {
+        return "<invalid baseUrl>";
+    }
+}
+function readVoiceContext(config, overrides) {
+    return {
+        voiceId: trimToUndefined(overrides?.voiceId) ?? trimToUndefined(overrides?.voice),
+        modelName: trimToUndefined(overrides?.modelName) ??
+            trimToUndefined(overrides?.model) ??
+            trimToUndefined(config.defaultModelName) ??
+            trimToUndefined(config.modelName),
+        modelId: asNumber(overrides?.modelId) ?? asNumber(config.defaultModelId) ?? asNumber(config.modelId),
+        speakerName: trimToUndefined(overrides?.speakerName) ??
+            trimToUndefined(overrides?.speaker) ??
+            trimToUndefined(config.defaultSpeakerName) ??
+            trimToUndefined(config.speakerName),
+        speakerId: asNumber(overrides?.speakerId) ??
+            asNumber(config.defaultSpeakerId) ??
+            asNumber(config.speakerId),
+        style: trimToUndefined(overrides?.style) ??
+            trimToUndefined(config.defaultStyle) ??
+            trimToUndefined(config.style),
+        styleWeight: asNumber(overrides?.styleWeight) ??
+            asNumber(config.defaultStyleWeight) ??
+            asNumber(config.styleWeight),
+        length: asNumber(overrides?.length) ??
+            asNumber(config.defaultLength) ??
+            asNumber(config.length),
+        language: asSbv2Language(overrides?.language) ??
+            asSbv2Language(config.defaultLanguage) ??
+            asSbv2Language(config.language),
+    };
+}
+function buildTelemetryMetadata(args) {
+    const { resolvedVoice } = args;
+    return {
+        provider: "style-bert-vits2",
+        baseUrl: sanitizeBaseUrl(args.baseUrl),
+        voiceId: resolvedVoice.voiceId,
+        modelName: resolvedVoice.modelName,
+        modelId: resolvedVoice.modelId,
+        speakerName: resolvedVoice.speakerName,
+        speakerId: resolvedVoice.speakerId,
+        style: resolvedVoice.style,
+        styleWeight: resolvedVoice.styleWeight,
+        length: resolvedVoice.length,
+        language: resolvedVoice.language,
+        outputFormat: "wav",
+        audioBytes: args.audioBytes,
+    };
+}
+function formatTelemetryContext(metadata) {
+    const entries = Object.entries(metadata).filter(([, value]) => value !== undefined);
+    return entries.map(([key, value]) => `${key}=${String(value)}`).join(", ");
+}
+function withTelemetryContext(error, metadata) {
+    const message = error instanceof Error ? error.message : String(error);
+    return new Error(`${message}. SBV2 telemetry context: ${formatTelemetryContext(metadata)}`);
+}
+export function buildSbv2SpeechProvider(options = {}) {
     return {
         id: "style-bert-vits2",
         label: "Style-Bert-VITS2",
@@ -124,29 +196,55 @@ export function buildSbv2SpeechProvider() {
             }
             const timeoutMs = asNumber(config.timeoutMs) ?? req.timeoutMs ?? 30_000;
             const client = new Sbv2Client({ baseUrl, timeoutMs });
-            const resolvedVoice = await resolveVoiceProfile({
-                client,
-                providerConfig: config,
-                providerOverrides: normalizeOverrides(req.providerOverrides),
+            const providerOverrides = normalizeOverrides(req.providerOverrides);
+            let resolvedVoice;
+            try {
+                resolvedVoice = await resolveVoiceProfile({
+                    client,
+                    providerConfig: config,
+                    providerOverrides,
+                });
+            }
+            catch (error) {
+                throw withTelemetryContext(error, buildTelemetryMetadata({
+                    baseUrl,
+                    resolvedVoice: readVoiceContext(config, providerOverrides),
+                }));
+            }
+            let audioBuffer;
+            try {
+                audioBuffer = await client.synthesize({
+                    text: req.text,
+                    modelName: resolvedVoice.modelName,
+                    modelId: resolvedVoice.modelId,
+                    speakerId: resolvedVoice.speakerId,
+                    speakerName: resolvedVoice.speakerName,
+                    style: resolvedVoice.style,
+                    styleWeight: resolvedVoice.styleWeight,
+                    length: resolvedVoice.length,
+                    assistText: resolvedVoice.assistText,
+                    assistTextWeight: resolvedVoice.assistTextWeight,
+                    language: resolvedVoice.language,
+                });
+            }
+            catch (error) {
+                throw withTelemetryContext(error, buildTelemetryMetadata({
+                    baseUrl,
+                    resolvedVoice,
+                }));
+            }
+            const metadata = buildTelemetryMetadata({
+                baseUrl,
+                resolvedVoice,
+                audioBytes: audioBuffer.length,
             });
-            const audioBuffer = await client.synthesize({
-                text: req.text,
-                modelName: resolvedVoice.modelName,
-                modelId: resolvedVoice.modelId,
-                speakerId: resolvedVoice.speakerId,
-                speakerName: resolvedVoice.speakerName,
-                style: resolvedVoice.style,
-                styleWeight: resolvedVoice.styleWeight,
-                length: resolvedVoice.length,
-                assistText: resolvedVoice.assistText,
-                assistTextWeight: resolvedVoice.assistTextWeight,
-                language: resolvedVoice.language,
-            });
+            options.logger?.debug?.("style-bert-vits2 synthesis resolved", metadata);
             return {
                 audioBuffer,
                 outputFormat: "wav",
                 fileExtension: ".wav",
                 voiceCompatible: false,
+                metadata,
             };
         },
     };
@@ -157,7 +255,7 @@ export default definePluginEntry({
     description: "Bridge OpenClaw to a Style-Bert-VITS2 API server for speech generation.",
     register(api) {
         api?.logger?.info?.("register start");
-        api.registerSpeechProvider(buildSbv2SpeechProvider());
+        api.registerSpeechProvider(buildSbv2SpeechProvider({ logger: api?.logger }));
         api?.logger?.info?.("speech provider registered: style-bert-vits2");
     },
 });

@@ -6,7 +6,13 @@
 declare module "openclaw/plugin-sdk/plugin-entry" {
   import type { SpeechProviderPlugin } from "openclaw/plugin-sdk/speech";
 
+  interface OpenClawLogger {
+    debug?: (message: string, data?: unknown) => void;
+    info?: (message: string, data?: unknown) => void;
+  }
+
   interface OpenClawPluginApi {
+    logger?: OpenClawLogger;
     registerSpeechProvider(provider: SpeechProviderPlugin): void;
   }
 
@@ -41,6 +47,7 @@ declare module "openclaw/plugin-sdk/speech" {
     outputFormat: string;
     fileExtension: string;
     voiceCompatible: boolean;
+    metadata?: Record<string, unknown>;
   }
 
   export interface SpeechDirectiveTokenParseContext {

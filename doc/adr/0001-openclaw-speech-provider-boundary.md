@@ -1,7 +1,7 @@
 # ADR 0001: OpenClaw Speech Provider Boundary
 
 - **日付**: 2026-05-28
-- **ステータス**: Proposed
+- **ステータス**: Accepted
 
 ## Context
 
@@ -16,6 +16,8 @@ OpenClaw には TTS runtime、`/tts` directive、Talk mode、media delivery、pl
 ## Decision
 
 OpenClaw は speech request の共通 runtime を担当し、style-bert-vits2-bridge は SBV2 固有の provider implementation を担当する。
+
+この境界は第二段階の provider registration、directive / Talk override、healthcheck、telemetry 実装で採用済みとする。
 
 OpenClaw から bridge に渡す情報は次の通りとする。
 
