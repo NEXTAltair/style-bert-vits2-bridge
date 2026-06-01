@@ -37,6 +37,19 @@ function makeNpy(shape: number[]): Buffer {
   return result;
 }
 
+function makeModelConfig(modelName: string): Record<string, unknown> {
+  return {
+    model_name: modelName,
+    model: {},
+    train: {},
+    data: {
+      num_styles: 1,
+      spk2id: { [modelName]: 0 },
+      style2id: { Neutral: 0 },
+    },
+  };
+}
+
 describe("sbv2-bridge CLI", () => {
   it("detects invocation through a package bin symlink", () => {
     const dir = tempJobsRoot();
@@ -447,7 +460,7 @@ if (args.includes("resample.py")) {
     writeFileSync(path.join(sbv2Root, "configs", "paths.yml"), "assets_root: model_assets\n");
     writeFileSync(
       path.join(modelDir, "config.json"),
-      JSON.stringify({ model_name: "cli-model", data: { spk2id: { "cli-model": 0 }, style2id: { Neutral: 0 } } }),
+      JSON.stringify(makeModelConfig("cli-model")),
     );
     writeFileSync(path.join(modelDir, "style_vectors.npy"), makeNpy([1, 2]));
     writeFileSync(path.join(modelDir, "cli-model_e1_s100.safetensors"), "model");
@@ -501,7 +514,7 @@ if (args.includes("resample.py")) {
     writeFileSync(path.join(sbv2Root, "configs", "paths.yml"), "assets_root: model_assets\n");
     writeFileSync(
       path.join(source, "config.json"),
-      JSON.stringify({ model_name: "external-model", data: { spk2id: { "external-model": 0 }, style2id: { Neutral: 0 } } }),
+      JSON.stringify(makeModelConfig("external-model")),
     );
     writeFileSync(path.join(source, "style_vectors.npy"), makeNpy([1, 2]));
     writeFileSync(path.join(source, "external-model_e1_s100.safetensors"), "model");

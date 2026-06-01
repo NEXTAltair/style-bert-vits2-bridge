@@ -174,12 +174,11 @@ async function inspectModelCandidate(context) {
     else {
         errors.push(...(await validateStyleVectorsFile(styleVectorsPath)));
     }
-    const safetensors = await listSafetensors(sourceDir);
+    const safetensorsResult = await listSafetensors(sourceDir);
+    const safetensors = safetensorsResult.files;
+    errors.push(...safetensorsResult.errors);
     if (!safetensors.length) {
         errors.push(`no non-empty .safetensors files were found in ${sourceDir}`);
-    }
-    if (!configModelName) {
-        warnings.push("config.json does not include model_name; using CLI/model directory name for promotion.");
     }
     return {
         schemaVersion: 1,
@@ -238,20 +237,24 @@ async function listSafetensors(sourceDir) {
     }
     catch (error) {
         if (isNodeError(error) && (error.code === "ENOENT" || error.code === "ENOTDIR"))
-            return [];
+            return { files: [], errors: [] };
         throw error;
     }
     const files = [];
+    const errors = [];
     for (const entry of entries.sort((left, right) => left.localeCompare(right))) {
         if (!entry.endsWith(".safetensors") || entry.startsWith("."))
             continue;
         const filePath = path.join(sourceDir, entry);
-        const fileStat = await nonEmptyFileStat(filePath);
-        if (fileStat) {
+        const fileStat = await stat(filePath);
+        if (!fileStat.isFile() || fileStat.size === 0) {
+            errors.push(`safetensors file is missing or empty: ${filePath}`);
+        }
+        else {
             files.push({ path: filePath, sizeBytes: fileStat.size });
         }
     }
-    return files;
+    return { files, errors };
 }
 async function nonEmptyFileStat(filePath) {
     try {
@@ -320,15 +323,32 @@ function validateConfigShape(value) {
     if (!isRecord(value)) {
         return ["config.json root must be an object"];
     }
+    const errors = [];
+    if (!readConfigModelName(value)) {
+        errors.push("config.json model_name must be a non-empty string");
+    }
+    if (!isRecord(value.model)) {
+        errors.push("config.json is missing model object");
+    }
+    if (!isRecord(value.train)) {
+        errors.push("config.json is missing train object");
+    }
     const data = value.data;
     if (!isRecord(data)) {
-        return ["config.json is missing data object"];
+        errors.push("config.json is missing data object");
+        return errors;
     }
     const spk2id = data.spk2id;
     const style2id = data.style2id;
-    const errors = [];
+    const numStyles = data.num_styles;
     errors.push(...validateIdMap(spk2id, "data.spk2id"));
     errors.push(...validateIdMap(style2id, "data.style2id"));
+    if (typeof numStyles !== "number" || !Number.isInteger(numStyles) || numStyles < 1) {
+        errors.push("config.json data.num_styles must be a positive integer");
+    }
+    else if (isRecord(style2id) && Object.keys(style2id).length !== numStyles) {
+        errors.push("config.json data.num_styles must match data.style2id size");
+    }
     return errors;
 }
 function validateModelName(value) {
@@ -338,16 +358,21 @@ function validateModelName(value) {
 }
 async function validateStyleVectorsFile(filePath) {
     const buffer = await readFile(filePath);
-    const shape = parseNpyShape(buffer);
-    if (!shape) {
+    const header = parseNpyHeader(buffer);
+    if (!header) {
         return [`style_vectors.npy is not a valid NumPy .npy file: ${filePath}`];
     }
+    const { shape } = header;
     if (shape.length < 2 || shape[0] < 1) {
         return [`style_vectors.npy must have at least one 2D style vector row: ${filePath}`];
     }
+    const expectedDataBytes = calculateNpyDataBytes(shape, header.bytesPerElement);
+    if (expectedDataBytes === undefined || buffer.length < header.dataOffset + expectedDataBytes) {
+        return [`style_vectors.npy data is truncated: ${filePath}`];
+    }
     return [];
 }
-function parseNpyShape(buffer) {
+function parseNpyHeader(buffer) {
     if (buffer.length < 10 || buffer.toString("latin1", 0, 6) !== "\x93NUMPY") {
         return undefined;
     }
@@ -364,16 +389,40 @@ function parseNpyShape(buffer) {
         return undefined;
     }
     const header = buffer.toString("latin1", headerStart, headerEnd);
-    const match = header.match(/'shape'\s*:\s*\(([^)]*)\)/);
-    if (!match) {
+    const shapeMatch = header.match(/'shape'\s*:\s*\(([^)]*)\)/);
+    const descrMatch = header.match(/'descr'\s*:\s*'([^']+)'/);
+    if (!shapeMatch || !descrMatch) {
         return undefined;
     }
-    const shape = match[1]
+    const bytesPerElement = parseNpyDescriptorBytes(descrMatch[1]);
+    if (!bytesPerElement) {
+        return undefined;
+    }
+    const shape = shapeMatch[1]
         .split(",")
         .map((part) => part.trim())
         .filter(Boolean)
         .map((part) => Number(part));
-    return shape.length && shape.every((part) => Number.isInteger(part) && part >= 0) ? shape : undefined;
+    return shape.length && shape.every((part) => Number.isInteger(part) && part >= 0)
+        ? { shape, dataOffset: headerEnd, bytesPerElement }
+        : undefined;
+}
+function parseNpyDescriptorBytes(descriptor) {
+    const match = descriptor.match(/^[<>=|]?[A-Za-z](\d+)$/);
+    if (!match)
+        return undefined;
+    const bytes = Number(match[1]);
+    return Number.isInteger(bytes) && bytes > 0 ? bytes : undefined;
+}
+function calculateNpyDataBytes(shape, bytesPerElement) {
+    let count = 1;
+    for (const dimension of shape) {
+        count *= dimension;
+        if (!Number.isSafeInteger(count))
+            return undefined;
+    }
+    const total = count * bytesPerElement;
+    return Number.isSafeInteger(total) ? total : undefined;
 }
 function parseSimpleYamlString(text, key) {
     for (const line of text.split(/\r?\n/)) {
