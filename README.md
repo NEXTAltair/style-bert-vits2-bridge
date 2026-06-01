@@ -225,6 +225,24 @@ openclaw plugins inspect style-bert-vits2-bridge --runtime --json
 
 `openclaw plugins validate` は simple tool plugin metadata 用のコマンドなので、この capability plugin の検証には使いません。
 
+### 制作 job CLI
+
+SBV2 の非再生機能は、まず bridge 内 CLI の `sbv2-bridge` から段階的に実装します。現時点では #31 の土台として、実 SBV2 処理を呼ばない dummy job の manifest / status / log 追跡だけを提供します。
+
+job manifest と log は、agent workspace ではなくユーザー環境の plugin runtime state として保存します。既定の保存先は `~/.openclaw/state/style-bert-vits2-bridge/jobs` です。大きな dataset / model / training artifact の置き場は後続 issue で別途設計します。
+
+```bash
+pnpm run build
+pnpm run sbv2-bridge -- jobs start-dummy --message "job store smoke"
+pnpm run sbv2-bridge -- jobs start-dummy --fail --json
+pnpm run sbv2-bridge -- jobs list
+pnpm run sbv2-bridge -- jobs status <jobId>
+pnpm run sbv2-bridge -- jobs log <jobId> --tail 20
+pnpm run sbv2-bridge -- jobs cancel <jobId> --json
+pnpm run sbv2-bridge -- jobs resume <jobId> --json
+pnpm run sbv2-bridge -- jobs retry <failedJobId> --json
+```
+
 ## バンドルスキル
 
 `skills/voice` — エージェントがモデル・スピーカー・スタイルを選択する際のガイダンスを提供します。`style_weight` の注意点や `assist_text` による感情混合の使い方などを含みます。
