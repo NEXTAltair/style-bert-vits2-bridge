@@ -6,6 +6,7 @@ import { randomUUID } from "node:crypto";
 export const DEFAULT_JOBS_ROOT = "~/.openclaw/state/style-bert-vits2-bridge/jobs";
 
 export type Sbv2JobState = "running" | "succeeded" | "failed" | "cancelled";
+export type Sbv2JobOperation = "dummy" | "dataset-ingest";
 
 export interface Sbv2JobCancellation {
   supported: boolean;
@@ -15,7 +16,7 @@ export interface Sbv2JobCancellation {
 export interface Sbv2JobManifest {
   schemaVersion: 1;
   jobId: string;
-  operation: "dummy";
+  operation: Sbv2JobOperation;
   state: Sbv2JobState;
   createdAt: string;
   startedAt?: string;
@@ -35,6 +36,21 @@ export interface CreateDummyJobOptions {
   message?: string;
   fail?: boolean;
   retriedFrom?: string;
+  now?: () => Date;
+  randomId?: () => string;
+}
+
+export interface CreateJobManifestOptions {
+  jobsRoot?: string;
+  operation: Sbv2JobOperation;
+  state?: Sbv2JobState;
+  inputSummary: Record<string, unknown>;
+  artifactPaths?: string[];
+  progressSummary: string;
+  logLines?: string[];
+  firstError?: string | null;
+  retryable?: boolean;
+  cancellation?: Sbv2JobCancellation;
   now?: () => Date;
   randomId?: () => string;
 }
@@ -98,6 +114,57 @@ function assertSafeJobId(jobId: string): void {
   if (!/^sbv2-job-[a-zA-Z0-9-]+$/.test(jobId)) {
     throw new Error(`Invalid SBV2 job id: ${jobId}`);
   }
+}
+
+export async function createJobManifest(options: CreateJobManifestOptions): Promise<Sbv2JobManifest> {
+  const now = options.now ?? (() => new Date());
+  const randomId = options.randomId ?? randomUUID;
+  const created = now();
+  const jobId = makeJobId(created, randomId);
+  const root = resolveJobsRoot(options.jobsRoot);
+  const jobDir = path.join(root, jobId);
+  const resolvedLogPath = logPath(jobDir);
+  const startedAt = now().toISOString();
+  const finishedAt = now().toISOString();
+  const state = options.state ?? "succeeded";
+
+  await mkdir(jobDir, { recursive: true });
+
+  const manifest: Sbv2JobManifest = {
+    schemaVersion: 1,
+    jobId,
+    operation: options.operation,
+    state,
+    createdAt: created.toISOString(),
+    startedAt,
+    finishedAt,
+    inputSummary: options.inputSummary,
+    outputDir: jobDir,
+    artifactPaths: options.artifactPaths ?? [],
+    logPath: resolvedLogPath,
+    firstError: options.firstError ?? null,
+    retryable: options.retryable ?? false,
+    cancellation: options.cancellation ?? {
+      supported: false,
+      reason: "This job is already complete and cannot be cancelled.",
+    },
+    progressSummary: options.progressSummary,
+  };
+
+  const logLines = options.logLines ?? [options.progressSummary];
+  await writeFile(
+    resolvedLogPath,
+    [
+      `[${startedAt}] ${options.operation} job started`,
+      ...logLines.map((line) => `[${finishedAt}] ${line}`),
+      `[${finishedAt}] ${options.operation} job ${state}`,
+      "",
+    ].join("\n"),
+    "utf8",
+  );
+  await writeFile(manifestPath(jobDir), `${JSON.stringify(manifest, null, 2)}\n`, "utf8");
+
+  return manifest;
 }
 
 export async function createDummyJob(options: CreateDummyJobOptions = {}): Promise<Sbv2JobManifest> {
@@ -221,6 +288,13 @@ export async function resumeJob(jobId: string, options: ReadJobOptions = {}): Pr
 
 export async function retryJob(jobId: string, options: ReadJobOptions = {}): Promise<RetryJobResult> {
   const sourceJob = await readJobManifest(jobId, options);
+  if (sourceJob.operation !== "dummy") {
+    return {
+      ok: false,
+      sourceJob,
+      reason: "Only dummy jobs support retry in this CLI version.",
+    };
+  }
   if (!sourceJob.retryable) {
     return {
       ok: false,
@@ -255,7 +329,7 @@ function isSbv2JobManifest(value: unknown): value is Sbv2JobManifest {
     isRecord(value) &&
     value.schemaVersion === 1 &&
     typeof value.jobId === "string" &&
-    value.operation === "dummy" &&
+    (value.operation === "dummy" || value.operation === "dataset-ingest") &&
     typeof value.state === "string" &&
     typeof value.createdAt === "string" &&
     isRecord(value.inputSummary) &&

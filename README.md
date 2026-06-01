@@ -227,12 +227,27 @@ openclaw plugins inspect style-bert-vits2-bridge --runtime --json
 
 ### 制作 job CLI
 
-SBV2 の非再生機能は、まず bridge 内 CLI の `sbv2-bridge` から段階的に実装します。現時点では #31 の土台として、実 SBV2 処理を呼ばない dummy job の manifest / status / log 追跡だけを提供します。
+SBV2 の非再生機能は、まず bridge 内 CLI の `sbv2-bridge` から段階的に実装します。#31 の土台として job manifest / status / log 追跡を提供し、#32 では音声素材を bridge 管理の ingest workspace にコピーして dataset manifest を作成します。
 
-job manifest と log は、agent workspace ではなくユーザー環境の plugin runtime state として保存します。既定の保存先は `~/.openclaw/state/style-bert-vits2-bridge/jobs` です。大きな dataset / model / training artifact の置き場は後続 issue で別途設計します。
+job manifest と log は、agent workspace ではなくユーザー環境の plugin runtime state として保存します。既定の保存先は `~/.openclaw/state/style-bert-vits2-bridge/jobs` です。
+
+dataset ingest workspace も agent workspace ではなく plugin runtime state に保存します。既定の保存先は `~/.openclaw/state/style-bert-vits2-bridge/datasets` です。#32 の ingest は SBV2 の `Data/<modelName>` や `model_assets/<modelName>` へ直接書き込まず、原本を壊さないコピーと manifest 作成だけを行います。
+
+`modelName` は SBV2 production pipeline 全体のキーとして扱い、後続の slice / transcribe / preprocess / train で同じ値を使います。別の `speakerName`、project 名、dataset 名、利用許諾メモは初期 ingest 入力として扱いません。音声ディレクトリに 2 個以上の直下サブディレクトリがある場合は、SBV2 2.5+ の通常挙動に合わせ、サブディレクトリ名を style group として manifest に記録します。
 
 ```bash
 pnpm run build
+pnpm run sbv2-bridge -- datasets ingest \
+  --model-name valentina_custom \
+  --source /path/to/raw-audio-or-directory \
+  --language ja \
+  --use-jp-extra
+pnpm run sbv2-bridge -- datasets ingest \
+  --model-name multilingual_custom \
+  --source /path/to/raw-audio-or-directory \
+  --language ja \
+  --no-use-jp-extra \
+  --json
 pnpm run sbv2-bridge -- jobs start-dummy --message "job store smoke"
 pnpm run sbv2-bridge -- jobs start-dummy --fail --json
 pnpm run sbv2-bridge -- jobs list
