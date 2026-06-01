@@ -57,5 +57,6 @@ export declare class Sbv2Client {
     private readonly timeoutMs;
     constructor(options: Sbv2ClientOptions);
     getModelsInfo(): Promise<Sbv2ModelInfo[]>;
+    refreshModels(): Promise<Sbv2ModelInfo[]>;
     synthesize(params: Sbv2SynthesizeParams): Promise<Buffer>;
 }

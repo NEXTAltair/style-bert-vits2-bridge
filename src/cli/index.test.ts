@@ -422,4 +422,77 @@ if (args.includes("resample.py")) {
       process.env.PATH = previousPath;
     }
   });
+
+  it("lists and promotes SBV2 model candidates", async () => {
+    const jobsRoot = tempJobsRoot();
+    const sbv2Root = mkdtempSync(path.join(tmpdir(), "sbv2-cli-model-root-"));
+    const modelDir = path.join(sbv2Root, "model_assets", "cli-model");
+    mkdirSync(path.join(sbv2Root, "configs"), { recursive: true });
+    mkdirSync(modelDir, { recursive: true });
+    writeFileSync(path.join(sbv2Root, "configs", "paths.yml"), "assets_root: model_assets\n");
+    writeFileSync(path.join(modelDir, "config.json"), JSON.stringify({ model_name: "cli-model" }));
+    writeFileSync(path.join(modelDir, "style_vectors.npy"), "style");
+    writeFileSync(path.join(modelDir, "cli-model_e1_s100.safetensors"), "model");
+
+    const candidatesOut = createWriter();
+    await expect(
+      runCli(
+        ["models", "candidates", "--sbv2-root", sbv2Root, "--model-name", "cli-model", "--json"],
+        { stdout: candidatesOut.stream, stderr: createWriter().stream },
+      ),
+    ).resolves.toBe(0);
+    const candidates = JSON.parse(candidatesOut.output()) as {
+      candidates: Array<{ modelName: string; promotable: boolean }>;
+    };
+    expect(candidates.candidates[0]).toMatchObject({
+      modelName: "cli-model",
+      promotable: true,
+    });
+
+    const promoteOut = createWriter();
+    await expect(
+      runCli(
+        [
+          "models",
+          "promote",
+          "--jobs-dir",
+          jobsRoot,
+          "--sbv2-root",
+          sbv2Root,
+          "--model-name",
+          "cli-model",
+          "--confirm-model-name",
+          "cli-model",
+          "--json",
+        ],
+        { stdout: promoteOut.stream, stderr: createWriter().stream },
+      ),
+    ).resolves.toBe(0);
+    const promoted = JSON.parse(promoteOut.output()) as {
+      summary: { modelName: string; copied: boolean };
+      job: { operation: string };
+    };
+    expect(promoted.summary).toMatchObject({ modelName: "cli-model", copied: false });
+    expect(promoted.job.operation).toBe("model-promote");
+  });
+
+  it("requires exact confirmation before model promotion", async () => {
+    const stderr = createWriter();
+    await expect(
+      runCli(
+        [
+          "models",
+          "promote",
+          "--sbv2-root",
+          mkdtempSync(path.join(tmpdir(), "sbv2-cli-model-root-")),
+          "--model-name",
+          "cli-model",
+          "--confirm-model-name",
+          "wrong",
+        ],
+        { stdout: createWriter().stream, stderr: stderr.stream },
+      ),
+    ).resolves.toBe(1);
+    expect(stderr.output()).toContain("--confirm-model-name must exactly match cli-model");
+  });
 });

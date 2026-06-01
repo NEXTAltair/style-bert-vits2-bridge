@@ -378,6 +378,27 @@ export class Sbv2Client {
     return normalizeModelsInfo(await response.json());
   }
 
+  async refreshModels(): Promise<Sbv2ModelInfo[]> {
+    const url = new URL("/models/refresh", this.baseUrl);
+
+    let response: Response;
+    try {
+      response = await fetch(url, {
+        method: "POST",
+        signal: AbortSignal.timeout(this.timeoutMs),
+      });
+    } catch (error) {
+      throw formatRequestError("/models/refresh", this.baseUrl, this.timeoutMs, error);
+    }
+
+    if (!response.ok) {
+      const body = await response.text().catch(() => "");
+      throw formatHttpError("/models/refresh", response, body);
+    }
+
+    return normalizeModelsInfo(await response.json());
+  }
+
   async synthesize(params: Sbv2SynthesizeParams): Promise<Buffer> {
     const url = new URL("/voice", this.baseUrl);
 
