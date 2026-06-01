@@ -23,7 +23,7 @@ function writeModelAssets(dir: string, modelName = "test-voice"): void {
     JSON.stringify(makeConfig(modelName)),
   );
   writeFileSync(path.join(dir, "style_vectors.npy"), makeNpy([1, 2]));
-  writeFileSync(path.join(dir, `${modelName}_e1_s100.safetensors`), "model");
+  writeFileSync(path.join(dir, `${modelName}_e1_s100.safetensors`), makeSafetensors());
 }
 
 function makeConfig(modelName = "test-voice", overrides: Record<string, unknown> = {}): Record<string, unknown> {
@@ -52,6 +52,32 @@ function makeNpy(shape: number[]): Buffer {
   result[7] = 0;
   result.writeUInt16LE(paddedHeader.length, 8);
   result.write(paddedHeader, magicLength, "latin1");
+  return result;
+}
+
+function makeNpyWithDescriptor(shape: number[], descriptor: string): Buffer {
+  const shapeText = shape.length === 1 ? `${shape[0]},` : shape.join(", ");
+  const header = `{'descr': '${descriptor}', 'fortran_order': False, 'shape': (${shapeText}), }`;
+  const magicLength = 10;
+  const bytesPerElement = Number(descriptor.match(/(\d+)$/)?.[1] ?? 1);
+  const padding = 16 - ((magicLength + header.length + 1) % 16);
+  const paddedHeader = `${header}${" ".repeat(padding)}\n`;
+  const result = Buffer.alloc(magicLength + paddedHeader.length + shape.reduce((total, value) => total * value, 1) * bytesPerElement);
+  result.write("\x93NUMPY", 0, "latin1");
+  result[6] = 1;
+  result[7] = 0;
+  result.writeUInt16LE(paddedHeader.length, 8);
+  result.write(paddedHeader, magicLength, "latin1");
+  return result;
+}
+
+function makeSafetensors(): Buffer {
+  const payload = Buffer.alloc(4);
+  const header = Buffer.from(JSON.stringify({ weight: { dtype: "F32", shape: [1], data_offsets: [0, payload.length] } }), "utf8");
+  const result = Buffer.alloc(8 + header.length + payload.length);
+  result.writeBigUInt64LE(BigInt(header.length), 0);
+  header.copy(result, 8);
+  payload.copy(result, 8 + header.length);
   return result;
 }
 
@@ -94,7 +120,7 @@ describe("SBV2 model registry", () => {
     const modelDir = path.join(sbv2Root, "model_assets", "test-voice");
     writeFileSync(path.join(modelDir, "config.json"), JSON.stringify(makeConfig("test-voice", { data: {} })));
     writeFileSync(path.join(modelDir, "style_vectors.npy"), makeNpy([1, 2]));
-    writeFileSync(path.join(modelDir, "test-voice_e1_s100.safetensors"), "model");
+    writeFileSync(path.join(modelDir, "test-voice_e1_s100.safetensors"), makeSafetensors());
 
     const [candidate] = await listModelCandidates({ sbv2Root, modelName: "test-voice" });
 
@@ -117,7 +143,7 @@ describe("SBV2 model registry", () => {
       }),
     );
     writeFileSync(path.join(modelDir, "style_vectors.npy"), makeNpy([1, 2]));
-    writeFileSync(path.join(modelDir, "test-voice_e1_s100.safetensors"), "model");
+    writeFileSync(path.join(modelDir, "test-voice_e1_s100.safetensors"), makeSafetensors());
 
     const [candidate] = await listModelCandidates({ sbv2Root, modelName: "test-voice" });
 
@@ -136,7 +162,7 @@ describe("SBV2 model registry", () => {
       JSON.stringify(makeConfig("test-voice", { data: { num_styles: 2, spk2id: { "test-voice": 0 }, style2id: { Neutral: 0 } } })),
     );
     writeFileSync(path.join(modelDir, "style_vectors.npy"), makeNpy([1, 2]));
-    writeFileSync(path.join(modelDir, "test-voice_e1_s100.safetensors"), "model");
+    writeFileSync(path.join(modelDir, "test-voice_e1_s100.safetensors"), makeSafetensors());
 
     const [candidate] = await listModelCandidates({ sbv2Root, modelName: "test-voice" });
 
@@ -152,13 +178,30 @@ describe("SBV2 model registry", () => {
       JSON.stringify(makeConfig("test-voice", { data: { num_styles: 1, spk2id: { "test-voice": "x" }, style2id: { Neutral: "0" } } })),
     );
     writeFileSync(path.join(modelDir, "style_vectors.npy"), makeNpy([1, 2]));
-    writeFileSync(path.join(modelDir, "test-voice_e1_s100.safetensors"), "model");
+    writeFileSync(path.join(modelDir, "test-voice_e1_s100.safetensors"), makeSafetensors());
 
     const [candidate] = await listModelCandidates({ sbv2Root, modelName: "test-voice" });
 
     expect(candidate.promotable).toBe(false);
-    expect(candidate.errors).toContain("config.json data.spk2id values must be finite numbers");
-    expect(candidate.errors).toContain("config.json data.style2id values must be finite numbers");
+    expect(candidate.errors).toContain("config.json data.spk2id values must be safe integers");
+    expect(candidate.errors).toContain("config.json data.style2id values must be safe integers");
+  });
+
+  it("requires integer SBV2 config id map values", async () => {
+    const sbv2Root = createSbv2Root();
+    const modelDir = path.join(sbv2Root, "model_assets", "test-voice");
+    writeFileSync(
+      path.join(modelDir, "config.json"),
+      JSON.stringify(makeConfig("test-voice", { data: { num_styles: 1, spk2id: { "test-voice": 0.5 }, style2id: { Neutral: 0.5 } } })),
+    );
+    writeFileSync(path.join(modelDir, "style_vectors.npy"), makeNpy([1, 2]));
+    writeFileSync(path.join(modelDir, "test-voice_e1_s100.safetensors"), makeSafetensors());
+
+    const [candidate] = await listModelCandidates({ sbv2Root, modelName: "test-voice" });
+
+    expect(candidate.promotable).toBe(false);
+    expect(candidate.errors).toContain("config.json data.spk2id values must be safe integers");
+    expect(candidate.errors).toContain("config.json data.style2id values must be safe integers");
   });
 
   it("reports regular file sources as blocked candidates", async () => {
@@ -193,7 +236,7 @@ describe("SBV2 model registry", () => {
       JSON.stringify(makeConfig()),
     );
     writeFileSync(path.join(modelDir, "style_vectors.npy"), "style");
-    writeFileSync(path.join(modelDir, "test-voice_e1_s100.safetensors"), "model");
+    writeFileSync(path.join(modelDir, "test-voice_e1_s100.safetensors"), makeSafetensors());
 
     const [candidate] = await listModelCandidates({ sbv2Root, modelName: "test-voice" });
 
@@ -209,12 +252,25 @@ describe("SBV2 model registry", () => {
       JSON.stringify(makeConfig()),
     );
     writeFileSync(path.join(modelDir, "style_vectors.npy"), makeNpy([0, 2]));
-    writeFileSync(path.join(modelDir, "test-voice_e1_s100.safetensors"), "model");
+    writeFileSync(path.join(modelDir, "test-voice_e1_s100.safetensors"), makeSafetensors());
 
     const [candidate] = await listModelCandidates({ sbv2Root, modelName: "test-voice" });
 
     expect(candidate.promotable).toBe(false);
     expect(candidate.errors.join("\n")).toContain("style_vectors.npy must have at least one 2D style vector row");
+  });
+
+  it("rejects non-numeric style_vectors.npy dtypes", async () => {
+    const sbv2Root = createSbv2Root();
+    const modelDir = path.join(sbv2Root, "model_assets", "test-voice");
+    writeFileSync(path.join(modelDir, "config.json"), JSON.stringify(makeConfig()));
+    writeFileSync(path.join(modelDir, "style_vectors.npy"), makeNpyWithDescriptor([1, 2], "|S4"));
+    writeFileSync(path.join(modelDir, "test-voice_e1_s100.safetensors"), makeSafetensors());
+
+    const [candidate] = await listModelCandidates({ sbv2Root, modelName: "test-voice" });
+
+    expect(candidate.promotable).toBe(false);
+    expect(candidate.errors.join("\n")).toContain("style_vectors.npy is not a valid NumPy .npy file");
   });
 
   it("requires style_vectors.npy rows to match config data.num_styles", async () => {
@@ -233,7 +289,7 @@ describe("SBV2 model registry", () => {
       ),
     );
     writeFileSync(path.join(modelDir, "style_vectors.npy"), makeNpy([1, 2]));
-    writeFileSync(path.join(modelDir, "test-voice_e1_s100.safetensors"), "model");
+    writeFileSync(path.join(modelDir, "test-voice_e1_s100.safetensors"), makeSafetensors());
 
     const [candidate] = await listModelCandidates({ sbv2Root, modelName: "test-voice" });
 
@@ -247,7 +303,7 @@ describe("SBV2 model registry", () => {
     writeFileSync(path.join(modelDir, "config.json"), JSON.stringify(makeConfig()));
     const completeStyleVectors = makeNpy([1, 2]);
     writeFileSync(path.join(modelDir, "style_vectors.npy"), completeStyleVectors.subarray(0, completeStyleVectors.length - 4));
-    writeFileSync(path.join(modelDir, "test-voice_e1_s100.safetensors"), "model");
+    writeFileSync(path.join(modelDir, "test-voice_e1_s100.safetensors"), makeSafetensors());
 
     const [candidate] = await listModelCandidates({ sbv2Root, modelName: "test-voice" });
 
@@ -266,6 +322,19 @@ describe("SBV2 model registry", () => {
     expect(candidate.promotable).toBe(false);
     expect(candidate.safetensors).toHaveLength(1);
     expect(candidate.errors.join("\n")).toContain("safetensors file is missing or empty");
+  });
+
+  it("rejects corrupt safetensors files", async () => {
+    const sbv2Root = createSbv2Root();
+    const modelDir = path.join(sbv2Root, "model_assets", "test-voice");
+    writeFileSync(path.join(modelDir, "config.json"), JSON.stringify(makeConfig()));
+    writeFileSync(path.join(modelDir, "style_vectors.npy"), makeNpy([1, 2]));
+    writeFileSync(path.join(modelDir, "test-voice_e1_s100.safetensors"), "model");
+
+    const [candidate] = await listModelCandidates({ sbv2Root, modelName: "test-voice" });
+
+    expect(candidate.promotable).toBe(false);
+    expect(candidate.errors.join("\n")).toContain("safetensors file is not valid");
   });
 
   it("records a failed job when promotion source is not a directory", async () => {
@@ -365,7 +434,7 @@ describe("SBV2 model registry", () => {
 
     const targetFile = path.join(sbv2Root, "model_assets", "test-voice", "test-voice_e1_s100.safetensors");
     expect(lstatSync(targetFile).isSymbolicLink()).toBe(false);
-    expect(readFileSync(targetFile, "utf8")).toBe("model");
+    expect(readFileSync(targetFile)).toEqual(makeSafetensors());
   });
 
   it("removes a fresh external-copy target when post-copy verification fails", async () => {

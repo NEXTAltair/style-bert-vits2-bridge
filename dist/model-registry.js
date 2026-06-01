@@ -258,6 +258,11 @@ async function listSafetensors(sourceDir) {
         const fileStat = await stat(filePath);
         if (!fileStat.isFile() || fileStat.size === 0) {
             errors.push(`safetensors file is missing or empty: ${filePath}`);
+            continue;
+        }
+        const validationErrors = await validateSafetensorsFile(filePath);
+        if (validationErrors.length) {
+            errors.push(...validationErrors);
         }
         else {
             files.push({ path: filePath, sizeBytes: fileStat.size });
@@ -436,10 +441,13 @@ function parseNpyHeader(buffer) {
         : undefined;
 }
 function parseNpyDescriptorBytes(descriptor) {
-    const match = descriptor.match(/^[<>=|]?[A-Za-z](\d+)$/);
+    const match = descriptor.match(/^[<>=|]?([A-Za-z])(\d+)$/);
     if (!match)
         return undefined;
-    const bytes = Number(match[1]);
+    const kind = match[1];
+    if (!["f", "i", "u", "c", "b"].includes(kind))
+        return undefined;
+    const bytes = Number(match[2]);
     return Number.isInteger(bytes) && bytes > 0 ? bytes : undefined;
 }
 function calculateNpyDataBytes(shape, bytesPerElement) {
@@ -505,8 +513,99 @@ function validateIdMap(value, name) {
     if (!isRecord(value) || Object.keys(value).length === 0) {
         return [`config.json ${name} must be a non-empty object`];
     }
-    if (!Object.values(value).every((id) => typeof id === "number" && Number.isFinite(id))) {
-        return [`config.json ${name} values must be finite numbers`];
+    if (!Object.values(value).every((id) => typeof id === "number" && Number.isSafeInteger(id))) {
+        return [`config.json ${name} values must be safe integers`];
     }
     return [];
+}
+async function validateSafetensorsFile(filePath) {
+    const buffer = await readFile(filePath);
+    const header = parseSafetensorsHeader(buffer);
+    if (!header) {
+        return [`safetensors file is not valid: ${filePath}`];
+    }
+    return validateSafetensorsHeader(header.value, header.dataBytes, filePath);
+}
+function parseSafetensorsHeader(buffer) {
+    if (buffer.length < 8)
+        return undefined;
+    const headerLengthBig = buffer.readBigUInt64LE(0);
+    if (headerLengthBig > BigInt(Number.MAX_SAFE_INTEGER))
+        return undefined;
+    const headerLength = Number(headerLengthBig);
+    const headerStart = 8;
+    const headerEnd = headerStart + headerLength;
+    if (headerLength < 2 || headerEnd > buffer.length)
+        return undefined;
+    try {
+        const value = JSON.parse(buffer.toString("utf8", headerStart, headerEnd));
+        return { value, dataBytes: buffer.length - headerEnd };
+    }
+    catch {
+        return undefined;
+    }
+}
+function validateSafetensorsHeader(value, dataBytes, filePath) {
+    if (!isRecord(value)) {
+        return [`safetensors header must be an object: ${filePath}`];
+    }
+    const tensorEntries = Object.entries(value).filter(([name]) => name !== "__metadata__");
+    if (!tensorEntries.length) {
+        return [`safetensors file must include at least one tensor: ${filePath}`];
+    }
+    for (const [name, tensor] of tensorEntries) {
+        if (!isRecord(tensor)) {
+            return [`safetensors tensor metadata is invalid for ${name}: ${filePath}`];
+        }
+        const dtype = tensor.dtype;
+        const shape = tensor.shape;
+        const offsets = tensor.data_offsets;
+        const bytesPerElement = typeof dtype === "string" ? safetensorsDtypeBytes(dtype) : undefined;
+        if (!bytesPerElement || !Array.isArray(shape) || !Array.isArray(offsets) || offsets.length !== 2) {
+            return [`safetensors tensor metadata is invalid for ${name}: ${filePath}`];
+        }
+        if (!shape.every((dimension) => typeof dimension === "number" && Number.isSafeInteger(dimension) && dimension >= 0)) {
+            return [`safetensors tensor shape is invalid for ${name}: ${filePath}`];
+        }
+        const [start, end] = offsets;
+        if (typeof start !== "number" ||
+            typeof end !== "number" ||
+            !Number.isSafeInteger(start) ||
+            !Number.isSafeInteger(end) ||
+            start < 0 ||
+            end < start ||
+            end > dataBytes) {
+            return [`safetensors tensor data_offsets are invalid for ${name}: ${filePath}`];
+        }
+        const expectedBytes = calculateNpyDataBytes(shape, bytesPerElement);
+        if (expectedBytes === undefined || end - start !== expectedBytes) {
+            return [`safetensors tensor byte size does not match shape for ${name}: ${filePath}`];
+        }
+    }
+    return [];
+}
+function safetensorsDtypeBytes(dtype) {
+    switch (dtype) {
+        case "F64":
+        case "I64":
+        case "U64":
+            return 8;
+        case "F32":
+        case "I32":
+        case "U32":
+            return 4;
+        case "F16":
+        case "BF16":
+        case "I16":
+        case "U16":
+            return 2;
+        case "F8_E5M2":
+        case "F8_E4M3":
+        case "I8":
+        case "U8":
+        case "BOOL":
+            return 1;
+        default:
+            return undefined;
+    }
 }

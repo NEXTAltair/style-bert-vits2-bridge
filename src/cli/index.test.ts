@@ -50,6 +50,16 @@ function makeModelConfig(modelName: string): Record<string, unknown> {
   };
 }
 
+function makeSafetensors(): Buffer {
+  const payload = Buffer.alloc(4);
+  const header = Buffer.from(JSON.stringify({ weight: { dtype: "F32", shape: [1], data_offsets: [0, payload.length] } }), "utf8");
+  const result = Buffer.alloc(8 + header.length + payload.length);
+  result.writeBigUInt64LE(BigInt(header.length), 0);
+  header.copy(result, 8);
+  payload.copy(result, 8 + header.length);
+  return result;
+}
+
 describe("sbv2-bridge CLI", () => {
   it("detects invocation through a package bin symlink", () => {
     const dir = tempJobsRoot();
@@ -463,7 +473,7 @@ if (args.includes("resample.py")) {
       JSON.stringify(makeModelConfig("cli-model")),
     );
     writeFileSync(path.join(modelDir, "style_vectors.npy"), makeNpy([1, 2]));
-    writeFileSync(path.join(modelDir, "cli-model_e1_s100.safetensors"), "model");
+    writeFileSync(path.join(modelDir, "cli-model_e1_s100.safetensors"), makeSafetensors());
 
     const candidatesOut = createWriter();
     await expect(
@@ -517,7 +527,7 @@ if (args.includes("resample.py")) {
       JSON.stringify(makeModelConfig("external-model")),
     );
     writeFileSync(path.join(source, "style_vectors.npy"), makeNpy([1, 2]));
-    writeFileSync(path.join(source, "external-model_e1_s100.safetensors"), "model");
+    writeFileSync(path.join(source, "external-model_e1_s100.safetensors"), makeSafetensors());
 
     const stdout = createWriter();
     await expect(
