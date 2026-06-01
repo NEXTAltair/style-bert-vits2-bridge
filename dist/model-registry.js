@@ -61,7 +61,12 @@ export async function promoteModel(options) {
             else {
                 cleanupTargetOnFailure = true;
             }
-            await cp(context.sourceDir, context.targetDir, { recursive: true, errorOnExist: true, force: false });
+            await cp(context.sourceDir, context.targetDir, {
+                recursive: true,
+                errorOnExist: true,
+                force: false,
+                dereference: true,
+            });
             copied = true;
             logLines.push(`copied model assets to ${context.targetDir}`);
             candidate = await inspectModelCandidate({ ...context, sourceDir: context.targetDir });
@@ -138,8 +143,12 @@ async function inspectModelCandidate(context) {
     const configJsonPath = path.join(sourceDir, "config.json");
     const styleVectorsPath = path.join(sourceDir, "style_vectors.npy");
     let configModelName;
-    if (!(await pathExists(sourceDir))) {
+    const sourceStat = await directoryStat(sourceDir);
+    if (!sourceStat.exists) {
         errors.push(`candidate directory was not found: ${sourceDir}`);
+    }
+    else if (!sourceStat.isDirectory) {
+        errors.push(`candidate path is not a directory: ${sourceDir}`);
     }
     const configStat = await nonEmptyFileStat(configJsonPath);
     if (!configStat) {
@@ -225,7 +234,7 @@ async function listSafetensors(sourceDir) {
         entries = await readdir(sourceDir);
     }
     catch (error) {
-        if (isNodeError(error) && error.code === "ENOENT")
+        if (isNodeError(error) && (error.code === "ENOENT" || error.code === "ENOTDIR"))
             return [];
         throw error;
     }
@@ -247,7 +256,7 @@ async function nonEmptyFileStat(filePath) {
         return result.isFile() && result.size > 0 ? { size: result.size } : undefined;
     }
     catch (error) {
-        if (isNodeError(error) && error.code === "ENOENT")
+        if (isNodeError(error) && (error.code === "ENOENT" || error.code === "ENOTDIR"))
             return undefined;
         throw error;
     }
@@ -315,12 +324,8 @@ function validateConfigShape(value) {
     const spk2id = data.spk2id;
     const style2id = data.style2id;
     const errors = [];
-    if (!isNonEmptyIdMap(spk2id)) {
-        errors.push("config.json data.spk2id must be a non-empty object");
-    }
-    if (!isNonEmptyIdMap(style2id)) {
-        errors.push("config.json data.style2id must be a non-empty object");
-    }
+    errors.push(...validateIdMap(spk2id, "data.spk2id"));
+    errors.push(...validateIdMap(style2id, "data.style2id"));
     return errors;
 }
 function validateModelName(value) {
@@ -360,12 +365,29 @@ async function pathExists(filePath) {
         throw error;
     }
 }
+async function directoryStat(filePath) {
+    try {
+        const result = await stat(filePath);
+        return { exists: true, isDirectory: result.isDirectory() };
+    }
+    catch (error) {
+        if (isNodeError(error) && error.code === "ENOENT")
+            return { exists: false, isDirectory: false };
+        throw error;
+    }
+}
 function isNodeError(value) {
     return value instanceof Error && "code" in value;
 }
 function isRecord(value) {
     return typeof value === "object" && value !== null && !Array.isArray(value);
 }
-function isNonEmptyIdMap(value) {
-    return isRecord(value) && Object.keys(value).length > 0;
+function validateIdMap(value, name) {
+    if (!isRecord(value) || Object.keys(value).length === 0) {
+        return [`config.json ${name} must be a non-empty object`];
+    }
+    if (!Object.values(value).every((id) => typeof id === "number" && Number.isFinite(id))) {
+        return [`config.json ${name} values must be finite numbers`];
+    }
+    return [];
 }

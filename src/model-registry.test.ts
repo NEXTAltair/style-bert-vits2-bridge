@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -74,6 +74,60 @@ describe("SBV2 model registry", () => {
     expect(candidate.errors).toContain("config.json data.style2id must be a non-empty object");
   });
 
+  it("requires numeric SBV2 config id map values", async () => {
+    const sbv2Root = createSbv2Root();
+    const modelDir = path.join(sbv2Root, "model_assets", "test-voice");
+    writeFileSync(
+      path.join(modelDir, "config.json"),
+      JSON.stringify({ model_name: "test-voice", data: { spk2id: { "test-voice": "x" }, style2id: { Neutral: "0" } } }),
+    );
+    writeFileSync(path.join(modelDir, "style_vectors.npy"), "style");
+    writeFileSync(path.join(modelDir, "test-voice_e1_s100.safetensors"), "model");
+
+    const [candidate] = await listModelCandidates({ sbv2Root, modelName: "test-voice" });
+
+    expect(candidate.promotable).toBe(false);
+    expect(candidate.errors).toContain("config.json data.spk2id values must be finite numbers");
+    expect(candidate.errors).toContain("config.json data.style2id values must be finite numbers");
+  });
+
+  it("reports regular file sources as blocked candidates", async () => {
+    const sbv2Root = tempRoot("sbv2-model-registry-root-");
+    const sourceFile = path.join(tempRoot("sbv2-model-registry-source-"), "candidate.safetensors");
+    writeFileSync(sourceFile, "model");
+
+    const [candidate] = await listModelCandidates({
+      sbv2Root,
+      modelName: "test-voice",
+      sourcePath: sourceFile,
+    });
+
+    expect(candidate.promotable).toBe(false);
+    expect(candidate.errors).toContain(`candidate path is not a directory: ${sourceFile}`);
+  });
+
+  it("records a failed job when promotion source is not a directory", async () => {
+    const sbv2Root = tempRoot("sbv2-model-registry-root-");
+    const jobsRoot = tempRoot("sbv2-model-registry-jobs-");
+    const sourceFile = path.join(tempRoot("sbv2-model-registry-source-"), "candidate.safetensors");
+    writeFileSync(sourceFile, "model");
+
+    await expect(
+      promoteModel({
+        sbv2Root,
+        modelName: "test-voice",
+        sourcePath: sourceFile,
+        confirmModelName: "test-voice",
+        jobsRoot,
+        now: () => new Date("2026-06-01T00:00:00.000Z"),
+        randomId: () => "nondir123",
+      }),
+    ).rejects.toThrow("candidate path is not a directory");
+
+    const manifest = readFileSync(path.join(jobsRoot, "sbv2-job-20260601000000-nondir12", "manifest.json"), "utf8");
+    expect(manifest).toContain('"state": "failed"');
+  });
+
   it("rejects config model_name mismatches", async () => {
     const sbv2Root = createSbv2Root();
     writeModelAssets(path.join(sbv2Root, "model_assets", "test-voice"), "other-voice");
@@ -126,6 +180,30 @@ describe("SBV2 model registry", () => {
     expect(result.summary.copied).toBe(true);
     expect(existsSync(path.join(sbv2Root, "model_assets", "test-voice", "config.json"))).toBe(true);
     expect(existsSync(path.join(sbv2Root, "model_assets", "test-voice", "style_vectors.npy"))).toBe(true);
+  });
+
+  it("dereferences symlinked files when copying an external source", async () => {
+    const sbv2Root = tempRoot("sbv2-model-registry-root-");
+    mkdirSync(path.join(sbv2Root, "configs"), { recursive: true });
+    writeFileSync(path.join(sbv2Root, "configs", "paths.yml"), "assets_root: model_assets\n");
+    const source = tempRoot("sbv2-model-registry-source-");
+    const realFiles = tempRoot("sbv2-model-registry-real-");
+    writeModelAssets(realFiles);
+    symlinkSync(path.join(realFiles, "config.json"), path.join(source, "config.json"));
+    symlinkSync(path.join(realFiles, "style_vectors.npy"), path.join(source, "style_vectors.npy"));
+    symlinkSync(path.join(realFiles, "test-voice_e1_s100.safetensors"), path.join(source, "test-voice_e1_s100.safetensors"));
+
+    await promoteModel({
+      sbv2Root,
+      modelName: "test-voice",
+      sourcePath: source,
+      confirmModelName: "test-voice",
+      jobsRoot: tempRoot("sbv2-model-registry-jobs-"),
+    });
+
+    const targetFile = path.join(sbv2Root, "model_assets", "test-voice", "test-voice_e1_s100.safetensors");
+    expect(lstatSync(targetFile).isSymbolicLink()).toBe(false);
+    expect(readFileSync(targetFile, "utf8")).toBe("model");
   });
 
   it("removes a fresh external-copy target when post-copy verification fails", async () => {
