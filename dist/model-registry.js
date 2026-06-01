@@ -19,6 +19,7 @@ export async function promoteModel(options) {
     const logLines = [`model promotion started for ${context.modelName}`];
     let backupDir = null;
     let copied = false;
+    let cleanupTargetOnFailure = false;
     let candidate = await inspectModelCandidate(context);
     const fail = async (error) => {
         const message = error instanceof Error ? error.message : String(error);
@@ -51,10 +52,14 @@ export async function promoteModel(options) {
                 if (!options.backupExisting) {
                     throw new Error(`SBV2 model assets already exist: ${context.targetDir}`);
                 }
-                backupDir = await makeBackupDir(context.assetsRoot, context.modelName, now());
-                await mkdir(path.dirname(backupDir), { recursive: true });
-                await rename(context.targetDir, backupDir);
+                const pendingBackupDir = await makeBackupDir(context.assetsRoot, context.modelName, now());
+                await mkdir(path.dirname(pendingBackupDir), { recursive: true });
+                await rename(context.targetDir, pendingBackupDir);
+                backupDir = pendingBackupDir;
                 logLines.push(`backed up existing model assets: ${backupDir}`);
+            }
+            else {
+                cleanupTargetOnFailure = true;
             }
             await cp(context.sourceDir, context.targetDir, { recursive: true, errorOnExist: true, force: false });
             copied = true;
@@ -120,6 +125,9 @@ export async function promoteModel(options) {
         if (backupDir) {
             await rollbackBackup(context.targetDir, backupDir, logLines);
         }
+        else if (cleanupTargetOnFailure) {
+            await cleanupCopiedTarget(context.targetDir, logLines);
+        }
         return fail(error);
     }
 }
@@ -144,6 +152,7 @@ async function inspectModelCandidate(context) {
             if (configModelName && configModelName !== context.modelName) {
                 errors.push(`config.json model_name "${configModelName}" does not match "${context.modelName}"`);
             }
+            errors.push(...validateConfigShape(config));
         }
         catch (error) {
             const message = error instanceof Error ? error.message : String(error);
@@ -264,7 +273,15 @@ async function samePath(left, right) {
 }
 async function makeBackupDir(assetsRoot, modelName, now) {
     const stamp = now.toISOString().replace(/[-:.TZ]/g, "").slice(0, 14);
-    return path.join(assetsRoot, ".bridge-backups", `${modelName}-${stamp}`);
+    const base = path.join(assetsRoot, ".bridge-backups", `${modelName}-${stamp}`);
+    if (!(await pathExists(base)))
+        return base;
+    for (let index = 2; index < 1000; index += 1) {
+        const candidate = `${base}-${index}`;
+        if (!(await pathExists(candidate)))
+            return candidate;
+    }
+    throw new Error(`Unable to find an unused backup path for ${modelName}`);
 }
 async function rollbackBackup(targetDir, backupDir, logLines) {
     try {
@@ -276,6 +293,35 @@ async function rollbackBackup(targetDir, backupDir, logLines) {
         const message = error instanceof Error ? error.message : String(error);
         logLines.push(`warning: failed to roll back model assets from ${backupDir}: ${message}`);
     }
+}
+async function cleanupCopiedTarget(targetDir, logLines) {
+    try {
+        await rm(targetDir, { recursive: true, force: true });
+        logLines.push(`removed incomplete promoted model assets: ${targetDir}`);
+    }
+    catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        logLines.push(`warning: failed to remove incomplete model assets ${targetDir}: ${message}`);
+    }
+}
+function validateConfigShape(value) {
+    if (!isRecord(value)) {
+        return ["config.json root must be an object"];
+    }
+    const data = value.data;
+    if (!isRecord(data)) {
+        return ["config.json is missing data object"];
+    }
+    const spk2id = data.spk2id;
+    const style2id = data.style2id;
+    const errors = [];
+    if (!isNonEmptyIdMap(spk2id)) {
+        errors.push("config.json data.spk2id must be a non-empty object");
+    }
+    if (!isNonEmptyIdMap(style2id)) {
+        errors.push("config.json data.style2id must be a non-empty object");
+    }
+    return errors;
 }
 function validateModelName(value) {
     if (!value.trim() || value === "." || value === ".." || /[\\/]/.test(value) || /[\u0000-\u001f]/.test(value)) {
@@ -319,4 +365,7 @@ function isNodeError(value) {
 }
 function isRecord(value) {
     return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+function isNonEmptyIdMap(value) {
+    return isRecord(value) && Object.keys(value).length > 0;
 }

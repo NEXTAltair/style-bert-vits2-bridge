@@ -93,6 +93,7 @@ export async function promoteModel(options: PromoteModelOptions): Promise<Promot
   const logLines: string[] = [`model promotion started for ${context.modelName}`];
   let backupDir: string | null = null;
   let copied = false;
+  let cleanupTargetOnFailure = false;
   let candidate = await inspectModelCandidate(context);
 
   const fail = async (error: unknown): Promise<never> => {
@@ -128,10 +129,13 @@ export async function promoteModel(options: PromoteModelOptions): Promise<Promot
         if (!options.backupExisting) {
           throw new Error(`SBV2 model assets already exist: ${context.targetDir}`);
         }
-        backupDir = await makeBackupDir(context.assetsRoot, context.modelName, now());
-        await mkdir(path.dirname(backupDir), { recursive: true });
-        await rename(context.targetDir, backupDir);
+        const pendingBackupDir = await makeBackupDir(context.assetsRoot, context.modelName, now());
+        await mkdir(path.dirname(pendingBackupDir), { recursive: true });
+        await rename(context.targetDir, pendingBackupDir);
+        backupDir = pendingBackupDir;
         logLines.push(`backed up existing model assets: ${backupDir}`);
+      } else {
+        cleanupTargetOnFailure = true;
       }
       await cp(context.sourceDir, context.targetDir, { recursive: true, errorOnExist: true, force: false });
       copied = true;
@@ -197,6 +201,8 @@ export async function promoteModel(options: PromoteModelOptions): Promise<Promot
   } catch (error) {
     if (backupDir) {
       await rollbackBackup(context.targetDir, backupDir, logLines);
+    } else if (cleanupTargetOnFailure) {
+      await cleanupCopiedTarget(context.targetDir, logLines);
     }
     return fail(error);
   }
@@ -224,6 +230,7 @@ async function inspectModelCandidate(context: ModelContext): Promise<Sbv2ModelCa
       if (configModelName && configModelName !== context.modelName) {
         errors.push(`config.json model_name "${configModelName}" does not match "${context.modelName}"`);
       }
+      errors.push(...validateConfigShape(config));
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       errors.push(`config.json is not valid JSON: ${message}`);
@@ -351,7 +358,13 @@ async function samePath(left: string, right: string): Promise<boolean> {
 
 async function makeBackupDir(assetsRoot: string, modelName: string, now: Date): Promise<string> {
   const stamp = now.toISOString().replace(/[-:.TZ]/g, "").slice(0, 14);
-  return path.join(assetsRoot, ".bridge-backups", `${modelName}-${stamp}`);
+  const base = path.join(assetsRoot, ".bridge-backups", `${modelName}-${stamp}`);
+  if (!(await pathExists(base))) return base;
+  for (let index = 2; index < 1000; index += 1) {
+    const candidate = `${base}-${index}`;
+    if (!(await pathExists(candidate))) return candidate;
+  }
+  throw new Error(`Unable to find an unused backup path for ${modelName}`);
 }
 
 async function rollbackBackup(targetDir: string, backupDir: string, logLines: string[]): Promise<void> {
@@ -363,6 +376,36 @@ async function rollbackBackup(targetDir: string, backupDir: string, logLines: st
     const message = error instanceof Error ? error.message : String(error);
     logLines.push(`warning: failed to roll back model assets from ${backupDir}: ${message}`);
   }
+}
+
+async function cleanupCopiedTarget(targetDir: string, logLines: string[]): Promise<void> {
+  try {
+    await rm(targetDir, { recursive: true, force: true });
+    logLines.push(`removed incomplete promoted model assets: ${targetDir}`);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    logLines.push(`warning: failed to remove incomplete model assets ${targetDir}: ${message}`);
+  }
+}
+
+function validateConfigShape(value: unknown): string[] {
+  if (!isRecord(value)) {
+    return ["config.json root must be an object"];
+  }
+  const data = value.data;
+  if (!isRecord(data)) {
+    return ["config.json is missing data object"];
+  }
+  const spk2id = data.spk2id;
+  const style2id = data.style2id;
+  const errors: string[] = [];
+  if (!isNonEmptyIdMap(spk2id)) {
+    errors.push("config.json data.spk2id must be a non-empty object");
+  }
+  if (!isNonEmptyIdMap(style2id)) {
+    errors.push("config.json data.style2id must be a non-empty object");
+  }
+  return errors;
 }
 
 function validateModelName(value: string): void {
@@ -408,4 +451,8 @@ function isNodeError(value: unknown): value is NodeJS.ErrnoException {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function isNonEmptyIdMap(value: unknown): boolean {
+  return isRecord(value) && Object.keys(value).length > 0;
 }

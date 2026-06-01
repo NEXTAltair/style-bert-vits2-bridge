@@ -430,7 +430,10 @@ if (args.includes("resample.py")) {
     mkdirSync(path.join(sbv2Root, "configs"), { recursive: true });
     mkdirSync(modelDir, { recursive: true });
     writeFileSync(path.join(sbv2Root, "configs", "paths.yml"), "assets_root: model_assets\n");
-    writeFileSync(path.join(modelDir, "config.json"), JSON.stringify({ model_name: "cli-model" }));
+    writeFileSync(
+      path.join(modelDir, "config.json"),
+      JSON.stringify({ model_name: "cli-model", data: { spk2id: { "cli-model": 0 }, style2id: { Neutral: 0 } } }),
+    );
     writeFileSync(path.join(modelDir, "style_vectors.npy"), "style");
     writeFileSync(path.join(modelDir, "cli-model_e1_s100.safetensors"), "model");
 
@@ -474,6 +477,42 @@ if (args.includes("resample.py")) {
     };
     expect(promoted.summary).toMatchObject({ modelName: "cli-model", copied: false });
     expect(promoted.job.operation).toBe("model-promote");
+  });
+
+  it("passes --source through when listing model candidates", async () => {
+    const sbv2Root = mkdtempSync(path.join(tmpdir(), "sbv2-cli-model-root-"));
+    const source = mkdtempSync(path.join(tmpdir(), "sbv2-cli-model-source-"));
+    mkdirSync(path.join(sbv2Root, "configs"), { recursive: true });
+    writeFileSync(path.join(sbv2Root, "configs", "paths.yml"), "assets_root: model_assets\n");
+    writeFileSync(
+      path.join(source, "config.json"),
+      JSON.stringify({ model_name: "external-model", data: { spk2id: { "external-model": 0 }, style2id: { Neutral: 0 } } }),
+    );
+    writeFileSync(path.join(source, "style_vectors.npy"), "style");
+    writeFileSync(path.join(source, "external-model_e1_s100.safetensors"), "model");
+
+    const stdout = createWriter();
+    await expect(
+      runCli(
+        [
+          "models",
+          "candidates",
+          "--sbv2-root",
+          sbv2Root,
+          "--model-name",
+          "external-model",
+          "--source",
+          source,
+          "--json",
+        ],
+        { stdout: stdout.stream, stderr: createWriter().stream },
+      ),
+    ).resolves.toBe(0);
+
+    const result = JSON.parse(stdout.output()) as {
+      candidates: Array<{ sourceDir: string; promotable: boolean }>;
+    };
+    expect(result.candidates[0]).toMatchObject({ sourceDir: source, promotable: true });
   });
 
   it("requires exact confirmation before model promotion", async () => {

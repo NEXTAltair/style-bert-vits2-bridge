@@ -402,6 +402,7 @@ export async function runCli(argv: string[], io: CliIO = {}): Promise<number> {
           manifestPath: options.manifestPath,
           sbv2Root: options.sbv2Root,
           modelName: options.modelName,
+          sourcePath: options.sourceAudioPath,
         });
         if (options.json) {
           printJson(stdout, { ok: true, candidates });
