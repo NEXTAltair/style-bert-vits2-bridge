@@ -1,10 +1,11 @@
 import { randomUUID } from "node:crypto";
-import { cp, mkdir, readdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
+import { cp, lstat, mkdir, open, readdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import path from "node:path";
 import { createJobManifest } from "./jobs.js";
 import { readDatasetManifest } from "./datasets.js";
 import { Sbv2Client } from "./sbv2-client.js";
+const MAX_SAFETENSORS_HEADER_BYTES = 100 * 1024 * 1024;
 export async function listModelCandidates(options) {
     const context = await resolveModelContext(options);
     return [await inspectModelCandidate(context)];
@@ -189,6 +190,9 @@ async function inspectModelCandidate(context) {
     if (!safetensors.length) {
         errors.push(`no non-empty .safetensors files were found in ${sourceDir}`);
     }
+    if (!(await samePath(sourceDir, context.targetDir))) {
+        errors.push(...(await validateSourceSymlinks(sourceDir)));
+    }
     return {
         schemaVersion: 1,
         candidateId: `${context.modelName}:${path.basename(sourceDir)}`,
@@ -264,7 +268,7 @@ async function listSafetensors(sourceDir) {
             errors.push(`safetensors file is missing or empty: ${filePath}`);
             continue;
         }
-        const validationErrors = await validateSafetensorsFile(filePath);
+        const validationErrors = await validateSafetensorsFile(filePath, fileStat.size);
         if (validationErrors.length) {
             errors.push(...validationErrors);
         }
@@ -535,6 +539,51 @@ async function fileStatOrError(filePath) {
         throw error;
     }
 }
+async function validateSourceSymlinks(sourceDir) {
+    const errors = [];
+    await collectUnexpectedSymlinkErrors(sourceDir, sourceDir, errors);
+    return errors;
+}
+async function collectUnexpectedSymlinkErrors(rootDir, currentDir, errors) {
+    let entries;
+    try {
+        entries = await readdir(currentDir);
+    }
+    catch (error) {
+        if (isNodeError(error) && (error.code === "ENOENT" || error.code === "ENOTDIR"))
+            return;
+        throw error;
+    }
+    for (const entry of entries) {
+        if (entry === "." || entry === "..")
+            continue;
+        const filePath = path.join(currentDir, entry);
+        const relativePath = path.relative(rootDir, filePath);
+        let fileStat;
+        try {
+            fileStat = await lstat(filePath);
+        }
+        catch (error) {
+            if (isNodeError(error))
+                continue;
+            throw error;
+        }
+        if (fileStat.isSymbolicLink()) {
+            if (!isAllowedArtifactSymlink(relativePath)) {
+                errors.push(`unexpected symlink in model source: ${filePath}`);
+            }
+            continue;
+        }
+        if (fileStat.isDirectory()) {
+            await collectUnexpectedSymlinkErrors(rootDir, filePath, errors);
+        }
+    }
+}
+function isAllowedArtifactSymlink(relativePath) {
+    if (relativePath.includes(path.sep))
+        return false;
+    return relativePath === "config.json" || relativePath === "style_vectors.npy" || relativePath.endsWith(".safetensors");
+}
 function isZeroBasedPermutation(values, size) {
     const ids = values.filter((value) => typeof value === "number" && Number.isSafeInteger(value) && value >= 0);
     if (ids.length !== values.length)
@@ -542,31 +591,44 @@ function isZeroBasedPermutation(values, size) {
     const unique = new Set(ids);
     return unique.size === size && ids.every((id) => id < size);
 }
-async function validateSafetensorsFile(filePath) {
-    const buffer = await readFile(filePath);
-    const header = parseSafetensorsHeader(buffer);
+async function validateSafetensorsFile(filePath, fileSize) {
+    const header = await readSafetensorsHeader(filePath, fileSize);
     if (!header) {
         return [`safetensors file is not valid: ${filePath}`];
     }
     return validateSafetensorsHeader(header.value, header.dataBytes, filePath);
 }
-function parseSafetensorsHeader(buffer) {
-    if (buffer.length < 8)
+async function readSafetensorsHeader(filePath, fileSize) {
+    if (fileSize < 8)
         return undefined;
-    const headerLengthBig = buffer.readBigUInt64LE(0);
-    if (headerLengthBig > BigInt(Number.MAX_SAFE_INTEGER))
-        return undefined;
-    const headerLength = Number(headerLengthBig);
-    const headerStart = 8;
-    const headerEnd = headerStart + headerLength;
-    if (headerLength < 2 || headerEnd > buffer.length)
-        return undefined;
+    const file = await open(filePath, "r");
     try {
-        const value = JSON.parse(buffer.toString("utf8", headerStart, headerEnd));
-        return { value, dataBytes: buffer.length - headerEnd };
+        const lengthBuffer = Buffer.alloc(8);
+        const lengthRead = await file.read(lengthBuffer, 0, lengthBuffer.length, 0);
+        if (lengthRead.bytesRead !== lengthBuffer.length)
+            return undefined;
+        const headerLengthBig = lengthBuffer.readBigUInt64LE(0);
+        if (headerLengthBig > BigInt(Number.MAX_SAFE_INTEGER))
+            return undefined;
+        const headerLength = Number(headerLengthBig);
+        const headerStart = 8;
+        const headerEnd = headerStart + headerLength;
+        if (headerLength < 2 || headerLength > MAX_SAFETENSORS_HEADER_BYTES || headerEnd > fileSize)
+            return undefined;
+        const headerBuffer = Buffer.alloc(headerLength);
+        const headerRead = await file.read(headerBuffer, 0, headerLength, headerStart);
+        if (headerRead.bytesRead !== headerLength)
+            return undefined;
+        try {
+            const value = JSON.parse(headerBuffer.toString("utf8"));
+            return { value, dataBytes: fileSize - headerEnd };
+        }
+        catch {
+            return undefined;
+        }
     }
-    catch {
-        return undefined;
+    finally {
+        await file.close();
     }
 }
 function validateSafetensorsHeader(value, dataBytes, filePath) {
@@ -577,6 +639,7 @@ function validateSafetensorsHeader(value, dataBytes, filePath) {
     if (!tensorEntries.length) {
         return [`safetensors file must include at least one tensor: ${filePath}`];
     }
+    const ranges = [];
     for (const [name, tensor] of tensorEntries) {
         if (!isRecord(tensor)) {
             return [`safetensors tensor metadata is invalid for ${name}: ${filePath}`];
@@ -605,6 +668,18 @@ function validateSafetensorsHeader(value, dataBytes, filePath) {
         if (expectedBytes === undefined || end - start !== expectedBytes) {
             return [`safetensors tensor byte size does not match shape for ${name}: ${filePath}`];
         }
+        ranges.push({ start, end });
+    }
+    ranges.sort((left, right) => left.start - right.start);
+    let nextOffset = 0;
+    for (const range of ranges) {
+        if (range.start !== nextOffset) {
+            return [`safetensors tensor data_offsets must cover payload contiguously: ${filePath}`];
+        }
+        nextOffset = range.end;
+    }
+    if (nextOffset !== dataBytes) {
+        return [`safetensors tensor data_offsets must cover payload contiguously: ${filePath}`];
     }
     return [];
 }

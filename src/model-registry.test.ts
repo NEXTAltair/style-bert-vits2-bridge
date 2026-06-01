@@ -1,4 +1,4 @@
-import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, symlinkSync, writeFileSync } from "node:fs";
+import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, symlinkSync, truncateSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -74,10 +74,13 @@ function makeNpyWithDescriptor(shape: number[], descriptor: string): Buffer {
 function makeSafetensors(): Buffer {
   const payload = Buffer.alloc(4);
   const header = Buffer.from(JSON.stringify({ weight: { dtype: "F32", shape: [1], data_offsets: [0, payload.length] } }), "utf8");
-  const result = Buffer.alloc(8 + header.length + payload.length);
+  return makeSafetensorsWithHeader(header, payload.length);
+}
+
+function makeSafetensorsWithHeader(header: Buffer, payloadLength: number): Buffer {
+  const result = Buffer.alloc(8 + header.length + payloadLength);
   result.writeBigUInt64LE(BigInt(header.length), 0);
   header.copy(result, 8);
-  payload.copy(result, 8 + header.length);
   return result;
 }
 
@@ -377,6 +380,66 @@ describe("SBV2 model registry", () => {
     expect(candidate.errors.join("\n")).toContain("safetensors file is not valid");
   });
 
+  it.each([
+    [
+      "overlapping",
+      {
+        left: { dtype: "F32", shape: [1], data_offsets: [0, 4] },
+        right: { dtype: "F32", shape: [1], data_offsets: [0, 4] },
+      },
+      4,
+    ],
+    [
+      "gapped",
+      {
+        left: { dtype: "F32", shape: [1], data_offsets: [0, 4] },
+        right: { dtype: "F32", shape: [1], data_offsets: [8, 12] },
+      },
+      12,
+    ],
+    [
+      "trailing",
+      {
+        left: { dtype: "F32", shape: [1], data_offsets: [0, 4] },
+      },
+      8,
+    ],
+  ])("rejects %s safetensors payload offsets", async (_caseName, headerValue, payloadLength) => {
+    const sbv2Root = createSbv2Root();
+    const modelDir = path.join(sbv2Root, "model_assets", "test-voice");
+    writeFileSync(path.join(modelDir, "config.json"), JSON.stringify(makeConfig()));
+    writeFileSync(path.join(modelDir, "style_vectors.npy"), makeNpy([1, 2]));
+    writeFileSync(
+      path.join(modelDir, "test-voice_e1_s100.safetensors"),
+      makeSafetensorsWithHeader(Buffer.from(JSON.stringify(headerValue), "utf8"), payloadLength),
+    );
+
+    const [candidate] = await listModelCandidates({ sbv2Root, modelName: "test-voice" });
+
+    expect(candidate.promotable).toBe(false);
+    expect(candidate.errors.join("\n")).toContain("safetensors tensor data_offsets must cover payload contiguously");
+  });
+
+  it("validates safetensors headers without materializing large payloads", async () => {
+    const sbv2Root = createSbv2Root();
+    const modelDir = path.join(sbv2Root, "model_assets", "test-voice");
+    const payloadLength = 64 * 1024 * 1024;
+    const header = Buffer.from(
+      JSON.stringify({ weight: { dtype: "U8", shape: [payloadLength], data_offsets: [0, payloadLength] } }),
+      "utf8",
+    );
+    const checkpointPath = path.join(modelDir, "test-voice_e1_s100.safetensors");
+    writeFileSync(path.join(modelDir, "config.json"), JSON.stringify(makeConfig()));
+    writeFileSync(path.join(modelDir, "style_vectors.npy"), makeNpy([1, 2]));
+    writeFileSync(checkpointPath, makeSafetensorsWithHeader(header, 0));
+    truncateSync(checkpointPath, 8 + header.length + payloadLength);
+
+    const [candidate] = await listModelCandidates({ sbv2Root, modelName: "test-voice" });
+
+    expect(candidate.promotable).toBe(true);
+    expect(candidate.safetensors[0].sizeBytes).toBe(8 + header.length + payloadLength);
+  });
+
   it("reports broken safetensors symlinks as candidate errors", async () => {
     const sbv2Root = createSbv2Root();
     const modelDir = path.join(sbv2Root, "model_assets", "test-voice");
@@ -489,6 +552,28 @@ describe("SBV2 model registry", () => {
     const targetFile = path.join(sbv2Root, "model_assets", "test-voice", "test-voice_e1_s100.safetensors");
     expect(lstatSync(targetFile).isSymbolicLink()).toBe(false);
     expect(readFileSync(targetFile)).toEqual(makeSafetensors());
+  });
+
+  it("rejects unrelated symlinks in an external source before copying", async () => {
+    const sbv2Root = tempRoot("sbv2-model-registry-root-");
+    mkdirSync(path.join(sbv2Root, "configs"), { recursive: true });
+    writeFileSync(path.join(sbv2Root, "configs", "paths.yml"), "assets_root: model_assets\n");
+    const source = tempRoot("sbv2-model-registry-source-");
+    const outside = tempRoot("sbv2-model-registry-outside-");
+    writeModelAssets(source);
+    symlinkSync(outside, path.join(source, "extra-cache"));
+
+    await expect(
+      promoteModel({
+        sbv2Root,
+        modelName: "test-voice",
+        sourcePath: source,
+        confirmModelName: "test-voice",
+        jobsRoot: tempRoot("sbv2-model-registry-jobs-"),
+      }),
+    ).rejects.toThrow("unexpected symlink in model source");
+
+    expect(existsSync(path.join(sbv2Root, "model_assets", "test-voice"))).toBe(false);
   });
 
   it("removes a fresh external-copy target when post-copy verification fails", async () => {
