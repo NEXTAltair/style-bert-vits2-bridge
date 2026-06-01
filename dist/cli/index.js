@@ -2,6 +2,7 @@
 import { realpathSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { ingestDataset, prepareDataset } from "../datasets.js";
+import { createTrainingPlan, parseTrainingStage, runTraining, } from "../training.js";
 import { cancelJob, createDummyJob, listJobManifests, readJobManifest, resumeJob, retryJob, tailJobLog, } from "../jobs.js";
 export function isCliEntrypoint(moduleUrl, argvPath) {
     if (!argvPath)
@@ -22,6 +23,8 @@ function printHelp(stdout) {
 Commands:
   datasets ingest        Copy audio into a bridge dataset workspace and write a manifest.
   datasets prepare       Run SBV2 slice/transcribe for an ingested dataset manifest.
+  training plan          Print an agent-safe SBV2 training plan without running it.
+  training run           Run selected SBV2 training stages and write a job.
   jobs start-dummy         Start a synchronous dummy job and write manifest/log files.
   jobs list                List known jobs.
   jobs status <jobId>      Print a job manifest.
@@ -36,7 +39,21 @@ Options:
   --sbv2-root <path>       SBV2 repository root. Defaults to SBV2_ROOT, then ~/src/Style-Bert-VITS2.
   --model-name <name>      SBV2 model name for dataset ingest.
   --source <path>          Source audio file or directory for dataset ingest.
-  --manifest <path>        Dataset manifest path for datasets prepare.
+  --manifest <path>        Dataset manifest path for datasets prepare/training.
+  --stage <name>           Training stage. May be repeated. Defaults to all stages.
+  --batch-size <n>         Training batch size. Default 2.
+  --epochs <n>             Training epochs. Default 100.
+  --save-every-steps <n>   Checkpoint/eval interval. Default 1000.
+  --log-interval <n>       Training log interval. Default 200.
+  --num-processes <n>      Resample/style_gen process count.
+  --val-per-lang <n>       Validation rows per speaker/language field. Default 0.
+  --yomi-error <mode>      Yomi error mode: raise, skip, or use. Default skip.
+  --normalize              Normalize audio during resample.
+  --trim                   Trim leading/trailing silence during resample.
+  --skip-default-style     Pass --skip_default_style to train_ms.
+  --speedup                Pass --speedup to train_ms.
+  --not-use-custom-batch-sampler
+                            Pass --not_use_custom_batch_sampler to train_ms.
   --language <ja|en|zh>    Dataset language for downstream SBV2 transcription/preprocess.
   --use-jp-extra           Record JP-Extra as enabled for downstream production.
   --no-use-jp-extra        Record JP-Extra as disabled for downstream production.
@@ -53,14 +70,27 @@ function parsePositiveInteger(value, name) {
     }
     return parsed;
 }
+function parseNonNegativeInteger(value, name) {
+    const parsed = Number(value);
+    if (!Number.isInteger(parsed) || parsed < 0) {
+        throw new Error(`${name} must be a non-negative integer`);
+    }
+    return parsed;
+}
 function parseLanguage(value) {
     if (value === "ja" || value === "en" || value === "zh") {
         return value;
     }
     throw new Error("--language must be one of: ja, en, zh");
 }
+function parseYomiError(value) {
+    if (value === "raise" || value === "skip" || value === "use") {
+        return value;
+    }
+    throw new Error("--yomi-error must be one of: raise, skip, use");
+}
 function parseArgs(argv) {
-    const options = { json: false, fail: false };
+    const options = { json: false, fail: false, trainingSettings: {} };
     const positional = [];
     for (let index = 0; index < argv.length; index += 1) {
         const arg = argv[index];
@@ -101,6 +131,53 @@ function parseArgs(argv) {
             options.manifestPath = next;
             index += 1;
         }
+        else if (arg === "--stage" && next) {
+            options.stages = [...(options.stages ?? []), parseTrainingStage(next)];
+            index += 1;
+        }
+        else if (arg === "--batch-size" && next) {
+            options.trainingSettings.batchSize = parsePositiveInteger(next, "--batch-size");
+            index += 1;
+        }
+        else if (arg === "--epochs" && next) {
+            options.trainingSettings.epochs = parsePositiveInteger(next, "--epochs");
+            index += 1;
+        }
+        else if (arg === "--save-every-steps" && next) {
+            options.trainingSettings.saveEverySteps = parsePositiveInteger(next, "--save-every-steps");
+            index += 1;
+        }
+        else if (arg === "--log-interval" && next) {
+            options.trainingSettings.logInterval = parsePositiveInteger(next, "--log-interval");
+            index += 1;
+        }
+        else if (arg === "--num-processes" && next) {
+            options.trainingSettings.numProcesses = parsePositiveInteger(next, "--num-processes");
+            index += 1;
+        }
+        else if (arg === "--val-per-lang" && next) {
+            options.trainingSettings.valPerLang = parseNonNegativeInteger(next, "--val-per-lang");
+            index += 1;
+        }
+        else if (arg === "--yomi-error" && next) {
+            options.trainingSettings.yomiError = parseYomiError(next);
+            index += 1;
+        }
+        else if (arg === "--normalize") {
+            options.trainingSettings.normalize = true;
+        }
+        else if (arg === "--trim") {
+            options.trainingSettings.trim = true;
+        }
+        else if (arg === "--skip-default-style") {
+            options.trainingSettings.skipDefaultStyle = true;
+        }
+        else if (arg === "--speedup") {
+            options.trainingSettings.speedup = true;
+        }
+        else if (arg === "--not-use-custom-batch-sampler") {
+            options.trainingSettings.notUseCustomBatchSampler = true;
+        }
         else if (arg === "--language" && next) {
             options.language = parseLanguage(next);
             index += 1;
@@ -129,8 +206,8 @@ function parseArgs(argv) {
     if (positional[0] === "help") {
         return { group: "help", command: "help", args: [], options };
     }
-    if (positional[0] !== "jobs" && positional[0] !== "datasets") {
-        throw new Error("Expected command group: jobs or datasets");
+    if (positional[0] !== "jobs" && positional[0] !== "datasets" && positional[0] !== "training") {
+        throw new Error("Expected command group: jobs, datasets, or training");
     }
     return {
         group: positional[0],
@@ -218,6 +295,49 @@ export async function runCli(argv, io = {}) {
                 writeLine(stdout, `log: ${result.job.logPath}`);
             }
             return 0;
+        }
+        if (parsed.group === "training") {
+            const planOptions = {
+                manifestPath: requireString(options.manifestPath, "--manifest"),
+                stages: options.stages,
+                settings: options.trainingSettings,
+            };
+            if (parsed.command === "plan") {
+                const result = await createTrainingPlan(planOptions);
+                if (options.json) {
+                    printJson(stdout, { ok: true, dataset: result.dataset, plan: result.plan });
+                }
+                else {
+                    writeLine(stdout, `training plan ${result.plan.workspaceId}`);
+                    writeLine(stdout, `model: ${result.plan.modelName}`);
+                    writeLine(stdout, `stages: ${result.plan.stages.join(", ")}`);
+                    writeLine(stdout, `dataset: ${result.plan.datasetPath}`);
+                    writeLine(stdout, `assets: ${result.plan.assetsPath}`);
+                    for (const command of result.plan.commands) {
+                        writeLine(stdout, `${command.stage}: ${command.executable} ${command.args.join(" ")}`);
+                    }
+                }
+                return 0;
+            }
+            if (parsed.command === "run") {
+                const result = await runTraining({
+                    ...planOptions,
+                    jobsRoot: options.jobsRoot,
+                });
+                if (options.json) {
+                    printJson(stdout, { ok: true, dataset: result.dataset, plan: result.plan, job: result.job });
+                }
+                else {
+                    writeLine(stdout, `training run ${result.plan.workspaceId}`);
+                    writeLine(stdout, `model: ${result.plan.modelName}`);
+                    writeLine(stdout, `stages: ${result.plan.stages.join(", ")}`);
+                    writeLine(stdout, `summary: ${result.job.outputDir}/summary.json`);
+                    writeLine(stdout, `job: ${result.job.jobId}`);
+                    writeLine(stdout, `log: ${result.job.logPath}`);
+                }
+                return 0;
+            }
+            throw new Error(`Unknown training command: ${parsed.command}`);
         }
         if (parsed.command === "start-dummy") {
             const job = await createDummyJob({

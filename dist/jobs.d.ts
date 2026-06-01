@@ -1,6 +1,6 @@
 export declare const DEFAULT_JOBS_ROOT = "~/.openclaw/state/style-bert-vits2-bridge/jobs";
 export type Sbv2JobState = "running" | "succeeded" | "failed" | "cancelled";
-export type Sbv2JobOperation = "dummy" | "dataset-ingest" | "dataset-prepare";
+export type Sbv2JobOperation = "dummy" | "dataset-ingest" | "dataset-prepare" | "training-run";
 export interface Sbv2JobCancellation {
     supported: boolean;
     reason?: string;

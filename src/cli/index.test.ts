@@ -312,4 +312,114 @@ if (args.includes("transcribe.py")) {
       process.env.PATH = previousPath;
     }
   });
+
+  it("prints a training plan and runs a selected training stage", async () => {
+    const jobsRoot = tempJobsRoot();
+    const datasetsRoot = mkdtempSync(path.join(tmpdir(), "sbv2-cli-datasets-"));
+    const sbv2Root = mkdtempSync(path.join(tmpdir(), "sbv2-cli-root-"));
+    const sourceRoot = mkdtempSync(path.join(tmpdir(), "sbv2-cli-source-"));
+    const binRoot = mkdtempSync(path.join(tmpdir(), "sbv2-cli-bin-"));
+    mkdirSync(path.join(sbv2Root, "configs"), { recursive: true });
+    writeFileSync(path.join(sbv2Root, "configs", "paths.yml"), "dataset_root: Data\nassets_root: model_assets\n");
+    writeFileSync(path.join(sbv2Root, "resample.py"), "");
+    writeFileSync(path.join(sourceRoot, "a.wav"), "a");
+    const fakeUv = path.join(binRoot, "uv");
+    writeFileSync(
+      fakeUv,
+      `#!/usr/bin/env node
+const fs = require("node:fs");
+const path = require("node:path");
+const args = process.argv.slice(2);
+if (args.includes("resample.py")) {
+  const output = args[args.indexOf("-o") + 1];
+  fs.mkdirSync(output, { recursive: true });
+}
+`,
+    );
+    chmodSync(fakeUv, 0o755);
+
+    const ingestOut = createWriter();
+    await expect(
+      runCli(
+        [
+          "datasets",
+          "ingest",
+          "--jobs-dir",
+          jobsRoot,
+          "--datasets-dir",
+          datasetsRoot,
+          "--sbv2-root",
+          sbv2Root,
+          "--model-name",
+          "cli-train",
+          "--source",
+          sourceRoot,
+          "--language",
+          "ja",
+          "--use-jp-extra",
+          "--json",
+        ],
+        { stdout: ingestOut.stream, stderr: createWriter().stream },
+      ),
+    ).resolves.toBe(0);
+    const ingested = JSON.parse(ingestOut.output()) as {
+      dataset: { manifestPath: string };
+    };
+    mkdirSync(path.join(sbv2Root, "Data", "cli-train", "raw"), { recursive: true });
+    writeFileSync(path.join(sbv2Root, "Data", "cli-train", "raw", "a-0.wav"), "a");
+    writeFileSync(path.join(sbv2Root, "Data", "cli-train", "esd.list"), "a-0.wav|cli-train|JP|こんにちは\n");
+
+    const planOut = createWriter();
+    await expect(
+      runCli(
+        [
+          "training",
+          "plan",
+          "--manifest",
+          ingested.dataset.manifestPath,
+          "--stage",
+          "resample",
+          "--batch-size",
+          "4",
+          "--json",
+        ],
+        { stdout: planOut.stream, stderr: createWriter().stream },
+      ),
+    ).resolves.toBe(0);
+    const planned = JSON.parse(planOut.output()) as {
+      plan: { stages: string[]; settings: { batchSize: number } };
+    };
+    expect(planned.plan.stages).toEqual(["resample"]);
+    expect(planned.plan.settings.batchSize).toBe(4);
+
+    const previousPath = process.env.PATH;
+    process.env.PATH = `${binRoot}:${previousPath ?? ""}`;
+    try {
+      const runOut = createWriter();
+      await expect(
+        runCli(
+          [
+            "training",
+            "run",
+            "--jobs-dir",
+            jobsRoot,
+            "--manifest",
+            ingested.dataset.manifestPath,
+            "--stage",
+            "resample",
+            "--json",
+          ],
+          { stdout: runOut.stream, stderr: createWriter().stream },
+        ),
+      ).resolves.toBe(0);
+      const ran = JSON.parse(runOut.output()) as {
+        job: { operation: string };
+        plan: { stages: string[] };
+      };
+      expect(ran.job.operation).toBe("training-run");
+      expect(ran.plan.stages).toEqual(["resample"]);
+    } finally {
+      process.env.PATH = previousPath;
+    }
+  });
 });
