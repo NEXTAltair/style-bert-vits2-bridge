@@ -6,6 +6,14 @@ export declare const DEFAULT_TRANSCRIPTION_MODEL = "litagin/anime-whisper";
 export declare const DEFAULT_TRANSCRIPTION_BATCH_SIZE = 16;
 export declare const DEFAULT_YOMI_ERROR = "skip";
 export declare const DEFAULT_NOT_USE_CUSTOM_BATCH_SAMPLER = false;
+export declare const DEFAULT_SLICE_MIN_SEC = 2;
+export declare const DEFAULT_SLICE_MAX_SEC = 12;
+export declare const DEFAULT_SLICE_MIN_SILENCE_DUR_MS = 700;
+export declare const DEFAULT_SLICE_NUM_PROCESSES = 3;
+export declare const DEFAULT_TRANSCRIPTION_FASTER_WHISPER_MODEL = "large-v3";
+export declare const DEFAULT_TRANSCRIPTION_COMPUTE_TYPE = "bfloat16";
+export declare const DEFAULT_TRANSCRIPTION_NUM_BEAMS = 1;
+export declare const DEFAULT_TRANSCRIPTION_INITIAL_PROMPT = "";
 export type Sbv2DatasetLanguage = "ja" | "en" | "zh";
 export type Sbv2DatasetStyleMode = "neutral" | "directory";
 export interface Sbv2AudioProbe {
@@ -77,6 +85,46 @@ export interface IngestDatasetResult {
     dataset: Sbv2DatasetManifest;
     job: Sbv2JobManifest;
 }
+export interface Sbv2DatasetPrepareSummary {
+    schemaVersion: 1;
+    workspaceId: string;
+    modelName: string;
+    rawDir: string;
+    esdListPath: string;
+    rawWavCount: number;
+    esdLineCount: number;
+    styleGroups: Sbv2DatasetStyleGroup[];
+    missingAudioReferences: string[];
+    untranscribedWavs: string[];
+    warnings: string[];
+    commands: {
+        executable: string;
+        args: string[];
+        cwd: string;
+    }[];
+}
+export interface PrepareDatasetCommandResult {
+    stdout?: string;
+    stderr?: string;
+}
+export interface PrepareDatasetCommandOptions {
+    cwd: string;
+}
+export type PrepareDatasetCommandRunner = (executable: string, args: string[], options: PrepareDatasetCommandOptions) => Promise<PrepareDatasetCommandResult>;
+export interface PrepareDatasetOptions {
+    manifestPath: string;
+    jobsRoot?: string;
+    commandRunner?: PrepareDatasetCommandRunner;
+    now?: () => Date;
+    randomId?: () => string;
+}
+export interface PrepareDatasetResult {
+    dataset: Sbv2DatasetManifest;
+    summary: Sbv2DatasetPrepareSummary;
+    job: Sbv2JobManifest;
+}
 export declare function resolveDatasetsRoot(value: string | undefined): string;
 export declare function resolveSbv2Root(value: string | undefined): string;
 export declare function ingestDataset(options: IngestDatasetOptions): Promise<IngestDatasetResult>;
+export declare function readDatasetManifest(filePath: string): Promise<Sbv2DatasetManifest>;
+export declare function prepareDataset(options: PrepareDatasetOptions): Promise<PrepareDatasetResult>;

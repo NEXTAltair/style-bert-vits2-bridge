@@ -177,6 +177,33 @@ SBV2_BASE_URL=http://127.0.0.1:5000 pnpm test
 
 live smoke test は `/status`、`/models/info`、短文 `/voice`、WAV header、invalid model 指定時の失敗を確認します。
 
+## モデル作成用データセット
+
+bridge は SBV2 の GUI でいう「データセット作成」タブ相当の素材準備を CLI から実行できます。まず音声を bridge workspace に取り込みます。
+
+```bash
+sbv2-bridge datasets ingest \
+  --model-name my_voice \
+  --source /path/to/audio-or-directory \
+  --language ja \
+  --use-jp-extra \
+  --json
+```
+
+出力された `dataset.manifestPath` を使って、SBV2 側の slice と transcription を実行します。
+
+```bash
+sbv2-bridge datasets prepare \
+  --manifest /path/to/manifest.json \
+  --json
+```
+
+`datasets prepare` は SBV2 root で `uv run python slice.py ...` と `uv run python transcribe.py ...` を呼び、`Data/<modelName>/raw` と `Data/<modelName>/esd.list` を作成します。文字起こしは `litagin/anime-whisper`、batch size 16、初期プロンプト空文字を既定にします。
+
+サブディレクトリごとに音声を置いた場合、その相対構造は SBV2 の `raw/` に渡されるため、style ごとの素材分けに使えます。既存の `Data/<modelName>/raw`、`Data/<modelName>/esd.list`、`model_assets/<modelName>` がある場合は上書きせず失敗します。
+
+この段階で行う品質確認は `esd.list` と raw wav の対応、speaker/language/text の軽量検証までです。SBV2 の auto preprocess、`resample`、`preprocess_text`、`bert_gen`、`style_gen`、学習、モデルマージは別工程として扱います。
+
 ### Healthcheck / lifecycle 境界
 
 この bridge は SBV2 FastAPI server manager ではありません。SBV2 server の起動、停止、GPU/backend 選択、モデルファイルの配置、モデルロードは SBV2 側または運用スクリプトの責務です。bridge は設定済みの `baseUrl` に対して `/models/info` と `/voice` を呼び、失敗時に operator が切り分けやすいエラーを返します。

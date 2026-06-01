@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
 import { createReadStream } from "node:fs";
-import { copyFile, mkdir, readdir, stat, writeFile } from "node:fs/promises";
+import { copyFile, mkdir, readdir, readFile, stat, writeFile } from "node:fs/promises";
 import { execFile } from "node:child_process";
 import { homedir } from "node:os";
 import path from "node:path";
@@ -14,6 +14,14 @@ export const DEFAULT_TRANSCRIPTION_MODEL = "litagin/anime-whisper";
 export const DEFAULT_TRANSCRIPTION_BATCH_SIZE = 16;
 export const DEFAULT_YOMI_ERROR = "skip";
 export const DEFAULT_NOT_USE_CUSTOM_BATCH_SAMPLER = false;
+export const DEFAULT_SLICE_MIN_SEC = 2;
+export const DEFAULT_SLICE_MAX_SEC = 12;
+export const DEFAULT_SLICE_MIN_SILENCE_DUR_MS = 700;
+export const DEFAULT_SLICE_NUM_PROCESSES = 3;
+export const DEFAULT_TRANSCRIPTION_FASTER_WHISPER_MODEL = "large-v3";
+export const DEFAULT_TRANSCRIPTION_COMPUTE_TYPE = "bfloat16";
+export const DEFAULT_TRANSCRIPTION_NUM_BEAMS = 1;
+export const DEFAULT_TRANSCRIPTION_INITIAL_PROMPT = "";
 const SUPPORTED_AUDIO_EXTENSIONS = new Set([".wav", ".flac", ".mp3", ".ogg", ".opus", ".m4a"]);
 function resolveUserPath(value) {
     if (value === "~") {
@@ -63,6 +71,9 @@ async function pathExists(filePath) {
         }
         throw error;
     }
+}
+function normalizeRelativePath(filePath) {
+    return filePath.split(path.sep).join("/");
 }
 async function collectDirectoryFiles(root, current = root) {
     const entries = await readdir(current, { withFileTypes: true });
@@ -278,6 +289,255 @@ export async function ingestDataset(options) {
         randomId,
     });
     return { dataset, job };
+}
+export async function readDatasetManifest(filePath) {
+    const resolvedPath = resolveUserPath(filePath);
+    const parsed = JSON.parse(await readFile(resolvedPath, "utf8"));
+    if (!isSbv2DatasetManifest(parsed)) {
+        throw new Error(`Invalid SBV2 dataset manifest: ${resolvedPath}`);
+    }
+    return parsed;
+}
+export async function prepareDataset(options) {
+    const manifestPath = resolveUserPath(options.manifestPath);
+    const dataset = await readDatasetManifest(manifestPath);
+    const runner = options.commandRunner ?? runSbv2Command;
+    const now = options.now ?? (() => new Date());
+    const randomId = options.randomId ?? randomUUID;
+    const rawDir = path.join(dataset.datasetPath, "raw");
+    const esdListPath = path.join(dataset.datasetPath, "esd.list");
+    const scriptPaths = [path.join(dataset.sbv2Root, "slice.py"), path.join(dataset.sbv2Root, "transcribe.py")];
+    const executedCommands = [];
+    const logLines = [`dataset prepare started for ${dataset.modelName}`];
+    const fail = async (error) => {
+        const message = error instanceof Error ? error.message : String(error);
+        await createJobManifest({
+            jobsRoot: options.jobsRoot,
+            operation: "dataset-prepare",
+            state: "failed",
+            inputSummary: {
+                workspaceId: dataset.workspaceId,
+                modelName: dataset.modelName,
+                datasetManifestPath: manifestPath,
+            },
+            artifactPaths: [manifestPath],
+            firstError: message,
+            retryable: false,
+            progressSummary: `Dataset prepare failed for ${dataset.modelName}.`,
+            logLines: [...logLines, message],
+            now,
+            randomId,
+        });
+        throw error;
+    };
+    try {
+        assertLanguage(dataset.language);
+        validateModelName(dataset.modelName);
+        if (!(await pathExists(dataset.originalsDir))) {
+            throw new Error(`Dataset originals directory was not found: ${dataset.originalsDir}`);
+        }
+        for (const scriptPath of scriptPaths) {
+            if (!(await pathExists(scriptPath))) {
+                throw new Error(`Required SBV2 script was not found: ${scriptPath}`);
+            }
+        }
+        if (await pathExists(rawDir)) {
+            throw new Error(`SBV2 raw dataset already exists: ${rawDir}`);
+        }
+        if (await pathExists(esdListPath)) {
+            throw new Error(`SBV2 esd.list already exists: ${esdListPath}`);
+        }
+        if (await pathExists(dataset.assetsPath)) {
+            throw new Error(`SBV2 model assets already exist: ${dataset.assetsPath}`);
+        }
+        const sliceArgs = [
+            "run",
+            "python",
+            "slice.py",
+            "--model_name",
+            dataset.modelName,
+            "--input_dir",
+            dataset.originalsDir,
+            "--min_sec",
+            String(DEFAULT_SLICE_MIN_SEC),
+            "--max_sec",
+            String(DEFAULT_SLICE_MAX_SEC),
+            "--min_silence_dur_ms",
+            String(DEFAULT_SLICE_MIN_SILENCE_DUR_MS),
+            "--num_processes",
+            String(DEFAULT_SLICE_NUM_PROCESSES),
+        ];
+        await runAndLogCommand(runner, "uv", sliceArgs, dataset.sbv2Root, executedCommands, logLines);
+        const transcribeArgs = [
+            "run",
+            "python",
+            "transcribe.py",
+            "--model_name",
+            dataset.modelName,
+            "--model",
+            DEFAULT_TRANSCRIPTION_FASTER_WHISPER_MODEL,
+            "--compute_type",
+            DEFAULT_TRANSCRIPTION_COMPUTE_TYPE,
+            "--language",
+            dataset.language,
+            "--initial_prompt",
+            DEFAULT_TRANSCRIPTION_INITIAL_PROMPT,
+            "--num_beams",
+            String(DEFAULT_TRANSCRIPTION_NUM_BEAMS),
+            "--use_hf_whisper",
+            "--hf_repo_id",
+            DEFAULT_TRANSCRIPTION_MODEL,
+            "--batch_size",
+            String(DEFAULT_TRANSCRIPTION_BATCH_SIZE),
+        ];
+        await runAndLogCommand(runner, "uv", transcribeArgs, dataset.sbv2Root, executedCommands, logLines);
+        const summary = await buildPrepareSummary(dataset, rawDir, esdListPath, executedCommands);
+        const job = await createJobManifest({
+            jobsRoot: options.jobsRoot,
+            operation: "dataset-prepare",
+            inputSummary: {
+                workspaceId: dataset.workspaceId,
+                modelName: dataset.modelName,
+                datasetManifestPath: manifestPath,
+                rawDir,
+                esdListPath,
+            },
+            artifactPaths: [manifestPath, rawDir, esdListPath],
+            progressSummary: `Dataset prepare completed for ${dataset.modelName}.`,
+            logLines: [
+                ...logLines,
+                `raw wav files: ${summary.rawWavCount}`,
+                `esd.list lines: ${summary.esdLineCount}`,
+                `dataset prepare succeeded for ${dataset.modelName}`,
+            ],
+            now,
+            randomId,
+        });
+        const summaryPath = path.join(job.outputDir, "summary.json");
+        await writeFile(summaryPath, `${JSON.stringify(summary, null, 2)}\n`, "utf8");
+        const updatedJob = {
+            ...job,
+            artifactPaths: [...job.artifactPaths, summaryPath],
+        };
+        await writeFile(path.join(job.outputDir, "manifest.json"), `${JSON.stringify(updatedJob, null, 2)}\n`, "utf8");
+        return { dataset, summary, job: updatedJob };
+    }
+    catch (error) {
+        return fail(error);
+    }
+}
+async function runSbv2Command(executable, args, options) {
+    const result = await execFileAsync(executable, args, {
+        cwd: options.cwd,
+        maxBuffer: 20 * 1024 * 1024,
+    });
+    return {
+        stdout: result.stdout,
+        stderr: result.stderr,
+    };
+}
+async function runAndLogCommand(runner, executable, args, cwd, commands, logLines) {
+    commands.push({ executable, args, cwd });
+    logLines.push(`running: ${executable} ${args.join(" ")}`);
+    const result = await runner(executable, args, { cwd });
+    if (result.stdout?.trim()) {
+        logLines.push(result.stdout.trim());
+    }
+    if (result.stderr?.trim()) {
+        logLines.push(result.stderr.trim());
+    }
+}
+async function buildPrepareSummary(dataset, rawDir, esdListPath, commands) {
+    const rawFiles = (await collectDirectoryFiles(rawDir))
+        .filter((file) => path.extname(file).toLowerCase() === ".wav")
+        .map((file) => normalizeRelativePath(path.relative(rawDir, file)))
+        .sort((left, right) => left.localeCompare(right));
+    if (!rawFiles.length) {
+        throw new Error(`No sliced WAV files were generated in ${rawDir}`);
+    }
+    const esdText = await readFile(esdListPath, "utf8").catch((error) => {
+        if (isNodeError(error) && error.code === "ENOENT") {
+            throw new Error(`SBV2 esd.list was not generated: ${esdListPath}`);
+        }
+        throw error;
+    });
+    const esdLines = esdText.split(/\r?\n/).filter((line) => line.trim().length > 0);
+    if (!esdLines.length) {
+        throw new Error(`SBV2 esd.list is empty: ${esdListPath}`);
+    }
+    const rawSet = new Set(rawFiles);
+    const transcribed = new Set();
+    const missingAudioReferences = [];
+    const warnings = [...dataset.warnings];
+    for (const [index, line] of esdLines.entries()) {
+        const parts = line.split("|");
+        if (parts.length < 4) {
+            warnings.push(`esd.list line ${index + 1} does not have four pipe-delimited fields`);
+            continue;
+        }
+        const [audioRelativePath, speakerName, languageId, text] = parts;
+        const normalizedAudioPath = normalizeRelativePath(audioRelativePath.trim());
+        transcribed.add(normalizedAudioPath);
+        if (!rawSet.has(normalizedAudioPath)) {
+            missingAudioReferences.push(normalizedAudioPath);
+        }
+        if (speakerName !== dataset.modelName) {
+            warnings.push(`esd.list line ${index + 1} speaker is ${speakerName}, expected ${dataset.modelName}`);
+        }
+        const expectedLanguageId = toSbv2LanguageId(dataset.language);
+        if (languageId !== expectedLanguageId) {
+            warnings.push(`esd.list line ${index + 1} language is ${languageId}, expected ${expectedLanguageId}`);
+        }
+        if (!text.trim()) {
+            warnings.push(`esd.list line ${index + 1} has empty transcription text`);
+        }
+    }
+    const untranscribedWavs = rawFiles.filter((file) => !transcribed.has(file));
+    if (missingAudioReferences.length) {
+        warnings.push(`${missingAudioReferences.length} esd.list audio reference(s) were not found under raw`);
+    }
+    if (untranscribedWavs.length) {
+        warnings.push(`${untranscribedWavs.length} raw WAV file(s) were not listed in esd.list`);
+    }
+    return {
+        schemaVersion: 1,
+        workspaceId: dataset.workspaceId,
+        modelName: dataset.modelName,
+        rawDir,
+        esdListPath,
+        rawWavCount: rawFiles.length,
+        esdLineCount: esdLines.length,
+        styleGroups: dataset.styleGroups,
+        missingAudioReferences,
+        untranscribedWavs,
+        warnings,
+        commands,
+    };
+}
+function toSbv2LanguageId(language) {
+    if (language === "ja")
+        return "JP";
+    if (language === "en")
+        return "EN";
+    return "ZH";
+}
+function isSbv2DatasetManifest(value) {
+    if (!isRecord(value)) {
+        return false;
+    }
+    return (value.schemaVersion === 1 &&
+        typeof value.workspaceId === "string" &&
+        typeof value.modelName === "string" &&
+        (value.language === "ja" || value.language === "en" || value.language === "zh") &&
+        typeof value.useJpExtra === "boolean" &&
+        typeof value.originalsDir === "string" &&
+        typeof value.manifestPath === "string" &&
+        typeof value.sbv2Root === "string" &&
+        typeof value.datasetPath === "string" &&
+        typeof value.assetsPath === "string" &&
+        Array.isArray(value.files) &&
+        Array.isArray(value.styleGroups) &&
+        Array.isArray(value.warnings));
 }
 function isNodeError(value) {
     return value instanceof Error && "code" in value;

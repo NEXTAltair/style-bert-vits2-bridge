@@ -144,7 +144,7 @@ describe("SBV2 jobs", () => {
     });
     await expect(resumeJob(job.jobId, { jobsRoot })).resolves.toMatchObject({
       ok: false,
-      reason: "Dummy jobs are synchronous terminal jobs and cannot be resumed.",
+      reason: "Synchronous terminal jobs cannot be resumed.",
       job,
     });
     await expect(retryJob(job.jobId, { jobsRoot })).resolves.toMatchObject({

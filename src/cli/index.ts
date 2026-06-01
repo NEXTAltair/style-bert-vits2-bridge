@@ -2,7 +2,7 @@
 
 import { realpathSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { ingestDataset, type Sbv2DatasetLanguage } from "../datasets.js";
+import { ingestDataset, prepareDataset, type Sbv2DatasetLanguage } from "../datasets.js";
 import {
   cancelJob,
   createDummyJob,
@@ -31,6 +31,7 @@ interface CliOptions {
   sourceAudioPath?: string;
   language?: Sbv2DatasetLanguage;
   useJpExtra?: boolean;
+  manifestPath?: string;
 }
 
 interface ParsedCommand {
@@ -61,6 +62,7 @@ function printHelp(stdout: Pick<typeof process.stdout, "write">): void {
 
 Commands:
   datasets ingest        Copy audio into a bridge dataset workspace and write a manifest.
+  datasets prepare       Run SBV2 slice/transcribe for an ingested dataset manifest.
   jobs start-dummy         Start a synchronous dummy job and write manifest/log files.
   jobs list                List known jobs.
   jobs status <jobId>      Print a job manifest.
@@ -75,6 +77,7 @@ Options:
   --sbv2-root <path>       SBV2 repository root. Defaults to SBV2_ROOT, then ~/src/Style-Bert-VITS2.
   --model-name <name>      SBV2 model name for dataset ingest.
   --source <path>          Source audio file or directory for dataset ingest.
+  --manifest <path>        Dataset manifest path for datasets prepare.
   --language <ja|en|zh>    Dataset language for downstream SBV2 transcription/preprocess.
   --use-jp-extra           Record JP-Extra as enabled for downstream production.
   --no-use-jp-extra        Record JP-Extra as disabled for downstream production.
@@ -131,6 +134,9 @@ function parseArgs(argv: string[]): ParsedCommand {
       index += 1;
     } else if (arg === "--source" && next) {
       options.sourceAudioPath = next;
+      index += 1;
+    } else if (arg === "--manifest" && next) {
+      options.manifestPath = next;
       index += 1;
     } else if (arg === "--language" && next) {
       options.language = parseLanguage(next);
@@ -212,6 +218,24 @@ export async function runCli(argv: string[], io: CliIO = {}): Promise<number> {
     }
 
     if (parsed.group === "datasets") {
+      if (parsed.command === "prepare") {
+        const result = await prepareDataset({
+          jobsRoot: options.jobsRoot,
+          manifestPath: requireString(options.manifestPath, "--manifest"),
+        });
+        if (options.json) {
+          printJson(stdout, { ok: true, dataset: result.dataset, summary: result.summary, job: result.job });
+        } else {
+          writeLine(stdout, `prepared ${result.dataset.workspaceId}`);
+          writeLine(stdout, `model: ${result.dataset.modelName}`);
+          writeLine(stdout, `raw wavs: ${result.summary.rawWavCount}`);
+          writeLine(stdout, `esd lines: ${result.summary.esdLineCount}`);
+          writeLine(stdout, `summary: ${result.job.outputDir}/summary.json`);
+          writeLine(stdout, `job: ${result.job.jobId}`);
+          writeLine(stdout, `log: ${result.job.logPath}`);
+        }
+        return 0;
+      }
       if (parsed.command !== "ingest") {
         throw new Error(`Unknown datasets command: ${parsed.command}`);
       }
