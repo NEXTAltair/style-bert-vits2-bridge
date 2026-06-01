@@ -183,8 +183,8 @@ describe("SBV2 model registry", () => {
     const [candidate] = await listModelCandidates({ sbv2Root, modelName: "test-voice" });
 
     expect(candidate.promotable).toBe(false);
-    expect(candidate.errors).toContain("config.json data.spk2id values must be safe integers");
-    expect(candidate.errors).toContain("config.json data.style2id values must be safe integers");
+    expect(candidate.errors).toContain("config.json data.spk2id values must be non-negative safe integers");
+    expect(candidate.errors).toContain("config.json data.style2id values must be non-negative safe integers");
   });
 
   it("requires integer SBV2 config id map values", async () => {
@@ -200,8 +200,48 @@ describe("SBV2 model registry", () => {
     const [candidate] = await listModelCandidates({ sbv2Root, modelName: "test-voice" });
 
     expect(candidate.promotable).toBe(false);
-    expect(candidate.errors).toContain("config.json data.spk2id values must be safe integers");
-    expect(candidate.errors).toContain("config.json data.style2id values must be safe integers");
+    expect(candidate.errors).toContain("config.json data.spk2id values must be non-negative safe integers");
+    expect(candidate.errors).toContain("config.json data.style2id values must be non-negative safe integers");
+  });
+
+  it("rejects negative speaker IDs", async () => {
+    const sbv2Root = createSbv2Root();
+    const modelDir = path.join(sbv2Root, "model_assets", "test-voice");
+    writeFileSync(
+      path.join(modelDir, "config.json"),
+      JSON.stringify(makeConfig("test-voice", { data: { num_styles: 1, spk2id: { "test-voice": -1 }, style2id: { Neutral: 0 } } })),
+    );
+    writeFileSync(path.join(modelDir, "style_vectors.npy"), makeNpy([1, 2]));
+    writeFileSync(path.join(modelDir, "test-voice_e1_s100.safetensors"), makeSafetensors());
+
+    const [candidate] = await listModelCandidates({ sbv2Root, modelName: "test-voice" });
+
+    expect(candidate.promotable).toBe(false);
+    expect(candidate.errors).toContain("config.json data.spk2id values must be non-negative safe integers");
+  });
+
+  it("requires style IDs to be a zero-based permutation", async () => {
+    const sbv2Root = createSbv2Root();
+    const modelDir = path.join(sbv2Root, "model_assets", "test-voice");
+    writeFileSync(
+      path.join(modelDir, "config.json"),
+      JSON.stringify(
+        makeConfig("test-voice", {
+          data: {
+            num_styles: 2,
+            spk2id: { "test-voice": 0 },
+            style2id: { Neutral: 0, Happy: 0 },
+          },
+        }),
+      ),
+    );
+    writeFileSync(path.join(modelDir, "style_vectors.npy"), makeNpy([2, 2]));
+    writeFileSync(path.join(modelDir, "test-voice_e1_s100.safetensors"), makeSafetensors());
+
+    const [candidate] = await listModelCandidates({ sbv2Root, modelName: "test-voice" });
+
+    expect(candidate.promotable).toBe(false);
+    expect(candidate.errors).toContain("config.json data.style2id values must be a zero-based permutation of data.num_styles");
   });
 
   it("reports regular file sources as blocked candidates", async () => {
@@ -335,6 +375,20 @@ describe("SBV2 model registry", () => {
 
     expect(candidate.promotable).toBe(false);
     expect(candidate.errors.join("\n")).toContain("safetensors file is not valid");
+  });
+
+  it("reports broken safetensors symlinks as candidate errors", async () => {
+    const sbv2Root = createSbv2Root();
+    const modelDir = path.join(sbv2Root, "model_assets", "test-voice");
+    writeFileSync(path.join(modelDir, "config.json"), JSON.stringify(makeConfig()));
+    writeFileSync(path.join(modelDir, "style_vectors.npy"), makeNpy([1, 2]));
+    symlinkSync(path.join(modelDir, "missing.safetensors"), path.join(modelDir, "broken.safetensors"));
+
+    const [candidate] = await listModelCandidates({ sbv2Root, modelName: "test-voice" });
+
+    expect(candidate.promotable).toBe(false);
+    expect(candidate.errors.join("\n")).toContain("safetensors file could not be inspected");
+    expect(candidate.errors.join("\n")).toContain("no non-empty .safetensors files");
   });
 
   it("records a failed job when promotion source is not a directory", async () => {

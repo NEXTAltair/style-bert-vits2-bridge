@@ -255,7 +255,11 @@ async function listSafetensors(sourceDir) {
         if (!entry.endsWith(".safetensors") || entry.startsWith("."))
             continue;
         const filePath = path.join(sourceDir, entry);
-        const fileStat = await stat(filePath);
+        const fileStat = await fileStatOrError(filePath);
+        if (!fileStat) {
+            errors.push(`safetensors file could not be inspected: ${filePath}`);
+            continue;
+        }
         if (!fileStat.isFile() || fileStat.size === 0) {
             errors.push(`safetensors file is missing or empty: ${filePath}`);
             continue;
@@ -378,6 +382,9 @@ function validateConfigShape(value) {
     }
     else if (isRecord(style2id) && Object.keys(style2id).length !== numStyles) {
         errors.push("config.json data.num_styles must match data.style2id size");
+    }
+    else if (isRecord(style2id) && !isZeroBasedPermutation(Object.values(style2id), numStyles)) {
+        errors.push("config.json data.style2id values must be a zero-based permutation of data.num_styles");
     }
     return errors;
 }
@@ -513,10 +520,27 @@ function validateIdMap(value, name) {
     if (!isRecord(value) || Object.keys(value).length === 0) {
         return [`config.json ${name} must be a non-empty object`];
     }
-    if (!Object.values(value).every((id) => typeof id === "number" && Number.isSafeInteger(id))) {
-        return [`config.json ${name} values must be safe integers`];
+    if (!Object.values(value).every((id) => typeof id === "number" && Number.isSafeInteger(id) && id >= 0)) {
+        return [`config.json ${name} values must be non-negative safe integers`];
     }
     return [];
+}
+async function fileStatOrError(filePath) {
+    try {
+        return await stat(filePath);
+    }
+    catch (error) {
+        if (isNodeError(error))
+            return undefined;
+        throw error;
+    }
+}
+function isZeroBasedPermutation(values, size) {
+    const ids = values.filter((value) => typeof value === "number" && Number.isSafeInteger(value) && value >= 0);
+    if (ids.length !== values.length)
+        return false;
+    const unique = new Set(ids);
+    return unique.size === size && ids.every((id) => id < size);
 }
 async function validateSafetensorsFile(filePath) {
     const buffer = await readFile(filePath);
