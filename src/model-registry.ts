@@ -204,10 +204,17 @@ export async function promoteModel(options: PromoteModelOptions): Promise<Promot
     await writeFile(path.join(job.outputDir, "manifest.json"), `${JSON.stringify(updatedJob, null, 2)}\n`, "utf8");
     return { candidate, summary, job: updatedJob };
   } catch (error) {
+    const refreshAfterRecovery = Boolean(options.baseUrl && copied);
     if (backupDir) {
       await rollbackBackup(context.targetDir, backupDir, logLines);
+      if (refreshAfterRecovery && options.baseUrl) {
+        await refreshAfterFailedMutation(options.baseUrl, logLines);
+      }
     } else if (cleanupTargetOnFailure) {
       await cleanupCopiedTarget(context.targetDir, logLines);
+      if (refreshAfterRecovery && options.baseUrl) {
+        await refreshAfterFailedMutation(options.baseUrl, logLines);
+      }
     }
     return fail(error);
   }
@@ -220,6 +227,7 @@ async function inspectModelCandidate(context: ModelContext): Promise<Sbv2ModelCa
   const configJsonPath = path.join(sourceDir, "config.json");
   const styleVectorsPath = path.join(sourceDir, "style_vectors.npy");
   let configModelName: string | undefined;
+  let expectedStyleRows: number | undefined;
 
   const sourceStat = await directoryStat(sourceDir);
   if (!sourceStat.exists) {
@@ -238,6 +246,7 @@ async function inspectModelCandidate(context: ModelContext): Promise<Sbv2ModelCa
       if (configModelName && configModelName !== context.modelName) {
         errors.push(`config.json model_name "${configModelName}" does not match "${context.modelName}"`);
       }
+      expectedStyleRows = readConfigNumStyles(config);
       errors.push(...validateConfigShape(config));
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
@@ -248,7 +257,7 @@ async function inspectModelCandidate(context: ModelContext): Promise<Sbv2ModelCa
   if (!(await nonEmptyFileStat(styleVectorsPath))) {
     errors.push(`style_vectors.npy is missing or empty: ${styleVectorsPath}`);
   } else {
-    errors.push(...(await validateStyleVectorsFile(styleVectorsPath)));
+    errors.push(...(await validateStyleVectorsFile(styleVectorsPath, expectedStyleRows)));
   }
 
   const safetensorsResult = await listSafetensors(sourceDir);
@@ -351,6 +360,12 @@ function readConfigModelName(value: unknown): string | undefined {
   return typeof candidate === "string" && candidate.trim() ? candidate.trim() : undefined;
 }
 
+function readConfigNumStyles(value: unknown): number | undefined {
+  if (!isRecord(value) || !isRecord(value.data)) return undefined;
+  const candidate = value.data.num_styles;
+  return typeof candidate === "number" && Number.isInteger(candidate) && candidate > 0 ? candidate : undefined;
+}
+
 function collectCandidateArtifacts(candidate: Sbv2ModelCandidate): string[] {
   return [
     candidate.configJsonPath,
@@ -399,6 +414,16 @@ async function cleanupCopiedTarget(targetDir: string, logLines: string[]): Promi
   }
 }
 
+async function refreshAfterFailedMutation(baseUrl: string, logLines: string[]): Promise<void> {
+  try {
+    const modelsInfo = await new Sbv2Client({ baseUrl }).refreshModels();
+    logLines.push(`refreshed SBV2 models after failed promotion recovery from ${baseUrl}; models=${modelsInfo.length}`);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    logLines.push(`warning: failed to refresh SBV2 models after promotion recovery from ${baseUrl}: ${message}`);
+  }
+}
+
 function validateConfigShape(value: unknown): string[] {
   if (!isRecord(value)) {
     return ["config.json root must be an object"];
@@ -437,7 +462,7 @@ function validateModelName(value: string): void {
   }
 }
 
-async function validateStyleVectorsFile(filePath: string): Promise<string[]> {
+async function validateStyleVectorsFile(filePath: string, expectedRows?: number): Promise<string[]> {
   const buffer = await readFile(filePath);
   const header = parseNpyHeader(buffer);
   if (!header) {
@@ -446,6 +471,9 @@ async function validateStyleVectorsFile(filePath: string): Promise<string[]> {
   const { shape } = header;
   if (shape.length < 2 || shape[0] < 1) {
     return [`style_vectors.npy must have at least one 2D style vector row: ${filePath}`];
+  }
+  if (expectedRows !== undefined && shape[0] !== expectedRows) {
+    return [`style_vectors.npy row count ${shape[0]} does not match config.json data.num_styles ${expectedRows}: ${filePath}`];
   }
   const expectedDataBytes = calculateNpyDataBytes(shape, header.bytesPerElement);
   if (expectedDataBytes === undefined || buffer.length < header.dataOffset + expectedDataBytes) {

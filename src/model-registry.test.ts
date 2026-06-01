@@ -217,6 +217,30 @@ describe("SBV2 model registry", () => {
     expect(candidate.errors.join("\n")).toContain("style_vectors.npy must have at least one 2D style vector row");
   });
 
+  it("requires style_vectors.npy rows to match config data.num_styles", async () => {
+    const sbv2Root = createSbv2Root();
+    const modelDir = path.join(sbv2Root, "model_assets", "test-voice");
+    writeFileSync(
+      path.join(modelDir, "config.json"),
+      JSON.stringify(
+        makeConfig("test-voice", {
+          data: {
+            num_styles: 2,
+            spk2id: { "test-voice": 0 },
+            style2id: { Neutral: 0, Happy: 1 },
+          },
+        }),
+      ),
+    );
+    writeFileSync(path.join(modelDir, "style_vectors.npy"), makeNpy([1, 2]));
+    writeFileSync(path.join(modelDir, "test-voice_e1_s100.safetensors"), "model");
+
+    const [candidate] = await listModelCandidates({ sbv2Root, modelName: "test-voice" });
+
+    expect(candidate.promotable).toBe(false);
+    expect(candidate.errors.join("\n")).toContain("style_vectors.npy row count 1 does not match config.json data.num_styles 2");
+  });
+
   it("rejects truncated style_vectors.npy payloads", async () => {
     const sbv2Root = createSbv2Root();
     const modelDir = path.join(sbv2Root, "model_assets", "test-voice");
@@ -379,6 +403,61 @@ describe("SBV2 model registry", () => {
     ).rejects.toThrow('Promoted model "test-voice" was not found');
 
     expect(existsSync(path.join(sbv2Root, "model_assets", "test-voice"))).toBe(false);
+  });
+
+  it("refreshes SBV2 after rolling back a failed replacement", async () => {
+    const sbv2Root = createSbv2Root();
+    const target = path.join(sbv2Root, "model_assets", "test-voice");
+    writeModelAssets(target);
+    writeFileSync(path.join(target, "old.txt"), "old");
+    const source = tempRoot("sbv2-model-registry-source-");
+    writeModelAssets(source);
+    const jobsRoot = tempRoot("sbv2-model-registry-jobs-");
+    const requests: string[] = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: URL) => {
+        requests.push(`${url.pathname}`);
+        const body =
+          requests.length === 1
+            ? {
+                "0": {
+                  config_path: "model_assets/other/config.json",
+                  model_path: "model_assets/other/other.safetensors",
+                  spk2id: { other: 0 },
+                  style2id: { Neutral: 0 },
+                },
+              }
+            : {
+                "0": {
+                  config_path: path.join(sbv2Root, "model_assets", "test-voice", "config.json"),
+                  model_path: path.join(sbv2Root, "model_assets", "test-voice", "test-voice_e1_s100.safetensors"),
+                  spk2id: { "test-voice": 0 },
+                  style2id: { Neutral: 0 },
+                },
+              };
+        return new Response(JSON.stringify(body), { status: 200, headers: { "content-type": "application/json" } });
+      }),
+    );
+
+    await expect(
+      promoteModel({
+        sbv2Root,
+        modelName: "test-voice",
+        sourcePath: source,
+        confirmModelName: "test-voice",
+        backupExisting: true,
+        jobsRoot,
+        baseUrl: "http://localhost:5000",
+        now: () => new Date("2026-06-01T00:00:00.000Z"),
+        randomId: () => "rollback1",
+      }),
+    ).rejects.toThrow('Promoted model "test-voice" was not found');
+
+    expect(requests).toEqual(["/models/refresh", "/models/refresh"]);
+    expect(existsSync(path.join(target, "old.txt"))).toBe(true);
+    const log = readFileSync(path.join(jobsRoot, "sbv2-job-20260601000000-rollback", "job.log"), "utf8");
+    expect(log).toContain("refreshed SBV2 models after failed promotion recovery");
   });
 
   it("fails on an existing target unless backupExisting is enabled", async () => {
