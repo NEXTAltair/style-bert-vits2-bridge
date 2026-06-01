@@ -378,9 +378,21 @@ function validateConfigShape(value) {
     }
     const spk2id = data.spk2id;
     const style2id = data.style2id;
+    const numSpeakers = data.n_speakers;
     const numStyles = data.num_styles;
     errors.push(...validateIdMap(spk2id, "data.spk2id"));
     errors.push(...validateIdMap(style2id, "data.style2id"));
+    if (numSpeakers !== undefined) {
+        if (typeof numSpeakers !== "number" || !Number.isInteger(numSpeakers) || numSpeakers < 1) {
+            errors.push("config.json data.n_speakers must be a positive integer");
+        }
+        else if (isRecord(spk2id) && Object.keys(spk2id).length !== numSpeakers) {
+            errors.push("config.json data.n_speakers must match data.spk2id size");
+        }
+        else if (isRecord(spk2id) && !isZeroBasedPermutation(Object.values(spk2id), numSpeakers)) {
+            errors.push("config.json data.spk2id values must be a zero-based permutation of data.n_speakers");
+        }
+    }
     if (typeof numStyles !== "number" || !Number.isInteger(numStyles) || numStyles < 1) {
         errors.push("config.json data.num_styles must be a positive integer");
     }
@@ -398,7 +410,16 @@ function validateModelName(value) {
     }
 }
 async function validateStyleVectorsFile(filePath, expectedRows) {
-    const buffer = await readFile(filePath);
+    let buffer;
+    try {
+        buffer = await readFile(filePath);
+    }
+    catch (error) {
+        if (isNodeError(error)) {
+            return [`style_vectors.npy could not be read: ${filePath}`];
+        }
+        throw error;
+    }
     const header = parseNpyHeader(buffer);
     if (!header) {
         return [`style_vectors.npy is not a valid NumPy .npy file: ${filePath}`];
@@ -592,7 +613,16 @@ function isZeroBasedPermutation(values, size) {
     return unique.size === size && ids.every((id) => id < size);
 }
 async function validateSafetensorsFile(filePath, fileSize) {
-    const header = await readSafetensorsHeader(filePath, fileSize);
+    let header;
+    try {
+        header = await readSafetensorsHeader(filePath, fileSize);
+    }
+    catch (error) {
+        if (isNodeError(error)) {
+            return [`safetensors file could not be read: ${filePath}`];
+        }
+        throw error;
+    }
     if (!header) {
         return [`safetensors file is not valid: ${filePath}`];
     }

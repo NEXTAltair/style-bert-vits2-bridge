@@ -1,4 +1,4 @@
-import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, symlinkSync, truncateSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, symlinkSync, truncateSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -32,6 +32,7 @@ function makeConfig(modelName = "test-voice", overrides: Record<string, unknown>
     model: {},
     train: {},
     data: {
+      n_speakers: 1,
       num_styles: 1,
       spk2id: { [modelName]: 0 },
       style2id: { Neutral: 0 },
@@ -223,6 +224,31 @@ describe("SBV2 model registry", () => {
     expect(candidate.errors).toContain("config.json data.spk2id values must be non-negative safe integers");
   });
 
+  it("requires speaker IDs to be a zero-based permutation when n_speakers is declared", async () => {
+    const sbv2Root = createSbv2Root();
+    const modelDir = path.join(sbv2Root, "model_assets", "test-voice");
+    writeFileSync(
+      path.join(modelDir, "config.json"),
+      JSON.stringify(
+        makeConfig("test-voice", {
+          data: {
+            n_speakers: 1,
+            num_styles: 1,
+            spk2id: { "test-voice": 99 },
+            style2id: { Neutral: 0 },
+          },
+        }),
+      ),
+    );
+    writeFileSync(path.join(modelDir, "style_vectors.npy"), makeNpy([1, 2]));
+    writeFileSync(path.join(modelDir, "test-voice_e1_s100.safetensors"), makeSafetensors());
+
+    const [candidate] = await listModelCandidates({ sbv2Root, modelName: "test-voice" });
+
+    expect(candidate.promotable).toBe(false);
+    expect(candidate.errors).toContain("config.json data.spk2id values must be a zero-based permutation of data.n_speakers");
+  });
+
   it("requires style IDs to be a zero-based permutation", async () => {
     const sbv2Root = createSbv2Root();
     const modelDir = path.join(sbv2Root, "model_assets", "test-voice");
@@ -354,6 +380,25 @@ describe("SBV2 model registry", () => {
     expect(candidate.errors.join("\n")).toContain("style_vectors.npy data is truncated");
   });
 
+  it("reports unreadable style_vectors.npy files as candidate errors", async () => {
+    const sbv2Root = createSbv2Root();
+    const modelDir = path.join(sbv2Root, "model_assets", "test-voice");
+    const styleVectorsPath = path.join(modelDir, "style_vectors.npy");
+    writeFileSync(path.join(modelDir, "config.json"), JSON.stringify(makeConfig()));
+    writeFileSync(styleVectorsPath, makeNpy([1, 2]));
+    writeFileSync(path.join(modelDir, "test-voice_e1_s100.safetensors"), makeSafetensors());
+    chmodSync(styleVectorsPath, 0);
+
+    try {
+      const [candidate] = await listModelCandidates({ sbv2Root, modelName: "test-voice" });
+
+      expect(candidate.promotable).toBe(false);
+      expect(candidate.errors.join("\n")).toContain("style_vectors.npy could not be read");
+    } finally {
+      chmodSync(styleVectorsPath, 0o600);
+    }
+  });
+
   it("rejects empty safetensors files even when another checkpoint exists", async () => {
     const sbv2Root = createSbv2Root();
     const modelDir = path.join(sbv2Root, "model_assets", "test-voice");
@@ -378,6 +423,25 @@ describe("SBV2 model registry", () => {
 
     expect(candidate.promotable).toBe(false);
     expect(candidate.errors.join("\n")).toContain("safetensors file is not valid");
+  });
+
+  it("reports unreadable safetensors files as candidate errors", async () => {
+    const sbv2Root = createSbv2Root();
+    const modelDir = path.join(sbv2Root, "model_assets", "test-voice");
+    const checkpointPath = path.join(modelDir, "test-voice_e1_s100.safetensors");
+    writeFileSync(path.join(modelDir, "config.json"), JSON.stringify(makeConfig()));
+    writeFileSync(path.join(modelDir, "style_vectors.npy"), makeNpy([1, 2]));
+    writeFileSync(checkpointPath, makeSafetensors());
+    chmodSync(checkpointPath, 0);
+
+    try {
+      const [candidate] = await listModelCandidates({ sbv2Root, modelName: "test-voice" });
+
+      expect(candidate.promotable).toBe(false);
+      expect(candidate.errors.join("\n")).toContain("safetensors file could not be read");
+    } finally {
+      chmodSync(checkpointPath, 0o600);
+    }
   });
 
   it.each([
