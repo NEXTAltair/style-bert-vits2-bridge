@@ -204,6 +204,24 @@ sbv2-bridge datasets prepare \
 
 この段階で行う品質確認は `esd.list` と raw wav の対応、speaker/language/text の軽量検証までです。SBV2 の auto preprocess、`resample`、`preprocess_text`、`bert_gen`、`style_gen`、学習、モデルマージは別工程として扱います。
 
+学習系 wrapper は、同じ manifest から実行計画を確認してから起動できます。
+
+```bash
+sbv2-bridge training plan \
+  --manifest /path/to/manifest.json \
+  --json
+```
+
+通常実行は SBV2 の `resample`、`preprocess_text`、`bert_gen`、`style_gen`、`train_ms` を agent-safe job として順に呼びます。
+
+```bash
+sbv2-bridge training run \
+  --manifest /path/to/manifest.json \
+  --json
+```
+
+`--stage resample --stage preprocess-text` のように stage を限定できます。既存の `Data/<modelName>/models` や `model_assets/<modelName>` は上書きしません。実 SBV2 での training 完走検証は bridge の wrapper test では行わず、CLI は計画、preflight、job log、summary、失敗分類を提供します。
+
 ### Healthcheck / lifecycle 境界
 
 この bridge は SBV2 FastAPI server manager ではありません。SBV2 server の起動、停止、GPU/backend 選択、モデルファイルの配置、モデルロードは SBV2 側または運用スクリプトの責務です。bridge は設定済みの `baseUrl` に対して `/models/info` と `/voice` を呼び、失敗時に operator が切り分けやすいエラーを返します。

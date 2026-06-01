@@ -210,7 +210,10 @@ function isSbv2JobManifest(value) {
     return (isRecord(value) &&
         value.schemaVersion === 1 &&
         typeof value.jobId === "string" &&
-        (value.operation === "dummy" || value.operation === "dataset-ingest" || value.operation === "dataset-prepare") &&
+        (value.operation === "dummy" ||
+            value.operation === "dataset-ingest" ||
+            value.operation === "dataset-prepare" ||
+            value.operation === "training-run") &&
         typeof value.state === "string" &&
         typeof value.createdAt === "string" &&
         isRecord(value.inputSummary) &&

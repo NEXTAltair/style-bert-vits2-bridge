@@ -6,7 +6,7 @@ import { randomUUID } from "node:crypto";
 export const DEFAULT_JOBS_ROOT = "~/.openclaw/state/style-bert-vits2-bridge/jobs";
 
 export type Sbv2JobState = "running" | "succeeded" | "failed" | "cancelled";
-export type Sbv2JobOperation = "dummy" | "dataset-ingest" | "dataset-prepare";
+export type Sbv2JobOperation = "dummy" | "dataset-ingest" | "dataset-prepare" | "training-run";
 
 export interface Sbv2JobCancellation {
   supported: boolean;
@@ -329,7 +329,10 @@ function isSbv2JobManifest(value: unknown): value is Sbv2JobManifest {
     isRecord(value) &&
     value.schemaVersion === 1 &&
     typeof value.jobId === "string" &&
-    (value.operation === "dummy" || value.operation === "dataset-ingest" || value.operation === "dataset-prepare") &&
+    (value.operation === "dummy" ||
+      value.operation === "dataset-ingest" ||
+      value.operation === "dataset-prepare" ||
+      value.operation === "training-run") &&
     typeof value.state === "string" &&
     typeof value.createdAt === "string" &&
     isRecord(value.inputSummary) &&
