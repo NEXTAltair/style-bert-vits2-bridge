@@ -5,6 +5,9 @@
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
+  "bin": {
+    "sbv2-bridge": "./dist/cli/index.js"
+  },
   "files": [
     "dist",
     "scripts",
@@ -30,6 +33,7 @@
     "check": "tsc --noEmit",
     "check:sbv2": "node scripts/check-sbv2-runtime.mjs",
     "prepack": "pnpm run build",
+    "sbv2-bridge": "node dist/cli/index.js",
     "test": "vitest run",
     "test:watch": "vitest"
   },
