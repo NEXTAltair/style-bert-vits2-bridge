@@ -22,6 +22,21 @@ function createWriter() {
   };
 }
 
+function makeNpy(shape: number[]): Buffer {
+  const shapeText = shape.length === 1 ? `${shape[0]},` : shape.join(", ");
+  const header = `{'descr': '<f4', 'fortran_order': False, 'shape': (${shapeText}), }`;
+  const magicLength = 10;
+  const padding = 16 - ((magicLength + header.length + 1) % 16);
+  const paddedHeader = `${header}${" ".repeat(padding)}\n`;
+  const result = Buffer.alloc(magicLength + paddedHeader.length + shape.reduce((total, value) => total * value, 1) * 4);
+  result.write("\x93NUMPY", 0, "latin1");
+  result[6] = 1;
+  result[7] = 0;
+  result.writeUInt16LE(paddedHeader.length, 8);
+  result.write(paddedHeader, magicLength, "latin1");
+  return result;
+}
+
 describe("sbv2-bridge CLI", () => {
   it("detects invocation through a package bin symlink", () => {
     const dir = tempJobsRoot();
@@ -434,7 +449,7 @@ if (args.includes("resample.py")) {
       path.join(modelDir, "config.json"),
       JSON.stringify({ model_name: "cli-model", data: { spk2id: { "cli-model": 0 }, style2id: { Neutral: 0 } } }),
     );
-    writeFileSync(path.join(modelDir, "style_vectors.npy"), "style");
+    writeFileSync(path.join(modelDir, "style_vectors.npy"), makeNpy([1, 2]));
     writeFileSync(path.join(modelDir, "cli-model_e1_s100.safetensors"), "model");
 
     const candidatesOut = createWriter();
@@ -488,7 +503,7 @@ if (args.includes("resample.py")) {
       path.join(source, "config.json"),
       JSON.stringify({ model_name: "external-model", data: { spk2id: { "external-model": 0 }, style2id: { Neutral: 0 } } }),
     );
-    writeFileSync(path.join(source, "style_vectors.npy"), "style");
+    writeFileSync(path.join(source, "style_vectors.npy"), makeNpy([1, 2]));
     writeFileSync(path.join(source, "external-model_e1_s100.safetensors"), "model");
 
     const stdout = createWriter();

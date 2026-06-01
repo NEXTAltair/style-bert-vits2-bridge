@@ -247,6 +247,8 @@ async function inspectModelCandidate(context: ModelContext): Promise<Sbv2ModelCa
 
   if (!(await nonEmptyFileStat(styleVectorsPath))) {
     errors.push(`style_vectors.npy is missing or empty: ${styleVectorsPath}`);
+  } else {
+    errors.push(...(await validateStyleVectorsFile(styleVectorsPath)));
   }
 
   const safetensors = await listSafetensors(sourceDir);
@@ -413,9 +415,51 @@ function validateConfigShape(value: unknown): string[] {
 }
 
 function validateModelName(value: string): void {
-  if (!value.trim() || value === "." || value === ".." || /[\\/]/.test(value) || /[\u0000-\u001f]/.test(value)) {
+  if (!value.trim() || value === "." || value === ".." || value.startsWith(".") || /[\\/]/.test(value) || /[\u0000-\u001f]/.test(value)) {
     throw new Error(`Invalid SBV2 model name: ${value}`);
   }
+}
+
+async function validateStyleVectorsFile(filePath: string): Promise<string[]> {
+  const buffer = await readFile(filePath);
+  const shape = parseNpyShape(buffer);
+  if (!shape) {
+    return [`style_vectors.npy is not a valid NumPy .npy file: ${filePath}`];
+  }
+  if (shape.length < 2 || shape[0] < 1) {
+    return [`style_vectors.npy must have at least one 2D style vector row: ${filePath}`];
+  }
+  return [];
+}
+
+function parseNpyShape(buffer: Buffer): number[] | undefined {
+  if (buffer.length < 10 || buffer.toString("latin1", 0, 6) !== "\x93NUMPY") {
+    return undefined;
+  }
+  const major = buffer[6];
+  const minor = buffer[7];
+  const headerLengthBytes = major === 1 ? 2 : major === 2 || major === 3 ? 4 : 0;
+  if (!headerLengthBytes || minor === undefined || buffer.length < 8 + headerLengthBytes) {
+    return undefined;
+  }
+  const headerLength =
+    headerLengthBytes === 2 ? buffer.readUInt16LE(8) : buffer.readUInt32LE(8);
+  const headerStart = 8 + headerLengthBytes;
+  const headerEnd = headerStart + headerLength;
+  if (buffer.length < headerEnd) {
+    return undefined;
+  }
+  const header = buffer.toString("latin1", headerStart, headerEnd);
+  const match = header.match(/'shape'\s*:\s*\(([^)]*)\)/);
+  if (!match) {
+    return undefined;
+  }
+  const shape = match[1]
+    .split(",")
+    .map((part) => part.trim())
+    .filter(Boolean)
+    .map((part) => Number(part));
+  return shape.length && shape.every((part) => Number.isInteger(part) && part >= 0) ? shape : undefined;
 }
 
 function parseSimpleYamlString(text: string, key: string): string | undefined {

@@ -22,8 +22,23 @@ function writeModelAssets(dir: string, modelName = "test-voice"): void {
     path.join(dir, "config.json"),
     JSON.stringify({ model_name: modelName, data: { spk2id: { [modelName]: 0 }, style2id: { Neutral: 0 } } }),
   );
-  writeFileSync(path.join(dir, "style_vectors.npy"), "style");
+  writeFileSync(path.join(dir, "style_vectors.npy"), makeNpy([1, 2]));
   writeFileSync(path.join(dir, `${modelName}_e1_s100.safetensors`), "model");
+}
+
+function makeNpy(shape: number[]): Buffer {
+  const shapeText = shape.length === 1 ? `${shape[0]},` : shape.join(", ");
+  const header = `{'descr': '<f4', 'fortran_order': False, 'shape': (${shapeText}), }`;
+  const magicLength = 10;
+  const padding = 16 - ((magicLength + header.length + 1) % 16);
+  const paddedHeader = `${header}${" ".repeat(padding)}\n`;
+  const result = Buffer.alloc(magicLength + paddedHeader.length + shape.reduce((total, value) => total * value, 1) * 4);
+  result.write("\x93NUMPY", 0, "latin1");
+  result[6] = 1;
+  result[7] = 0;
+  result.writeUInt16LE(paddedHeader.length, 8);
+  result.write(paddedHeader, magicLength, "latin1");
+  return result;
 }
 
 describe("SBV2 model registry", () => {
@@ -64,7 +79,7 @@ describe("SBV2 model registry", () => {
     const sbv2Root = createSbv2Root();
     const modelDir = path.join(sbv2Root, "model_assets", "test-voice");
     writeFileSync(path.join(modelDir, "config.json"), JSON.stringify({ model_name: "test-voice", data: {} }));
-    writeFileSync(path.join(modelDir, "style_vectors.npy"), "style");
+    writeFileSync(path.join(modelDir, "style_vectors.npy"), makeNpy([1, 2]));
     writeFileSync(path.join(modelDir, "test-voice_e1_s100.safetensors"), "model");
 
     const [candidate] = await listModelCandidates({ sbv2Root, modelName: "test-voice" });
@@ -81,7 +96,7 @@ describe("SBV2 model registry", () => {
       path.join(modelDir, "config.json"),
       JSON.stringify({ model_name: "test-voice", data: { spk2id: { "test-voice": "x" }, style2id: { Neutral: "0" } } }),
     );
-    writeFileSync(path.join(modelDir, "style_vectors.npy"), "style");
+    writeFileSync(path.join(modelDir, "style_vectors.npy"), makeNpy([1, 2]));
     writeFileSync(path.join(modelDir, "test-voice_e1_s100.safetensors"), "model");
 
     const [candidate] = await listModelCandidates({ sbv2Root, modelName: "test-voice" });
@@ -104,6 +119,47 @@ describe("SBV2 model registry", () => {
 
     expect(candidate.promotable).toBe(false);
     expect(candidate.errors).toContain(`candidate path is not a directory: ${sourceFile}`);
+  });
+
+  it("rejects dot-prefixed model names", async () => {
+    await expect(
+      listModelCandidates({
+        sbv2Root: tempRoot("sbv2-model-registry-root-"),
+        modelName: ".draft",
+      }),
+    ).rejects.toThrow("Invalid SBV2 model name: .draft");
+  });
+
+  it("rejects corrupt style_vectors.npy files", async () => {
+    const sbv2Root = createSbv2Root();
+    const modelDir = path.join(sbv2Root, "model_assets", "test-voice");
+    writeFileSync(
+      path.join(modelDir, "config.json"),
+      JSON.stringify({ model_name: "test-voice", data: { spk2id: { "test-voice": 0 }, style2id: { Neutral: 0 } } }),
+    );
+    writeFileSync(path.join(modelDir, "style_vectors.npy"), "style");
+    writeFileSync(path.join(modelDir, "test-voice_e1_s100.safetensors"), "model");
+
+    const [candidate] = await listModelCandidates({ sbv2Root, modelName: "test-voice" });
+
+    expect(candidate.promotable).toBe(false);
+    expect(candidate.errors.join("\n")).toContain("style_vectors.npy is not a valid NumPy .npy file");
+  });
+
+  it("rejects style_vectors.npy files without 2D rows", async () => {
+    const sbv2Root = createSbv2Root();
+    const modelDir = path.join(sbv2Root, "model_assets", "test-voice");
+    writeFileSync(
+      path.join(modelDir, "config.json"),
+      JSON.stringify({ model_name: "test-voice", data: { spk2id: { "test-voice": 0 }, style2id: { Neutral: 0 } } }),
+    );
+    writeFileSync(path.join(modelDir, "style_vectors.npy"), makeNpy([0, 2]));
+    writeFileSync(path.join(modelDir, "test-voice_e1_s100.safetensors"), "model");
+
+    const [candidate] = await listModelCandidates({ sbv2Root, modelName: "test-voice" });
+
+    expect(candidate.promotable).toBe(false);
+    expect(candidate.errors.join("\n")).toContain("style_vectors.npy must have at least one 2D style vector row");
   });
 
   it("records a failed job when promotion source is not a directory", async () => {
