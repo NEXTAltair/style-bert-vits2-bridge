@@ -1,5 +1,6 @@
 export declare const DEFAULT_JOBS_ROOT = "~/.openclaw/state/style-bert-vits2-bridge/jobs";
 export type Sbv2JobState = "running" | "succeeded" | "failed" | "cancelled";
+export type Sbv2JobOperation = "dummy" | "dataset-ingest";
 export interface Sbv2JobCancellation {
     supported: boolean;
     reason?: string;
@@ -7,7 +8,7 @@ export interface Sbv2JobCancellation {
 export interface Sbv2JobManifest {
     schemaVersion: 1;
     jobId: string;
-    operation: "dummy";
+    operation: Sbv2JobOperation;
     state: Sbv2JobState;
     createdAt: string;
     startedAt?: string;
@@ -26,6 +27,20 @@ export interface CreateDummyJobOptions {
     message?: string;
     fail?: boolean;
     retriedFrom?: string;
+    now?: () => Date;
+    randomId?: () => string;
+}
+export interface CreateJobManifestOptions {
+    jobsRoot?: string;
+    operation: Sbv2JobOperation;
+    state?: Sbv2JobState;
+    inputSummary: Record<string, unknown>;
+    artifactPaths?: string[];
+    progressSummary: string;
+    logLines?: string[];
+    firstError?: string | null;
+    retryable?: boolean;
+    cancellation?: Sbv2JobCancellation;
     now?: () => Date;
     randomId?: () => string;
 }
@@ -51,6 +66,7 @@ export type RetryJobResult = {
     reason: string;
 };
 export declare function resolveJobsRoot(value: string | undefined): string;
+export declare function createJobManifest(options: CreateJobManifestOptions): Promise<Sbv2JobManifest>;
 export declare function createDummyJob(options?: CreateDummyJobOptions): Promise<Sbv2JobManifest>;
 export declare function readJobManifest(jobId: string, options?: ReadJobOptions): Promise<Sbv2JobManifest>;
 export declare function listJobManifests(options?: ReadJobOptions): Promise<Sbv2JobManifest[]>;

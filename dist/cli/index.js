@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import { realpathSync } from "node:fs";
 import { fileURLToPath } from "node:url";
+import { ingestDataset } from "../datasets.js";
 import { cancelJob, createDummyJob, listJobManifests, readJobManifest, resumeJob, retryJob, tailJobLog, } from "../jobs.js";
 export function isCliEntrypoint(moduleUrl, argvPath) {
     if (!argvPath)
@@ -16,9 +17,10 @@ function writeLine(stream, value) {
     stream.write(`${value}\n`);
 }
 function printHelp(stdout) {
-    writeLine(stdout, `Usage: sbv2-bridge jobs <command> [options]
+    writeLine(stdout, `Usage: sbv2-bridge <group> <command> [options]
 
 Commands:
+  datasets ingest        Copy audio into a bridge dataset workspace and write a manifest.
   jobs start-dummy         Start a synchronous dummy job and write manifest/log files.
   jobs list                List known jobs.
   jobs status <jobId>      Print a job manifest.
@@ -29,6 +31,13 @@ Commands:
 
 Options:
   --jobs-dir <path>        Job manifest/log root. Defaults to ~/.openclaw/state/style-bert-vits2-bridge/jobs.
+  --datasets-dir <path>    Dataset workspace root. Defaults to ~/.openclaw/state/style-bert-vits2-bridge/datasets.
+  --sbv2-root <path>       SBV2 repository root. Defaults to SBV2_ROOT, then ~/src/Style-Bert-VITS2.
+  --model-name <name>      SBV2 model name for dataset ingest.
+  --source <path>          Source audio file or directory for dataset ingest.
+  --language <ja|en|zh>    Dataset language for downstream SBV2 transcription/preprocess.
+  --use-jp-extra           Record JP-Extra as enabled for downstream production.
+  --no-use-jp-extra        Record JP-Extra as disabled for downstream production.
   --fail                   Make start-dummy write a failed manifest.
   --message <text>         Dummy job log message.
   --tail <lines>           Print the last N log lines.
@@ -41,6 +50,12 @@ function parsePositiveInteger(value, name) {
         throw new Error(`${name} must be a positive integer`);
     }
     return parsed;
+}
+function parseLanguage(value) {
+    if (value === "ja" || value === "en" || value === "zh") {
+        return value;
+    }
+    throw new Error("--language must be one of: ja, en, zh");
 }
 function parseArgs(argv) {
     const options = { json: false, fail: false };
@@ -64,6 +79,32 @@ function parseArgs(argv) {
             options.jobsRoot = next;
             index += 1;
         }
+        else if (arg === "--datasets-dir" && next) {
+            options.datasetsRoot = next;
+            index += 1;
+        }
+        else if (arg === "--sbv2-root" && next) {
+            options.sbv2Root = next;
+            index += 1;
+        }
+        else if (arg === "--model-name" && next) {
+            options.modelName = next;
+            index += 1;
+        }
+        else if (arg === "--source" && next) {
+            options.sourceAudioPath = next;
+            index += 1;
+        }
+        else if (arg === "--language" && next) {
+            options.language = parseLanguage(next);
+            index += 1;
+        }
+        else if (arg === "--use-jp-extra") {
+            options.useJpExtra = true;
+        }
+        else if (arg === "--no-use-jp-extra") {
+            options.useJpExtra = false;
+        }
         else if (arg === "--message" && next) {
             options.message = next;
             index += 1;
@@ -80,12 +121,13 @@ function parseArgs(argv) {
         }
     }
     if (positional[0] === "help") {
-        return { command: "help", args: [], options };
+        return { group: "help", command: "help", args: [], options };
     }
-    if (positional[0] !== "jobs") {
-        throw new Error("Expected command group: jobs");
+    if (positional[0] !== "jobs" && positional[0] !== "datasets") {
+        throw new Error("Expected command group: jobs or datasets");
     }
     return {
+        group: positional[0],
         command: positional[1] ?? "help",
         args: positional.slice(2),
         options,
@@ -104,6 +146,18 @@ function requireJobId(args) {
     }
     return jobId;
 }
+function requireString(value, name) {
+    if (!value) {
+        throw new Error(`Missing ${name}`);
+    }
+    return value;
+}
+function requireBoolean(value, name) {
+    if (value === undefined) {
+        throw new Error(`Missing ${name}`);
+    }
+    return value;
+}
 export async function runCli(argv, io = {}) {
     const stdout = io.stdout ?? process.stdout;
     const stderr = io.stderr ?? process.stderr;
@@ -112,6 +166,32 @@ export async function runCli(argv, io = {}) {
         const { options } = parsed;
         if (parsed.command === "help") {
             printHelp(stdout);
+            return 0;
+        }
+        if (parsed.group === "datasets") {
+            if (parsed.command !== "ingest") {
+                throw new Error(`Unknown datasets command: ${parsed.command}`);
+            }
+            const result = await ingestDataset({
+                datasetsRoot: options.datasetsRoot,
+                jobsRoot: options.jobsRoot,
+                sbv2Root: options.sbv2Root,
+                modelName: requireString(options.modelName, "--model-name"),
+                sourceAudioPath: requireString(options.sourceAudioPath, "--source"),
+                language: options.language ?? "ja",
+                useJpExtra: requireBoolean(options.useJpExtra, "--use-jp-extra or --no-use-jp-extra"),
+            });
+            if (options.json) {
+                printJson(stdout, { ok: true, dataset: result.dataset, job: result.job });
+            }
+            else {
+                writeLine(stdout, `ingested ${result.dataset.workspaceId}`);
+                writeLine(stdout, `model: ${result.dataset.modelName}`);
+                writeLine(stdout, `files: ${result.dataset.files.length}`);
+                writeLine(stdout, `manifest: ${result.dataset.manifestPath}`);
+                writeLine(stdout, `job: ${result.job.jobId}`);
+                writeLine(stdout, `log: ${result.job.logPath}`);
+            }
             return 0;
         }
         if (parsed.command === "start-dummy") {

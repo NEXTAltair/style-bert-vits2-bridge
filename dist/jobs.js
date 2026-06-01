@@ -30,6 +30,48 @@ function assertSafeJobId(jobId) {
         throw new Error(`Invalid SBV2 job id: ${jobId}`);
     }
 }
+export async function createJobManifest(options) {
+    const now = options.now ?? (() => new Date());
+    const randomId = options.randomId ?? randomUUID;
+    const created = now();
+    const jobId = makeJobId(created, randomId);
+    const root = resolveJobsRoot(options.jobsRoot);
+    const jobDir = path.join(root, jobId);
+    const resolvedLogPath = logPath(jobDir);
+    const startedAt = now().toISOString();
+    const finishedAt = now().toISOString();
+    const state = options.state ?? "succeeded";
+    await mkdir(jobDir, { recursive: true });
+    const manifest = {
+        schemaVersion: 1,
+        jobId,
+        operation: options.operation,
+        state,
+        createdAt: created.toISOString(),
+        startedAt,
+        finishedAt,
+        inputSummary: options.inputSummary,
+        outputDir: jobDir,
+        artifactPaths: options.artifactPaths ?? [],
+        logPath: resolvedLogPath,
+        firstError: options.firstError ?? null,
+        retryable: options.retryable ?? false,
+        cancellation: options.cancellation ?? {
+            supported: false,
+            reason: "This job is already complete and cannot be cancelled.",
+        },
+        progressSummary: options.progressSummary,
+    };
+    const logLines = options.logLines ?? [options.progressSummary];
+    await writeFile(resolvedLogPath, [
+        `[${startedAt}] ${options.operation} job started`,
+        ...logLines.map((line) => `[${finishedAt}] ${line}`),
+        `[${finishedAt}] ${options.operation} job ${state}`,
+        "",
+    ].join("\n"), "utf8");
+    await writeFile(manifestPath(jobDir), `${JSON.stringify(manifest, null, 2)}\n`, "utf8");
+    return manifest;
+}
 export async function createDummyJob(options = {}) {
     const now = options.now ?? (() => new Date());
     const randomId = options.randomId ?? randomUUID;
@@ -134,6 +176,13 @@ export async function resumeJob(jobId, options = {}) {
 }
 export async function retryJob(jobId, options = {}) {
     const sourceJob = await readJobManifest(jobId, options);
+    if (sourceJob.operation !== "dummy") {
+        return {
+            ok: false,
+            sourceJob,
+            reason: "Only dummy jobs support retry in this CLI version.",
+        };
+    }
     if (!sourceJob.retryable) {
         return {
             ok: false,
@@ -161,7 +210,7 @@ function isSbv2JobManifest(value) {
     return (isRecord(value) &&
         value.schemaVersion === 1 &&
         typeof value.jobId === "string" &&
-        value.operation === "dummy" &&
+        (value.operation === "dummy" || value.operation === "dataset-ingest") &&
         typeof value.state === "string" &&
         typeof value.createdAt === "string" &&
         isRecord(value.inputSummary) &&

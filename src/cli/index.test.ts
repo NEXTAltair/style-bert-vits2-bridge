@@ -1,4 +1,4 @@
-import { symlinkSync, writeFileSync, mkdtempSync } from "node:fs";
+import { mkdirSync, symlinkSync, writeFileSync, mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
@@ -139,5 +139,83 @@ describe("sbv2-bridge CLI", () => {
       }),
     ).resolves.toBe(2);
     expect(resumeOut.output()).toContain("resume unsupported");
+  });
+
+  it("ingests a dataset and exposes the resulting job through jobs status", async () => {
+    const jobsRoot = tempJobsRoot();
+    const datasetsRoot = mkdtempSync(path.join(tmpdir(), "sbv2-cli-datasets-"));
+    const sbv2Root = mkdtempSync(path.join(tmpdir(), "sbv2-cli-root-"));
+    const sourceRoot = mkdtempSync(path.join(tmpdir(), "sbv2-cli-source-"));
+    mkdirSync(path.join(sourceRoot, "bright"));
+    mkdirSync(path.join(sourceRoot, "soft"));
+    writeFileSync(path.join(sourceRoot, "bright", "a.wav"), "a");
+    writeFileSync(path.join(sourceRoot, "soft", "b.wav"), "b");
+
+    const stdout = createWriter();
+    const stderr = createWriter();
+    await expect(
+      runCli(
+        [
+          "datasets",
+          "ingest",
+          "--jobs-dir",
+          jobsRoot,
+          "--datasets-dir",
+          datasetsRoot,
+          "--sbv2-root",
+          sbv2Root,
+          "--model-name",
+          "cli-voice",
+          "--source",
+          sourceRoot,
+          "--language",
+          "ja",
+          "--use-jp-extra",
+          "--json",
+        ],
+        { stdout: stdout.stream, stderr: stderr.stream },
+      ),
+    ).resolves.toBe(0);
+    expect(stderr.output()).toBe("");
+
+    const ingested = JSON.parse(stdout.output()) as {
+      dataset: { modelName: string; styleMode: string; files: unknown[] };
+      job: { jobId: string; operation: string };
+    };
+    expect(ingested.dataset).toMatchObject({
+      modelName: "cli-voice",
+      styleMode: "directory",
+    });
+    expect(ingested.dataset.files).toHaveLength(2);
+    expect(ingested.job.operation).toBe("dataset-ingest");
+
+    const statusOut = createWriter();
+    await expect(
+      runCli(["jobs", "status", ingested.job.jobId, "--jobs-dir", jobsRoot, "--json"], {
+        stdout: statusOut.stream,
+        stderr: createWriter().stream,
+      }),
+    ).resolves.toBe(0);
+    const status = JSON.parse(statusOut.output()) as { job: { operation: string } };
+    expect(status.job.operation).toBe("dataset-ingest");
+  });
+
+  it("requires an explicit JP-Extra choice for dataset ingest", async () => {
+    const stdout = createWriter();
+    const stderr = createWriter();
+    await expect(
+      runCli(
+        [
+          "datasets",
+          "ingest",
+          "--model-name",
+          "missing-choice",
+          "--source",
+          mkdtempSync(path.join(tmpdir(), "sbv2-cli-source-")),
+        ],
+        { stdout: stdout.stream, stderr: stderr.stream },
+      ),
+    ).resolves.toBe(1);
+    expect(stderr.output()).toContain("Missing --use-jp-extra or --no-use-jp-extra");
   });
 });
