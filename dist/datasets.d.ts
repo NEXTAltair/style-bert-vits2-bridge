@@ -109,6 +109,7 @@ export interface PrepareDatasetCommandResult {
 }
 export interface PrepareDatasetCommandOptions {
     cwd: string;
+    onOutput?: (stream: "stdout" | "stderr", chunk: string) => void;
 }
 export type PrepareDatasetCommandRunner = (executable: string, args: string[], options: PrepareDatasetCommandOptions) => Promise<PrepareDatasetCommandResult>;
 export interface PrepareDatasetOptions {

@@ -236,18 +236,20 @@ describe("SBV2 dataset ingest", () => {
     const runner: PrepareDatasetCommandRunner = async (executable, args, options) => {
       calls.push({ executable, args, cwd: options.cwd });
       if (args.includes("slice.py")) {
+        options.onOutput?.("stdout", "slice progress\n");
         mkdirSync(path.join(sbv2Root, "Data", "prepare-voice", "raw", "happy"), { recursive: true });
         mkdirSync(path.join(sbv2Root, "Data", "prepare-voice", "raw", "sad"), { recursive: true });
         writeFileSync(path.join(sbv2Root, "Data", "prepare-voice", "raw", "happy", "a-0.wav"), "a");
         writeFileSync(path.join(sbv2Root, "Data", "prepare-voice", "raw", "sad", "b-0.wav"), "b");
       }
       if (args.includes("transcribe.py")) {
+        options.onOutput?.("stderr", "transcribe progress\n");
         writeFileSync(
           path.join(sbv2Root, "Data", "prepare-voice", "esd.list"),
           ["happy/a-0.wav|prepare-voice|JP|こんにちは", "sad/b-0.wav|prepare-voice|JP|おやすみ", ""].join("\n"),
         );
       }
-      return { stdout: "ok" };
+      return {};
     };
 
     const result = await prepareDataset({
@@ -307,10 +309,57 @@ describe("SBV2 dataset ingest", () => {
       operation: "dataset-prepare",
       state: "succeeded",
     });
+    expect(readFileSync(result.job.logPath, "utf8")).toContain("stdout: slice progress");
+    expect(readFileSync(result.job.logPath, "utf8")).toContain("stderr: transcribe progress");
     expect(result.job.artifactPaths).toContain(path.join(result.job.outputDir, "summary.json"));
     expect(JSON.parse(readFileSync(path.join(result.job.outputDir, "summary.json"), "utf8"))).toEqual(
       result.summary,
     );
+  });
+
+  it("honors SBV2 configs/paths.yml when locating prepare outputs", async () => {
+    const sbv2Root = tempRoot("sbv2-root-");
+    const configuredDatasetRoot = path.join(tempRoot("sbv2-configured-data-"), "datasets");
+    const configuredAssetsRoot = path.join(tempRoot("sbv2-configured-assets-"), "assets");
+    mkdirSync(path.join(sbv2Root, "configs"), { recursive: true });
+    writeFileSync(path.join(sbv2Root, "configs", "paths.yml"), `dataset_root: ${configuredDatasetRoot}\nassets_root: ${configuredAssetsRoot}\n`);
+    writeFileSync(path.join(sbv2Root, "slice.py"), "");
+    writeFileSync(path.join(sbv2Root, "transcribe.py"), "");
+    const sourceFile = path.join(tempRoot("sbv2-source-"), "sample.wav");
+    writeFileSync(sourceFile, "audio");
+    const ingested = await ingestDataset({
+      datasetsRoot: tempRoot("sbv2-datasets-"),
+      jobsRoot: tempRoot("sbv2-jobs-"),
+      sbv2Root,
+      modelName: "custom-root-prepare",
+      sourceAudioPath: sourceFile,
+      language: "ja",
+      useJpExtra: true,
+      probeAudio,
+    });
+    expect(ingested.dataset.datasetPath).toBe(path.join(configuredDatasetRoot, "custom-root-prepare"));
+    expect(ingested.dataset.assetsPath).toBe(path.join(configuredAssetsRoot, "custom-root-prepare"));
+    const runner: PrepareDatasetCommandRunner = async (_executable, args) => {
+      const outputDir = path.join(configuredDatasetRoot, "custom-root-prepare");
+      if (args.includes("slice.py")) {
+        mkdirSync(path.join(outputDir, "raw"), { recursive: true });
+        writeFileSync(path.join(outputDir, "raw", "sample-0.wav"), "a");
+      }
+      if (args.includes("transcribe.py")) {
+        writeFileSync(path.join(outputDir, "esd.list"), "sample-0.wav|custom-root-prepare|JP|こんにちは\n");
+      }
+      return {};
+    };
+
+    const result = await prepareDataset({
+      jobsRoot: tempRoot("sbv2-jobs-"),
+      manifestPath: ingested.dataset.manifestPath,
+      commandRunner: runner,
+    });
+
+    expect(result.summary.rawDir).toBe(path.join(configuredDatasetRoot, "custom-root-prepare", "raw"));
+    expect(result.summary.esdListPath).toBe(path.join(configuredDatasetRoot, "custom-root-prepare", "esd.list"));
+    expect(result.job.inputSummary.assetsPath).toBe(path.join(configuredAssetsRoot, "custom-root-prepare"));
   });
 
   it("rejects prepare when SBV2 output paths already exist", async () => {

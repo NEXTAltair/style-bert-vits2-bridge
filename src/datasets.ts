@@ -1,7 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
 import { createReadStream } from "node:fs";
 import { copyFile, mkdir, readdir, readFile, stat, writeFile } from "node:fs/promises";
-import { execFile } from "node:child_process";
+import { execFile, spawn } from "node:child_process";
 import { homedir } from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
@@ -131,6 +131,7 @@ export interface PrepareDatasetCommandResult {
 
 export interface PrepareDatasetCommandOptions {
   cwd: string;
+  onOutput?: (stream: "stdout" | "stderr", chunk: string) => void;
 }
 
 export type PrepareDatasetCommandRunner = (
@@ -151,6 +152,11 @@ export interface PrepareDatasetResult {
   dataset: Sbv2DatasetManifest;
   summary: Sbv2DatasetPrepareSummary;
   job: Sbv2JobManifest;
+}
+
+interface Sbv2PathConfigRoots {
+  datasetRoot: string;
+  assetsRoot: string;
 }
 
 interface SourceFile {
@@ -353,8 +359,9 @@ export async function ingestDataset(options: IngestDatasetOptions): Promise<Inge
   const created = now();
   const datasetsRoot = resolveDatasetsRoot(options.datasetsRoot);
   const sbv2Root = resolveSbv2Root(options.sbv2Root);
-  const datasetPath = path.join(sbv2Root, "Data", modelName);
-  const assetsPath = path.join(sbv2Root, "model_assets", modelName);
+  const pathConfig = await readSbv2PathConfig(sbv2Root);
+  const datasetPath = path.join(pathConfig.datasetRoot, modelName);
+  const assetsPath = path.join(pathConfig.assetsRoot, modelName);
 
   if (await pathExists(datasetPath)) {
     throw new Error(`SBV2 dataset already exists: ${datasetPath}`);
@@ -472,8 +479,6 @@ export async function prepareDataset(options: PrepareDatasetOptions): Promise<Pr
   const runner = options.commandRunner ?? runSbv2Command;
   const now = options.now ?? (() => new Date());
   const randomId = options.randomId ?? randomUUID;
-  const rawDir = path.join(dataset.datasetPath, "raw");
-  const esdListPath = path.join(dataset.datasetPath, "esd.list");
   const scriptPaths = [path.join(dataset.sbv2Root, "slice.py"), path.join(dataset.sbv2Root, "transcribe.py")];
   const executedCommands: Sbv2DatasetPrepareSummary["commands"] = [];
   const logLines: string[] = [`dataset prepare started for ${dataset.modelName}`];
@@ -501,6 +506,12 @@ export async function prepareDataset(options: PrepareDatasetOptions): Promise<Pr
   };
 
   try {
+    const pathConfig = await readSbv2PathConfig(dataset.sbv2Root);
+    const datasetPath = path.join(pathConfig.datasetRoot, dataset.modelName);
+    const assetsPath = path.join(pathConfig.assetsRoot, dataset.modelName);
+    const rawDir = path.join(datasetPath, "raw");
+    const esdListPath = path.join(datasetPath, "esd.list");
+
     assertLanguage(dataset.language);
     validateModelName(dataset.modelName);
     if (!(await pathExists(dataset.originalsDir))) {
@@ -517,8 +528,8 @@ export async function prepareDataset(options: PrepareDatasetOptions): Promise<Pr
     if (await pathExists(esdListPath)) {
       throw new Error(`SBV2 esd.list already exists: ${esdListPath}`);
     }
-    if (await pathExists(dataset.assetsPath)) {
-      throw new Error(`SBV2 model assets already exist: ${dataset.assetsPath}`);
+    if (await pathExists(assetsPath)) {
+      throw new Error(`SBV2 model assets already exist: ${assetsPath}`);
     }
 
     const sliceArgs = [
@@ -572,6 +583,8 @@ export async function prepareDataset(options: PrepareDatasetOptions): Promise<Pr
         workspaceId: dataset.workspaceId,
         modelName: dataset.modelName,
         datasetManifestPath: manifestPath,
+        datasetPath,
+        assetsPath,
         rawDir,
         esdListPath,
       },
@@ -604,14 +617,32 @@ async function runSbv2Command(
   args: string[],
   options: PrepareDatasetCommandOptions,
 ): Promise<PrepareDatasetCommandResult> {
-  const result = await execFileAsync(executable, args, {
-    cwd: options.cwd,
-    maxBuffer: 20 * 1024 * 1024,
+  return new Promise((resolve, reject) => {
+    const child = spawn(executable, args, {
+      cwd: options.cwd,
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    child.stdout?.setEncoding("utf8");
+    child.stderr?.setEncoding("utf8");
+    child.stdout?.on("data", (chunk: string) => {
+      options.onOutput?.("stdout", chunk);
+    });
+    child.stderr?.on("data", (chunk: string) => {
+      options.onOutput?.("stderr", chunk);
+    });
+    child.on("error", reject);
+    child.on("close", (code, signal) => {
+      if (code === 0) {
+        resolve({});
+        return;
+      }
+      const signalText = signal ? ` signal ${signal}` : "";
+      const error = new Error(
+        `${executable} ${args.join(" ")} failed with exit code ${code ?? "unknown"}${signalText}`,
+      );
+      reject(error);
+    });
   });
-  return {
-    stdout: result.stdout,
-    stderr: result.stderr,
-  };
 }
 
 async function runAndLogCommand(
@@ -624,13 +655,63 @@ async function runAndLogCommand(
 ): Promise<void> {
   commands.push({ executable, args, cwd });
   logLines.push(`running: ${executable} ${args.join(" ")}`);
-  const result = await runner(executable, args, { cwd });
-  if (result.stdout?.trim()) {
-    logLines.push(result.stdout.trim());
+  const result = await runner(executable, args, {
+    cwd,
+    onOutput: (stream, chunk) => appendCommandOutput(logLines, stream, chunk),
+  });
+  appendCommandOutput(logLines, "stdout", result.stdout ?? "");
+  appendCommandOutput(logLines, "stderr", result.stderr ?? "");
+}
+
+function appendCommandOutput(logLines: string[], stream: "stdout" | "stderr", chunk: string): void {
+  for (const line of chunk.split(/\r?\n/)) {
+    const trimmed = line.trim();
+    if (trimmed) {
+      logLines.push(`${stream}: ${trimmed}`);
+    }
   }
-  if (result.stderr?.trim()) {
-    logLines.push(result.stderr.trim());
+}
+
+async function readSbv2PathConfig(sbv2Root: string): Promise<Sbv2PathConfigRoots> {
+  const pathsPath = path.join(sbv2Root, "configs", "paths.yml");
+  const defaultPathsPath = path.join(sbv2Root, "configs", "default_paths.yml");
+  const configPath = (await pathExists(pathsPath))
+    ? pathsPath
+    : (await pathExists(defaultPathsPath))
+      ? defaultPathsPath
+      : null;
+  if (!configPath) {
+    return {
+      datasetRoot: path.join(sbv2Root, "Data"),
+      assetsRoot: path.join(sbv2Root, "model_assets"),
+    };
   }
+
+  const text = await readFile(configPath, "utf8");
+  return {
+    datasetRoot: resolveSbv2ConfigPath(sbv2Root, parseSimpleYamlString(text, "dataset_root") ?? "Data"),
+    assetsRoot: resolveSbv2ConfigPath(sbv2Root, parseSimpleYamlString(text, "assets_root") ?? "model_assets"),
+  };
+}
+
+function parseSimpleYamlString(text: string, key: string): string | undefined {
+  for (const line of text.split(/\r?\n/)) {
+    const withoutComment = line.replace(/\s+#.*$/, "");
+    const match = withoutComment.match(/^([A-Za-z_][A-Za-z0-9_-]*)\s*:\s*(.*?)\s*$/);
+    if (!match || match[1] !== key) {
+      continue;
+    }
+    const value = match[2].trim();
+    if (!value) {
+      return undefined;
+    }
+    return value.replace(/^['"]|['"]$/g, "");
+  }
+  return undefined;
+}
+
+function resolveSbv2ConfigPath(sbv2Root: string, value: string): string {
+  return path.isAbsolute(value) ? value : path.join(sbv2Root, value);
 }
 
 async function buildPrepareSummary(
