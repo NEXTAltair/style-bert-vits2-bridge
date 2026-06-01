@@ -1,4 +1,4 @@
-import { mkdtempSync } from "node:fs";
+import { mkdirSync, mkdtempSync } from "node:fs";
 import { readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -67,6 +67,18 @@ describe("SBV2 jobs", () => {
     });
 
     await expect(listJobManifests({ jobsRoot })).resolves.toEqual([newer, older]);
+  });
+
+  it("skips incomplete job directories when listing", async () => {
+    const jobsRoot = tempJobsRoot();
+    const job = await createDummyJob({
+      jobsRoot,
+      now: () => new Date("2026-06-01T00:00:00.000Z"),
+      randomId: () => "complete",
+    });
+    mkdirSync(path.join(jobsRoot, "sbv2-job-20260601010000-incomplete"));
+
+    await expect(listJobManifests({ jobsRoot })).resolves.toEqual([job]);
   });
 
   it("records dummy failures with firstError and retryability", async () => {

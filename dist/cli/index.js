@@ -1,5 +1,17 @@
 #!/usr/bin/env node
+import { realpathSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import { cancelJob, createDummyJob, listJobManifests, readJobManifest, resumeJob, retryJob, tailJobLog, } from "../jobs.js";
+export function isCliEntrypoint(moduleUrl, argvPath) {
+    if (!argvPath)
+        return false;
+    try {
+        return realpathSync(fileURLToPath(moduleUrl)) === realpathSync(argvPath);
+    }
+    catch {
+        return false;
+    }
+}
 function writeLine(stream, value) {
     stream.write(`${value}\n`);
 }
@@ -197,6 +209,6 @@ export async function runCli(argv, io = {}) {
         return 1;
     }
 }
-if (import.meta.url === `file://${process.argv[1]}`) {
+if (isCliEntrypoint(import.meta.url, process.argv[1])) {
     process.exitCode = await runCli(process.argv.slice(2));
 }

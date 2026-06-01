@@ -1,5 +1,7 @@
 #!/usr/bin/env node
 
+import { realpathSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import {
   cancelJob,
   createDummyJob,
@@ -28,6 +30,16 @@ interface ParsedCommand {
   command: string;
   args: string[];
   options: CliOptions;
+}
+
+export function isCliEntrypoint(moduleUrl: string, argvPath: string | undefined): boolean {
+  if (!argvPath) return false;
+
+  try {
+    return realpathSync(fileURLToPath(moduleUrl)) === realpathSync(argvPath);
+  } catch {
+    return false;
+  }
 }
 
 function writeLine(stream: Pick<typeof process.stdout, "write">, value: string): void {
@@ -236,6 +248,6 @@ export async function runCli(argv: string[], io: CliIO = {}): Promise<number> {
   }
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) {
+if (isCliEntrypoint(import.meta.url, process.argv[1])) {
   process.exitCode = await runCli(process.argv.slice(2));
 }

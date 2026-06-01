@@ -97,9 +97,10 @@ export async function listJobManifests(options = {}) {
         }
         throw error;
     }
-    const jobs = await Promise.all(entries
+    const results = await Promise.allSettled(entries
         .filter((entry) => entry.startsWith("sbv2-job-"))
         .map(async (entry) => readJobManifest(entry, { jobsRoot: root })));
+    const jobs = results.flatMap((result) => (result.status === "fulfilled" ? [result.value] : []));
     return jobs.sort((left, right) => right.createdAt.localeCompare(left.createdAt));
 }
 export async function tailJobLog(jobId, options = {}) {

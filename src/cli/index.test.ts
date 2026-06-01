@@ -1,8 +1,9 @@
-import { mkdtempSync } from "node:fs";
+import { symlinkSync, writeFileSync, mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { pathToFileURL } from "node:url";
 import { describe, expect, it } from "vitest";
-import { runCli } from "./index.js";
+import { isCliEntrypoint, runCli } from "./index.js";
 
 function tempJobsRoot(): string {
   return mkdtempSync(path.join(tmpdir(), "sbv2-cli-jobs-"));
@@ -22,6 +23,16 @@ function createWriter() {
 }
 
 describe("sbv2-bridge CLI", () => {
+  it("detects invocation through a package bin symlink", () => {
+    const dir = tempJobsRoot();
+    const target = path.join(dir, "index.js");
+    const link = path.join(dir, "sbv2-bridge");
+    writeFileSync(target, "");
+    symlinkSync(target, link);
+
+    expect(isCliEntrypoint(pathToFileURL(target).href, link)).toBe(true);
+  });
+
   it("starts a dummy job and reads its status as JSON", async () => {
     const jobsRoot = tempJobsRoot();
     const stdout = createWriter();
