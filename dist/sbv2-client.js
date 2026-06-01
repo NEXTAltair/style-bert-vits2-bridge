@@ -258,6 +258,24 @@ export class Sbv2Client {
         }
         return normalizeModelsInfo(await response.json());
     }
+    async refreshModels() {
+        const url = new URL("/models/refresh", this.baseUrl);
+        let response;
+        try {
+            response = await fetch(url, {
+                method: "POST",
+                signal: AbortSignal.timeout(this.timeoutMs),
+            });
+        }
+        catch (error) {
+            throw formatRequestError("/models/refresh", this.baseUrl, this.timeoutMs, error);
+        }
+        if (!response.ok) {
+            const body = await response.text().catch(() => "");
+            throw formatHttpError("/models/refresh", response, body);
+        }
+        return normalizeModelsInfo(await response.json());
+    }
     async synthesize(params) {
         const url = new URL("/voice", this.baseUrl);
         // SBV2 requires encoding=utf-8 to properly URL-decode non-ASCII text

@@ -1,0 +1,777 @@
+import { randomUUID } from "node:crypto";
+import { cp, lstat, mkdir, open, readdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
+import { homedir } from "node:os";
+import path from "node:path";
+import { createJobManifest } from "./jobs.js";
+import { readDatasetManifest } from "./datasets.js";
+import { Sbv2Client } from "./sbv2-client.js";
+const MAX_SAFETENSORS_HEADER_BYTES = 100 * 1024 * 1024;
+export async function listModelCandidates(options) {
+    const context = await resolveModelContext(options);
+    return [await inspectModelCandidate(context)];
+}
+export async function promoteModel(options) {
+    const context = await resolveModelContext(options);
+    if (options.confirmModelName !== context.modelName) {
+        throw new Error(`--confirm-model-name must exactly match ${context.modelName}`);
+    }
+    const now = options.now ?? (() => new Date());
+    const randomId = options.randomId ?? randomUUID;
+    const logLines = [`model promotion started for ${context.modelName}`];
+    let backupDir = null;
+    let copied = false;
+    let cleanupTargetOnFailure = false;
+    let candidate;
+    const fail = async (error) => {
+        const message = error instanceof Error ? error.message : String(error);
+        await createJobManifest({
+            jobsRoot: options.jobsRoot,
+            operation: "model-promote",
+            state: "failed",
+            inputSummary: {
+                modelName: context.modelName,
+                sourceDir: context.sourceDir,
+                targetDir: context.targetDir,
+            },
+            artifactPaths: candidate ? collectCandidateArtifacts(candidate) : [],
+            firstError: message,
+            retryable: false,
+            progressSummary: `Model promotion failed for ${context.modelName}.`,
+            logLines: [...logLines, message],
+            now,
+            randomId,
+        });
+        throw error;
+    };
+    try {
+        candidate = await inspectModelCandidate(context);
+        if (!candidate.promotable) {
+            throw new Error(`Model candidate is not promotable: ${candidate.errors.join("; ")}`);
+        }
+        const sameDirectory = await samePath(context.sourceDir, context.targetDir);
+        if (!sameDirectory) {
+            if (await pathExists(context.targetDir)) {
+                if (!options.backupExisting) {
+                    throw new Error(`SBV2 model assets already exist: ${context.targetDir}`);
+                }
+                const pendingBackupDir = await makeBackupDir(context.assetsRoot, context.modelName, now());
+                await mkdir(path.dirname(pendingBackupDir), { recursive: true });
+                await rename(context.targetDir, pendingBackupDir);
+                backupDir = pendingBackupDir;
+                logLines.push(`backed up existing model assets: ${backupDir}`);
+            }
+            else {
+                cleanupTargetOnFailure = true;
+            }
+            await cp(context.sourceDir, context.targetDir, {
+                recursive: true,
+                errorOnExist: true,
+                force: false,
+                dereference: true,
+            });
+            copied = true;
+            logLines.push(`copied model assets to ${context.targetDir}`);
+            candidate = await inspectModelCandidate({ ...context, sourceDir: context.targetDir });
+            if (!candidate.promotable) {
+                throw new Error(`Copied model candidate is not promotable: ${candidate.errors.join("; ")}`);
+            }
+        }
+        else {
+            logLines.push(`model assets already exist at target: ${context.targetDir}`);
+        }
+        const summary = {
+            schemaVersion: 1,
+            modelName: context.modelName,
+            sourceDir: context.sourceDir,
+            targetDir: context.targetDir,
+            copied,
+            backupDir,
+            candidate,
+        };
+        if (options.baseUrl) {
+            const client = new Sbv2Client({ baseUrl: options.baseUrl });
+            const modelsInfo = await client.refreshModels();
+            const found = modelInfoContains(modelsInfo, context.modelName);
+            summary.refresh = {
+                baseUrl: options.baseUrl,
+                refreshed: true,
+                foundInModelsInfo: found,
+                modelsInfoCount: modelsInfo.length,
+            };
+            logLines.push(`refreshed SBV2 models from ${options.baseUrl}`);
+            if (!found) {
+                throw new Error(`Promoted model "${context.modelName}" was not found in /models/info after refresh`);
+            }
+        }
+        const job = await createJobManifest({
+            jobsRoot: options.jobsRoot,
+            operation: "model-promote",
+            inputSummary: {
+                modelName: context.modelName,
+                sourceDir: context.sourceDir,
+                targetDir: context.targetDir,
+                copied,
+                backupDir,
+            },
+            artifactPaths: collectCandidateArtifacts(candidate),
+            progressSummary: `Model promotion completed for ${context.modelName}.`,
+            logLines: [...logLines, `model promotion succeeded for ${context.modelName}`],
+            now,
+            randomId,
+        });
+        const summaryPath = path.join(job.outputDir, "summary.json");
+        await writeFile(summaryPath, `${JSON.stringify(summary, null, 2)}\n`, "utf8");
+        const updatedJob = {
+            ...job,
+            artifactPaths: [...job.artifactPaths, summaryPath],
+        };
+        await writeFile(path.join(job.outputDir, "manifest.json"), `${JSON.stringify(updatedJob, null, 2)}\n`, "utf8");
+        return { candidate, summary, job: updatedJob };
+    }
+    catch (error) {
+        const refreshAfterRecovery = Boolean(options.baseUrl && copied);
+        if (backupDir) {
+            await rollbackBackup(context.targetDir, backupDir, logLines);
+            if (refreshAfterRecovery && options.baseUrl) {
+                await refreshAfterFailedMutation(options.baseUrl, logLines);
+            }
+        }
+        else if (cleanupTargetOnFailure) {
+            await cleanupCopiedTarget(context.targetDir, logLines);
+            if (refreshAfterRecovery && options.baseUrl) {
+                await refreshAfterFailedMutation(options.baseUrl, logLines);
+            }
+        }
+        return fail(error);
+    }
+}
+async function inspectModelCandidate(context) {
+    const sourceDir = resolveUserPath(context.sourceDir);
+    const warnings = [];
+    const errors = [];
+    const configJsonPath = path.join(sourceDir, "config.json");
+    const styleVectorsPath = path.join(sourceDir, "style_vectors.npy");
+    let configModelName;
+    let expectedStyleRows;
+    const sourceStat = await directoryStat(sourceDir);
+    if (!sourceStat.exists) {
+        errors.push(`candidate directory was not found: ${sourceDir}`);
+    }
+    else if (!sourceStat.isDirectory) {
+        errors.push(`candidate path is not a directory: ${sourceDir}`);
+    }
+    const configStat = await nonEmptyFileStat(configJsonPath);
+    if (!configStat) {
+        errors.push(`config.json is missing or empty: ${configJsonPath}`);
+    }
+    else {
+        try {
+            const config = JSON.parse(await readFile(configJsonPath, "utf8"));
+            configModelName = readConfigModelName(config);
+            if (configModelName && configModelName !== context.modelName) {
+                errors.push(`config.json model_name "${configModelName}" does not match "${context.modelName}"`);
+            }
+            expectedStyleRows = readConfigNumStyles(config);
+            errors.push(...validateConfigShape(config));
+        }
+        catch (error) {
+            const message = error instanceof Error ? error.message : String(error);
+            errors.push(`config.json is not valid JSON: ${message}`);
+        }
+    }
+    if (!(await nonEmptyFileStat(styleVectorsPath))) {
+        errors.push(`style_vectors.npy is missing or empty: ${styleVectorsPath}`);
+    }
+    else {
+        errors.push(...(await validateStyleVectorsFile(styleVectorsPath, expectedStyleRows)));
+    }
+    const safetensorsResult = await listSafetensors(sourceDir);
+    const safetensors = safetensorsResult.files;
+    errors.push(...safetensorsResult.errors);
+    if (!safetensors.length) {
+        errors.push(`no non-empty .safetensors files were found in ${sourceDir}`);
+    }
+    if (!(await samePath(sourceDir, context.targetDir))) {
+        errors.push(...(await validateSourceSymlinks(sourceDir)));
+    }
+    return {
+        schemaVersion: 1,
+        candidateId: `${context.modelName}:${path.basename(sourceDir)}`,
+        modelName: context.modelName,
+        sbv2Root: context.sbv2Root,
+        sourceDir,
+        targetDir: context.targetDir,
+        configJsonPath,
+        styleVectorsPath,
+        safetensors,
+        ...(configModelName ? { configModelName } : {}),
+        warnings,
+        errors,
+        promotable: errors.length === 0,
+    };
+}
+async function resolveModelContext(options) {
+    const fromManifest = options.manifestPath ? await readDatasetManifest(resolveUserPath(options.manifestPath)) : undefined;
+    const sbv2Root = resolveUserPath(options.sbv2Root ?? fromManifest?.sbv2Root ?? process.env.SBV2_ROOT ?? "~/src/Style-Bert-VITS2");
+    const modelName = options.modelName ?? fromManifest?.modelName;
+    if (!modelName) {
+        throw new Error("Missing --model-name or --manifest");
+    }
+    validateModelName(modelName);
+    const pathConfig = await readSbv2PathConfig(sbv2Root);
+    const targetDir = path.join(pathConfig.assetsRoot, modelName);
+    return {
+        sbv2Root,
+        modelName,
+        assetsRoot: pathConfig.assetsRoot,
+        sourceDir: resolveUserPath(options.sourcePath ?? targetDir),
+        targetDir,
+    };
+}
+async function readSbv2PathConfig(sbv2Root) {
+    const pathsPath = path.join(sbv2Root, "configs", "paths.yml");
+    const defaultPathsPath = path.join(sbv2Root, "configs", "default_paths.yml");
+    const configPath = (await pathExists(pathsPath))
+        ? pathsPath
+        : (await pathExists(defaultPathsPath))
+            ? defaultPathsPath
+            : null;
+    if (!configPath) {
+        return { assetsRoot: path.join(sbv2Root, "model_assets") };
+    }
+    const text = await readFile(configPath, "utf8");
+    return {
+        assetsRoot: resolveSbv2ConfigPath(sbv2Root, parseSimpleYamlString(text, "assets_root") ?? "model_assets"),
+    };
+}
+async function listSafetensors(sourceDir) {
+    let entries;
+    try {
+        entries = await readdir(sourceDir);
+    }
+    catch (error) {
+        if (isNodeError(error) && (error.code === "ENOENT" || error.code === "ENOTDIR"))
+            return { files: [], errors: [] };
+        throw error;
+    }
+    const files = [];
+    const errors = [];
+    for (const entry of entries.sort((left, right) => left.localeCompare(right))) {
+        if (!entry.endsWith(".safetensors") || entry.startsWith("."))
+            continue;
+        const filePath = path.join(sourceDir, entry);
+        const fileStat = await fileStatOrError(filePath);
+        if (!fileStat) {
+            errors.push(`safetensors file could not be inspected: ${filePath}`);
+            continue;
+        }
+        if (!fileStat.isFile() || fileStat.size === 0) {
+            errors.push(`safetensors file is missing or empty: ${filePath}`);
+            continue;
+        }
+        const validationErrors = await validateSafetensorsFile(filePath, fileStat.size);
+        if (validationErrors.length) {
+            errors.push(...validationErrors);
+        }
+        else {
+            files.push({ path: filePath, sizeBytes: fileStat.size });
+        }
+    }
+    return { files, errors };
+}
+async function nonEmptyFileStat(filePath) {
+    try {
+        const result = await stat(filePath);
+        return result.isFile() && result.size > 0 ? { size: result.size } : undefined;
+    }
+    catch (error) {
+        if (isNodeError(error) && (error.code === "ENOENT" || error.code === "ENOTDIR"))
+            return undefined;
+        throw error;
+    }
+}
+function readConfigModelName(value) {
+    if (!isRecord(value))
+        return undefined;
+    const candidate = value.model_name ?? value.modelName;
+    return typeof candidate === "string" && candidate.trim() ? candidate.trim() : undefined;
+}
+function readConfigNumStyles(value) {
+    if (!isRecord(value) || !isRecord(value.data))
+        return undefined;
+    const candidate = value.data.num_styles;
+    return typeof candidate === "number" && Number.isInteger(candidate) && candidate > 0 ? candidate : undefined;
+}
+function collectCandidateArtifacts(candidate) {
+    return [
+        candidate.configJsonPath,
+        candidate.styleVectorsPath,
+        ...candidate.safetensors.map((file) => file.path),
+    ];
+}
+function modelInfoContains(modelsInfo, modelName) {
+    return modelsInfo.some((model) => model.name === modelName || model.modelName === modelName || model.model_name === modelName);
+}
+async function samePath(left, right) {
+    return path.resolve(left) === path.resolve(right);
+}
+async function makeBackupDir(assetsRoot, modelName, now) {
+    const stamp = now.toISOString().replace(/[-:.TZ]/g, "").slice(0, 14);
+    const base = path.join(assetsRoot, ".bridge-backups", `${modelName}-${stamp}`);
+    if (!(await pathExists(base)))
+        return base;
+    for (let index = 2; index < 1000; index += 1) {
+        const candidate = `${base}-${index}`;
+        if (!(await pathExists(candidate)))
+            return candidate;
+    }
+    throw new Error(`Unable to find an unused backup path for ${modelName}`);
+}
+async function rollbackBackup(targetDir, backupDir, logLines) {
+    try {
+        await rm(targetDir, { recursive: true, force: true });
+        await rename(backupDir, targetDir);
+        logLines.push(`rolled back model assets from backup: ${backupDir}`);
+    }
+    catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        logLines.push(`warning: failed to roll back model assets from ${backupDir}: ${message}`);
+    }
+}
+async function cleanupCopiedTarget(targetDir, logLines) {
+    try {
+        await rm(targetDir, { recursive: true, force: true });
+        logLines.push(`removed incomplete promoted model assets: ${targetDir}`);
+    }
+    catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        logLines.push(`warning: failed to remove incomplete model assets ${targetDir}: ${message}`);
+    }
+}
+async function refreshAfterFailedMutation(baseUrl, logLines) {
+    try {
+        const modelsInfo = await new Sbv2Client({ baseUrl }).refreshModels();
+        logLines.push(`refreshed SBV2 models after failed promotion recovery from ${baseUrl}; models=${modelsInfo.length}`);
+    }
+    catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        logLines.push(`warning: failed to refresh SBV2 models after promotion recovery from ${baseUrl}: ${message}`);
+    }
+}
+function validateConfigShape(value) {
+    if (!isRecord(value)) {
+        return ["config.json root must be an object"];
+    }
+    const errors = [];
+    if (!readConfigModelName(value)) {
+        errors.push("config.json model_name must be a non-empty string");
+    }
+    if (!isRecord(value.model)) {
+        errors.push("config.json is missing model object");
+    }
+    if (!isRecord(value.train)) {
+        errors.push("config.json is missing train object");
+    }
+    const data = value.data;
+    if (!isRecord(data)) {
+        errors.push("config.json is missing data object");
+        return errors;
+    }
+    const spk2id = data.spk2id;
+    const style2id = data.style2id;
+    const numSpeakers = data.n_speakers;
+    const numStyles = data.num_styles;
+    errors.push(...validateIdMap(spk2id, "data.spk2id"));
+    errors.push(...validateIdMap(style2id, "data.style2id"));
+    const expectedSpeakers = numSpeakers === undefined ? 1 : numSpeakers;
+    if (typeof expectedSpeakers !== "number" || !Number.isInteger(expectedSpeakers) || expectedSpeakers < 1) {
+        errors.push("config.json data.n_speakers must be a positive integer");
+    }
+    else if (isRecord(spk2id) && Object.keys(spk2id).length !== expectedSpeakers) {
+        errors.push("config.json data.n_speakers must match data.spk2id size");
+    }
+    else if (isRecord(spk2id) && !isZeroBasedPermutation(Object.values(spk2id), expectedSpeakers)) {
+        errors.push("config.json data.spk2id values must be a zero-based permutation of data.n_speakers");
+    }
+    if (typeof numStyles !== "number" || !Number.isInteger(numStyles) || numStyles < 1) {
+        errors.push("config.json data.num_styles must be a positive integer");
+    }
+    else if (isRecord(style2id) && Object.keys(style2id).length !== numStyles) {
+        errors.push("config.json data.num_styles must match data.style2id size");
+    }
+    else if (isRecord(style2id) && !isZeroBasedPermutation(Object.values(style2id), numStyles)) {
+        errors.push("config.json data.style2id values must be a zero-based permutation of data.num_styles");
+    }
+    return errors;
+}
+function validateModelName(value) {
+    if (!value.trim() || value === "." || value === ".." || value.startsWith(".") || /[\\/]/.test(value) || /[\u0000-\u001f]/.test(value)) {
+        throw new Error(`Invalid SBV2 model name: ${value}`);
+    }
+}
+async function validateStyleVectorsFile(filePath, expectedRows) {
+    let buffer;
+    try {
+        buffer = await readFile(filePath);
+    }
+    catch (error) {
+        if (isNodeError(error)) {
+            return [`style_vectors.npy could not be read: ${filePath}`];
+        }
+        throw error;
+    }
+    const header = parseNpyHeader(buffer);
+    if (!header) {
+        return [`style_vectors.npy is not a valid NumPy .npy file: ${filePath}`];
+    }
+    const { shape } = header;
+    if (shape.length < 2 || shape[0] < 1) {
+        return [`style_vectors.npy must have at least one 2D style vector row: ${filePath}`];
+    }
+    if (expectedRows !== undefined && shape[0] !== expectedRows) {
+        return [`style_vectors.npy row count ${shape[0]} does not match config.json data.num_styles ${expectedRows}: ${filePath}`];
+    }
+    const expectedDataBytes = calculateNpyDataBytes(shape, header.bytesPerElement);
+    if (expectedDataBytes === undefined || buffer.length < header.dataOffset + expectedDataBytes) {
+        return [`style_vectors.npy data is truncated: ${filePath}`];
+    }
+    return [];
+}
+function parseNpyHeader(buffer) {
+    if (buffer.length < 10 || buffer.toString("latin1", 0, 6) !== "\x93NUMPY") {
+        return undefined;
+    }
+    const major = buffer[6];
+    const minor = buffer[7];
+    const headerLengthBytes = major === 1 ? 2 : major === 2 || major === 3 ? 4 : 0;
+    if (!headerLengthBytes || minor === undefined || buffer.length < 8 + headerLengthBytes) {
+        return undefined;
+    }
+    const headerLength = headerLengthBytes === 2 ? buffer.readUInt16LE(8) : buffer.readUInt32LE(8);
+    const headerStart = 8 + headerLengthBytes;
+    const headerEnd = headerStart + headerLength;
+    if (buffer.length < headerEnd) {
+        return undefined;
+    }
+    const header = buffer.toString("latin1", headerStart, headerEnd);
+    const parsedHeader = parseNpyHeaderLiteral(header);
+    if (!parsedHeader) {
+        return undefined;
+    }
+    const bytesPerElement = parseNpyDescriptorBytes(parsedHeader.descr);
+    if (!bytesPerElement) {
+        return undefined;
+    }
+    const shape = parsedHeader.shape
+        .split(",")
+        .map((part) => part.trim())
+        .filter(Boolean)
+        .map((part) => Number(part));
+    return shape.length && shape.every((part) => Number.isInteger(part) && part >= 0)
+        ? { shape, dataOffset: headerEnd, bytesPerElement }
+        : undefined;
+}
+function parseNpyHeaderLiteral(header) {
+    const trimmed = header.trim();
+    if (!trimmed.startsWith("{") || !trimmed.endsWith("}"))
+        return undefined;
+    const entries = new Map();
+    const entryPattern = /'([^']+)'\s*:\s*('[^']*'|True|False|\([^)]*\))\s*,?/g;
+    let match;
+    let consumed = "{";
+    while ((match = entryPattern.exec(trimmed)) !== null) {
+        entries.set(match[1], match[2]);
+        consumed += match[0];
+    }
+    consumed += "}";
+    if (normalizeNpyHeaderLiteral(consumed) !== normalizeNpyHeaderLiteral(trimmed))
+        return undefined;
+    if (entries.size !== 3 || !entries.has("descr") || !entries.has("fortran_order") || !entries.has("shape"))
+        return undefined;
+    const descr = entries.get("descr");
+    const fortranOrder = entries.get("fortran_order");
+    const shape = entries.get("shape");
+    if (!descr?.startsWith("'") || !descr.endsWith("'"))
+        return undefined;
+    if (fortranOrder !== "False" && fortranOrder !== "True")
+        return undefined;
+    if (!shape?.startsWith("(") || !shape.endsWith(")"))
+        return undefined;
+    return { descr: descr.slice(1, -1), fortranOrder: fortranOrder === "True", shape: shape.slice(1, -1) };
+}
+function normalizeNpyHeaderLiteral(value) {
+    return value.replace(/\s+/g, "").replace(/,}/g, "}");
+}
+function parseNpyDescriptorBytes(descriptor) {
+    const match = descriptor.match(/^[<>=|]?([A-Za-z])(\d+)$/);
+    if (!match)
+        return undefined;
+    const kind = match[1];
+    if (!["f", "i", "u", "c", "b"].includes(kind))
+        return undefined;
+    const bytes = Number(match[2]);
+    return Number.isInteger(bytes) && bytes > 0 ? bytes : undefined;
+}
+function calculateNpyDataBytes(shape, bytesPerElement) {
+    let count = 1;
+    for (const dimension of shape) {
+        count *= dimension;
+        if (!Number.isSafeInteger(count))
+            return undefined;
+    }
+    const total = count * bytesPerElement;
+    return Number.isSafeInteger(total) ? total : undefined;
+}
+function parseSimpleYamlString(text, key) {
+    for (const line of text.split(/\r?\n/)) {
+        const withoutComment = line.replace(/\s+#.*$/, "");
+        const match = withoutComment.match(/^([A-Za-z_][A-Za-z0-9_-]*)\s*:\s*(.*?)\s*$/);
+        if (!match || match[1] !== key)
+            continue;
+        const value = match[2].trim();
+        return value ? value.replace(/^['"]|['"]$/g, "") : undefined;
+    }
+    return undefined;
+}
+function resolveSbv2ConfigPath(sbv2Root, value) {
+    return path.isAbsolute(value) ? value : path.join(sbv2Root, value);
+}
+function resolveUserPath(value) {
+    if (value === "~")
+        return homedir();
+    if (value.startsWith("~/"))
+        return path.join(homedir(), value.slice(2));
+    return path.resolve(value);
+}
+async function pathExists(filePath) {
+    try {
+        await stat(filePath);
+        return true;
+    }
+    catch (error) {
+        if (isNodeError(error) && error.code === "ENOENT")
+            return false;
+        throw error;
+    }
+}
+async function directoryStat(filePath) {
+    try {
+        const result = await stat(filePath);
+        return { exists: true, isDirectory: result.isDirectory() };
+    }
+    catch (error) {
+        if (isNodeError(error) && error.code === "ENOENT")
+            return { exists: false, isDirectory: false };
+        throw error;
+    }
+}
+function isNodeError(value) {
+    return value instanceof Error && "code" in value;
+}
+function isRecord(value) {
+    return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+function validateIdMap(value, name) {
+    if (!isRecord(value) || Object.keys(value).length === 0) {
+        return [`config.json ${name} must be a non-empty object`];
+    }
+    if (!Object.values(value).every((id) => typeof id === "number" && Number.isSafeInteger(id) && id >= 0)) {
+        return [`config.json ${name} values must be non-negative safe integers`];
+    }
+    return [];
+}
+async function fileStatOrError(filePath) {
+    try {
+        return await stat(filePath);
+    }
+    catch (error) {
+        if (isNodeError(error))
+            return undefined;
+        throw error;
+    }
+}
+async function validateSourceSymlinks(sourceDir) {
+    const errors = [];
+    await collectUnexpectedSymlinkErrors(sourceDir, sourceDir, errors);
+    return errors;
+}
+async function collectUnexpectedSymlinkErrors(rootDir, currentDir, errors) {
+    let entries;
+    try {
+        entries = await readdir(currentDir);
+    }
+    catch (error) {
+        if (isNodeError(error) && (error.code === "ENOENT" || error.code === "ENOTDIR"))
+            return;
+        throw error;
+    }
+    for (const entry of entries) {
+        if (entry === "." || entry === "..")
+            continue;
+        const filePath = path.join(currentDir, entry);
+        const relativePath = path.relative(rootDir, filePath);
+        let fileStat;
+        try {
+            fileStat = await lstat(filePath);
+        }
+        catch (error) {
+            if (isNodeError(error))
+                continue;
+            throw error;
+        }
+        if (fileStat.isSymbolicLink()) {
+            if (!isAllowedArtifactSymlink(relativePath)) {
+                errors.push(`unexpected symlink in model source: ${filePath}`);
+            }
+            continue;
+        }
+        if (fileStat.isDirectory()) {
+            await collectUnexpectedSymlinkErrors(rootDir, filePath, errors);
+        }
+    }
+}
+function isAllowedArtifactSymlink(relativePath) {
+    if (relativePath.includes(path.sep))
+        return false;
+    if (path.basename(relativePath).startsWith("."))
+        return false;
+    return relativePath === "config.json" || relativePath === "style_vectors.npy" || relativePath.endsWith(".safetensors");
+}
+function isZeroBasedPermutation(values, size) {
+    const ids = values.filter((value) => typeof value === "number" && Number.isSafeInteger(value) && value >= 0);
+    if (ids.length !== values.length)
+        return false;
+    const unique = new Set(ids);
+    return unique.size === size && ids.every((id) => id < size);
+}
+async function validateSafetensorsFile(filePath, fileSize) {
+    let header;
+    try {
+        header = await readSafetensorsHeader(filePath, fileSize);
+    }
+    catch (error) {
+        if (isNodeError(error)) {
+            return [`safetensors file could not be read: ${filePath}`];
+        }
+        throw error;
+    }
+    if (!header) {
+        return [`safetensors file is not valid: ${filePath}`];
+    }
+    return validateSafetensorsHeader(header.value, header.dataBytes, filePath);
+}
+async function readSafetensorsHeader(filePath, fileSize) {
+    if (fileSize < 8)
+        return undefined;
+    const file = await open(filePath, "r");
+    try {
+        const lengthBuffer = Buffer.alloc(8);
+        const lengthRead = await file.read(lengthBuffer, 0, lengthBuffer.length, 0);
+        if (lengthRead.bytesRead !== lengthBuffer.length)
+            return undefined;
+        const headerLengthBig = lengthBuffer.readBigUInt64LE(0);
+        if (headerLengthBig > BigInt(Number.MAX_SAFE_INTEGER))
+            return undefined;
+        const headerLength = Number(headerLengthBig);
+        const headerStart = 8;
+        const headerEnd = headerStart + headerLength;
+        if (headerLength < 2 || headerLength > MAX_SAFETENSORS_HEADER_BYTES || headerEnd > fileSize)
+            return undefined;
+        const headerBuffer = Buffer.alloc(headerLength);
+        const headerRead = await file.read(headerBuffer, 0, headerLength, headerStart);
+        if (headerRead.bytesRead !== headerLength)
+            return undefined;
+        try {
+            const value = JSON.parse(headerBuffer.toString("utf8"));
+            return { value, dataBytes: fileSize - headerEnd };
+        }
+        catch {
+            return undefined;
+        }
+    }
+    finally {
+        await file.close();
+    }
+}
+function validateSafetensorsHeader(value, dataBytes, filePath) {
+    if (!isRecord(value)) {
+        return [`safetensors header must be an object: ${filePath}`];
+    }
+    const metadata = value.__metadata__;
+    if (metadata !== undefined &&
+        (!isRecord(metadata) || !Object.values(metadata).every((metadataValue) => typeof metadataValue === "string"))) {
+        return [`safetensors metadata must be a string map: ${filePath}`];
+    }
+    const tensorEntries = Object.entries(value).filter(([name]) => name !== "__metadata__");
+    if (!tensorEntries.length) {
+        return [`safetensors file must include at least one tensor: ${filePath}`];
+    }
+    const ranges = [];
+    for (const [name, tensor] of tensorEntries) {
+        if (!isRecord(tensor)) {
+            return [`safetensors tensor metadata is invalid for ${name}: ${filePath}`];
+        }
+        const dtype = tensor.dtype;
+        const shape = tensor.shape;
+        const offsets = tensor.data_offsets;
+        const bytesPerElement = typeof dtype === "string" ? safetensorsDtypeBytes(dtype) : undefined;
+        if (!bytesPerElement || !Array.isArray(shape) || !Array.isArray(offsets) || offsets.length !== 2) {
+            return [`safetensors tensor metadata is invalid for ${name}: ${filePath}`];
+        }
+        if (!shape.every((dimension) => typeof dimension === "number" && Number.isSafeInteger(dimension) && dimension >= 0)) {
+            return [`safetensors tensor shape is invalid for ${name}: ${filePath}`];
+        }
+        const [start, end] = offsets;
+        if (typeof start !== "number" ||
+            typeof end !== "number" ||
+            !Number.isSafeInteger(start) ||
+            !Number.isSafeInteger(end) ||
+            start < 0 ||
+            end < start ||
+            end > dataBytes) {
+            return [`safetensors tensor data_offsets are invalid for ${name}: ${filePath}`];
+        }
+        const expectedBytes = calculateNpyDataBytes(shape, bytesPerElement);
+        if (expectedBytes === undefined || end - start !== expectedBytes) {
+            return [`safetensors tensor byte size does not match shape for ${name}: ${filePath}`];
+        }
+        ranges.push({ start, end });
+    }
+    ranges.sort((left, right) => left.start - right.start);
+    let nextOffset = 0;
+    for (const range of ranges) {
+        if (range.start !== nextOffset) {
+            return [`safetensors tensor data_offsets must cover payload contiguously: ${filePath}`];
+        }
+        nextOffset = range.end;
+    }
+    if (nextOffset !== dataBytes) {
+        return [`safetensors tensor data_offsets must cover payload contiguously: ${filePath}`];
+    }
+    return [];
+}
+function safetensorsDtypeBytes(dtype) {
+    switch (dtype) {
+        case "F64":
+        case "I64":
+        case "U64":
+            return 8;
+        case "F32":
+        case "I32":
+        case "U32":
+            return 4;
+        case "F16":
+        case "BF16":
+        case "I16":
+        case "U16":
+            return 2;
+        case "F8_E5M2":
+        case "F8_E4M3":
+        case "I8":
+        case "U8":
+        case "BOOL":
+            return 1;
+        default:
+            return undefined;
+    }
+}

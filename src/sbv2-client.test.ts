@@ -275,6 +275,36 @@ describe("Sbv2Client", () => {
     ]);
   });
 
+  it("refreshes and normalizes /models/refresh", async () => {
+    const mockFetch = vi.fn().mockResolvedValue({
+      ok: true,
+      json: () =>
+        Promise.resolve({
+          "0": {
+            config_path: "model_assets/demo/config.json",
+            model_path: "model_assets/demo/demo.safetensors",
+            spk2id: { demo: 0 },
+            style2id: { Neutral: 0 },
+          },
+        }),
+    });
+    vi.stubGlobal("fetch", mockFetch);
+
+    const client = new Sbv2Client({ baseUrl: "http://localhost:5000" });
+    const result = await client.refreshModels();
+
+    expect(mockFetch).toHaveBeenCalledOnce();
+    const url = new URL(mockFetch.mock.calls[0][0]);
+    expect(url.pathname).toBe("/models/refresh");
+    expect(mockFetch.mock.calls[0][1]).toMatchObject({ method: "POST" });
+    expect(result[0]).toMatchObject({
+      id: 0,
+      name: "demo",
+      speakers: [{ id: 0, name: "demo" }],
+      styles: [{ id: 0, name: "Neutral" }],
+    });
+  });
+
   it("normalizes array-shaped /models/info payloads", () => {
     expect(
       normalizeModelsInfo([

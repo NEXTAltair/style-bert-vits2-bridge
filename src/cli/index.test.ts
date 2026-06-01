@@ -22,6 +22,44 @@ function createWriter() {
   };
 }
 
+function makeNpy(shape: number[]): Buffer {
+  const shapeText = shape.length === 1 ? `${shape[0]},` : shape.join(", ");
+  const header = `{'descr': '<f4', 'fortran_order': False, 'shape': (${shapeText}), }`;
+  const magicLength = 10;
+  const padding = 16 - ((magicLength + header.length + 1) % 16);
+  const paddedHeader = `${header}${" ".repeat(padding)}\n`;
+  const result = Buffer.alloc(magicLength + paddedHeader.length + shape.reduce((total, value) => total * value, 1) * 4);
+  result.write("\x93NUMPY", 0, "latin1");
+  result[6] = 1;
+  result[7] = 0;
+  result.writeUInt16LE(paddedHeader.length, 8);
+  result.write(paddedHeader, magicLength, "latin1");
+  return result;
+}
+
+function makeModelConfig(modelName: string): Record<string, unknown> {
+  return {
+    model_name: modelName,
+    model: {},
+    train: {},
+    data: {
+      num_styles: 1,
+      spk2id: { [modelName]: 0 },
+      style2id: { Neutral: 0 },
+    },
+  };
+}
+
+function makeSafetensors(): Buffer {
+  const payload = Buffer.alloc(4);
+  const header = Buffer.from(JSON.stringify({ weight: { dtype: "F32", shape: [1], data_offsets: [0, payload.length] } }), "utf8");
+  const result = Buffer.alloc(8 + header.length + payload.length);
+  result.writeBigUInt64LE(BigInt(header.length), 0);
+  header.copy(result, 8);
+  payload.copy(result, 8 + header.length);
+  return result;
+}
+
 describe("sbv2-bridge CLI", () => {
   it("detects invocation through a package bin symlink", () => {
     const dir = tempJobsRoot();
@@ -421,5 +459,117 @@ if (args.includes("resample.py")) {
     } finally {
       process.env.PATH = previousPath;
     }
+  });
+
+  it("lists and promotes SBV2 model candidates", async () => {
+    const jobsRoot = tempJobsRoot();
+    const sbv2Root = mkdtempSync(path.join(tmpdir(), "sbv2-cli-model-root-"));
+    const modelDir = path.join(sbv2Root, "model_assets", "cli-model");
+    mkdirSync(path.join(sbv2Root, "configs"), { recursive: true });
+    mkdirSync(modelDir, { recursive: true });
+    writeFileSync(path.join(sbv2Root, "configs", "paths.yml"), "assets_root: model_assets\n");
+    writeFileSync(
+      path.join(modelDir, "config.json"),
+      JSON.stringify(makeModelConfig("cli-model")),
+    );
+    writeFileSync(path.join(modelDir, "style_vectors.npy"), makeNpy([1, 2]));
+    writeFileSync(path.join(modelDir, "cli-model_e1_s100.safetensors"), makeSafetensors());
+
+    const candidatesOut = createWriter();
+    await expect(
+      runCli(
+        ["models", "candidates", "--sbv2-root", sbv2Root, "--model-name", "cli-model", "--json"],
+        { stdout: candidatesOut.stream, stderr: createWriter().stream },
+      ),
+    ).resolves.toBe(0);
+    const candidates = JSON.parse(candidatesOut.output()) as {
+      candidates: Array<{ modelName: string; promotable: boolean }>;
+    };
+    expect(candidates.candidates[0]).toMatchObject({
+      modelName: "cli-model",
+      promotable: true,
+    });
+
+    const promoteOut = createWriter();
+    await expect(
+      runCli(
+        [
+          "models",
+          "promote",
+          "--jobs-dir",
+          jobsRoot,
+          "--sbv2-root",
+          sbv2Root,
+          "--model-name",
+          "cli-model",
+          "--confirm-model-name",
+          "cli-model",
+          "--json",
+        ],
+        { stdout: promoteOut.stream, stderr: createWriter().stream },
+      ),
+    ).resolves.toBe(0);
+    const promoted = JSON.parse(promoteOut.output()) as {
+      summary: { modelName: string; copied: boolean };
+      job: { operation: string };
+    };
+    expect(promoted.summary).toMatchObject({ modelName: "cli-model", copied: false });
+    expect(promoted.job.operation).toBe("model-promote");
+  });
+
+  it("passes --source through when listing model candidates", async () => {
+    const sbv2Root = mkdtempSync(path.join(tmpdir(), "sbv2-cli-model-root-"));
+    const source = mkdtempSync(path.join(tmpdir(), "sbv2-cli-model-source-"));
+    mkdirSync(path.join(sbv2Root, "configs"), { recursive: true });
+    writeFileSync(path.join(sbv2Root, "configs", "paths.yml"), "assets_root: model_assets\n");
+    writeFileSync(
+      path.join(source, "config.json"),
+      JSON.stringify(makeModelConfig("external-model")),
+    );
+    writeFileSync(path.join(source, "style_vectors.npy"), makeNpy([1, 2]));
+    writeFileSync(path.join(source, "external-model_e1_s100.safetensors"), makeSafetensors());
+
+    const stdout = createWriter();
+    await expect(
+      runCli(
+        [
+          "models",
+          "candidates",
+          "--sbv2-root",
+          sbv2Root,
+          "--model-name",
+          "external-model",
+          "--source",
+          source,
+          "--json",
+        ],
+        { stdout: stdout.stream, stderr: createWriter().stream },
+      ),
+    ).resolves.toBe(0);
+
+    const result = JSON.parse(stdout.output()) as {
+      candidates: Array<{ sourceDir: string; promotable: boolean }>;
+    };
+    expect(result.candidates[0]).toMatchObject({ sourceDir: source, promotable: true });
+  });
+
+  it("requires exact confirmation before model promotion", async () => {
+    const stderr = createWriter();
+    await expect(
+      runCli(
+        [
+          "models",
+          "promote",
+          "--sbv2-root",
+          mkdtempSync(path.join(tmpdir(), "sbv2-cli-model-root-")),
+          "--model-name",
+          "cli-model",
+          "--confirm-model-name",
+          "wrong",
+        ],
+        { stdout: createWriter().stream, stderr: stderr.stream },
+      ),
+    ).resolves.toBe(1);
+    expect(stderr.output()).toContain("--confirm-model-name must exactly match cli-model");
   });
 });

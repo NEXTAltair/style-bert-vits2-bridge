@@ -3,6 +3,7 @@ import { realpathSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { ingestDataset, prepareDataset } from "../datasets.js";
 import { createTrainingPlan, parseTrainingStage, runTraining, } from "../training.js";
+import { listModelCandidates, promoteModel } from "../model-registry.js";
 import { cancelJob, createDummyJob, listJobManifests, readJobManifest, resumeJob, retryJob, tailJobLog, } from "../jobs.js";
 export function isCliEntrypoint(moduleUrl, argvPath) {
     if (!argvPath)
@@ -25,6 +26,8 @@ Commands:
   datasets prepare       Run SBV2 slice/transcribe for an ingested dataset manifest.
   training plan          Print an agent-safe SBV2 training plan without running it.
   training run           Run selected SBV2 training stages and write a job.
+  models candidates      List promotable SBV2 model artifact candidates.
+  models promote         Promote model artifacts into SBV2 model_assets.
   jobs start-dummy         Start a synchronous dummy job and write manifest/log files.
   jobs list                List known jobs.
   jobs status <jobId>      Print a job manifest.
@@ -39,7 +42,12 @@ Options:
   --sbv2-root <path>       SBV2 repository root. Defaults to SBV2_ROOT, then ~/src/Style-Bert-VITS2.
   --model-name <name>      SBV2 model name for dataset ingest.
   --source <path>          Source audio file or directory for dataset ingest.
+                            For models promote, source model artifact directory.
   --manifest <path>        Dataset manifest path for datasets prepare/training.
+  --confirm-model-name <name>
+                            Required exact model name confirmation for models promote.
+  --backup-existing        Back up an existing model_assets target before promoting.
+  --base-url <url>         SBV2 API base URL for /models/refresh and /models/info checks.
   --stage <name>           Training stage. May be repeated. Defaults to all stages.
   --batch-size <n>         Training batch size. Default 2.
   --epochs <n>             Training epochs. Default 100.
@@ -127,6 +135,17 @@ function parseArgs(argv) {
             options.sourceAudioPath = next;
             index += 1;
         }
+        else if (arg === "--confirm-model-name" && next) {
+            options.confirmModelName = next;
+            index += 1;
+        }
+        else if (arg === "--backup-existing") {
+            options.backupExisting = true;
+        }
+        else if (arg === "--base-url" && next) {
+            options.baseUrl = next;
+            index += 1;
+        }
         else if (arg === "--manifest" && next) {
             options.manifestPath = next;
             index += 1;
@@ -206,8 +225,8 @@ function parseArgs(argv) {
     if (positional[0] === "help") {
         return { group: "help", command: "help", args: [], options };
     }
-    if (positional[0] !== "jobs" && positional[0] !== "datasets" && positional[0] !== "training") {
-        throw new Error("Expected command group: jobs, datasets, or training");
+    if (positional[0] !== "jobs" && positional[0] !== "datasets" && positional[0] !== "training" && positional[0] !== "models") {
+        throw new Error("Expected command group: jobs, datasets, training, or models");
     }
     return {
         group: positional[0],
@@ -338,6 +357,61 @@ export async function runCli(argv, io = {}) {
                 return 0;
             }
             throw new Error(`Unknown training command: ${parsed.command}`);
+        }
+        if (parsed.group === "models") {
+            if (parsed.command === "candidates") {
+                const candidates = await listModelCandidates({
+                    manifestPath: options.manifestPath,
+                    sbv2Root: options.sbv2Root,
+                    modelName: options.modelName,
+                    sourcePath: options.sourceAudioPath,
+                });
+                if (options.json) {
+                    printJson(stdout, { ok: true, candidates });
+                }
+                else {
+                    for (const candidate of candidates) {
+                        writeLine(stdout, `${candidate.candidateId}\t${candidate.promotable ? "promotable" : "blocked"}\t${candidate.sourceDir}`);
+                        for (const error of candidate.errors) {
+                            writeLine(stdout, `error: ${error}`);
+                        }
+                        for (const warning of candidate.warnings) {
+                            writeLine(stdout, `warning: ${warning}`);
+                        }
+                    }
+                }
+                return 0;
+            }
+            if (parsed.command === "promote") {
+                const result = await promoteModel({
+                    jobsRoot: options.jobsRoot,
+                    manifestPath: options.manifestPath,
+                    sbv2Root: options.sbv2Root,
+                    modelName: options.modelName,
+                    sourcePath: options.sourceAudioPath,
+                    confirmModelName: requireString(options.confirmModelName, "--confirm-model-name"),
+                    backupExisting: options.backupExisting,
+                    baseUrl: options.baseUrl,
+                });
+                if (options.json) {
+                    printJson(stdout, { ok: true, candidate: result.candidate, summary: result.summary, job: result.job });
+                }
+                else {
+                    writeLine(stdout, `promoted ${result.summary.modelName}`);
+                    writeLine(stdout, `source: ${result.summary.sourceDir}`);
+                    writeLine(stdout, `target: ${result.summary.targetDir}`);
+                    if (result.summary.backupDir)
+                        writeLine(stdout, `backup: ${result.summary.backupDir}`);
+                    if (result.summary.refresh) {
+                        writeLine(stdout, `refresh: ${result.summary.refresh.foundInModelsInfo ? "found" : "missing"}`);
+                    }
+                    writeLine(stdout, `summary: ${result.job.outputDir}/summary.json`);
+                    writeLine(stdout, `job: ${result.job.jobId}`);
+                    writeLine(stdout, `log: ${result.job.logPath}`);
+                }
+                return 0;
+            }
+            throw new Error(`Unknown models command: ${parsed.command}`);
         }
         if (parsed.command === "start-dummy") {
             const job = await createDummyJob({
