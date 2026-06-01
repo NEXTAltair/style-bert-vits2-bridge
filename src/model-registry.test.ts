@@ -59,8 +59,11 @@ function makeNpy(shape: number[]): Buffer {
 function makeNpyWithDescriptor(shape: number[], descriptor: string): Buffer {
   const shapeText = shape.length === 1 ? `${shape[0]},` : shape.join(", ");
   const header = `{'descr': '${descriptor}', 'fortran_order': False, 'shape': (${shapeText}), }`;
+  return makeNpyWithHeader(shape, header, Number(descriptor.match(/(\d+)$/)?.[1] ?? 1));
+}
+
+function makeNpyWithHeader(shape: number[], header: string, bytesPerElement = 4): Buffer {
   const magicLength = 10;
-  const bytesPerElement = Number(descriptor.match(/(\d+)$/)?.[1] ?? 1);
   const padding = 16 - ((magicLength + header.length + 1) % 16);
   const paddedHeader = `${header}${" ".repeat(padding)}\n`;
   const result = Buffer.alloc(magicLength + paddedHeader.length + shape.reduce((total, value) => total * value, 1) * bytesPerElement);
@@ -249,6 +252,30 @@ describe("SBV2 model registry", () => {
     expect(candidate.errors).toContain("config.json data.spk2id values must be a zero-based permutation of data.n_speakers");
   });
 
+  it("validates speaker IDs against SBV2 default n_speakers when omitted", async () => {
+    const sbv2Root = createSbv2Root();
+    const modelDir = path.join(sbv2Root, "model_assets", "test-voice");
+    writeFileSync(
+      path.join(modelDir, "config.json"),
+      JSON.stringify(
+        makeConfig("test-voice", {
+          data: {
+            num_styles: 1,
+            spk2id: { alice: 0, bob: 1 },
+            style2id: { Neutral: 0 },
+          },
+        }),
+      ),
+    );
+    writeFileSync(path.join(modelDir, "style_vectors.npy"), makeNpy([1, 2]));
+    writeFileSync(path.join(modelDir, "test-voice_e1_s100.safetensors"), makeSafetensors());
+
+    const [candidate] = await listModelCandidates({ sbv2Root, modelName: "test-voice" });
+
+    expect(candidate.promotable).toBe(false);
+    expect(candidate.errors).toContain("config.json data.n_speakers must match data.spk2id size");
+  });
+
   it("requires style IDs to be a zero-based permutation", async () => {
     const sbv2Root = createSbv2Root();
     const modelDir = path.join(sbv2Root, "model_assets", "test-voice");
@@ -334,6 +361,19 @@ describe("SBV2 model registry", () => {
     const modelDir = path.join(sbv2Root, "model_assets", "test-voice");
     writeFileSync(path.join(modelDir, "config.json"), JSON.stringify(makeConfig()));
     writeFileSync(path.join(modelDir, "style_vectors.npy"), makeNpyWithDescriptor([1, 2], "|S4"));
+    writeFileSync(path.join(modelDir, "test-voice_e1_s100.safetensors"), makeSafetensors());
+
+    const [candidate] = await listModelCandidates({ sbv2Root, modelName: "test-voice" });
+
+    expect(candidate.promotable).toBe(false);
+    expect(candidate.errors.join("\n")).toContain("style_vectors.npy is not a valid NumPy .npy file");
+  });
+
+  it("rejects style_vectors.npy headers without valid fortran_order", async () => {
+    const sbv2Root = createSbv2Root();
+    const modelDir = path.join(sbv2Root, "model_assets", "test-voice");
+    writeFileSync(path.join(modelDir, "config.json"), JSON.stringify(makeConfig()));
+    writeFileSync(path.join(modelDir, "style_vectors.npy"), makeNpyWithHeader([1, 2], "{'descr': '<f4', 'shape': (1, 2), }"));
     writeFileSync(path.join(modelDir, "test-voice_e1_s100.safetensors"), makeSafetensors());
 
     const [candidate] = await listModelCandidates({ sbv2Root, modelName: "test-voice" });
@@ -444,6 +484,26 @@ describe("SBV2 model registry", () => {
     }
   });
 
+  it("rejects invalid safetensors metadata entries", async () => {
+    const sbv2Root = createSbv2Root();
+    const modelDir = path.join(sbv2Root, "model_assets", "test-voice");
+    const header = Buffer.from(
+      JSON.stringify({
+        __metadata__: { source: 1 },
+        weight: { dtype: "F32", shape: [1], data_offsets: [0, 4] },
+      }),
+      "utf8",
+    );
+    writeFileSync(path.join(modelDir, "config.json"), JSON.stringify(makeConfig()));
+    writeFileSync(path.join(modelDir, "style_vectors.npy"), makeNpy([1, 2]));
+    writeFileSync(path.join(modelDir, "test-voice_e1_s100.safetensors"), makeSafetensorsWithHeader(header, 4));
+
+    const [candidate] = await listModelCandidates({ sbv2Root, modelName: "test-voice" });
+
+    expect(candidate.promotable).toBe(false);
+    expect(candidate.errors.join("\n")).toContain("safetensors metadata must be a string map");
+  });
+
   it.each([
     [
       "overlapping",
@@ -540,6 +600,35 @@ describe("SBV2 model registry", () => {
     expect(manifest).toContain('"state": "failed"');
   });
 
+  it("records a failed job when initial candidate inspection throws", async () => {
+    const sbv2Root = tempRoot("sbv2-model-registry-root-");
+    const jobsRoot = tempRoot("sbv2-model-registry-jobs-");
+    const source = tempRoot("sbv2-model-registry-source-");
+    mkdirSync(path.join(sbv2Root, "configs"), { recursive: true });
+    writeFileSync(path.join(sbv2Root, "configs", "paths.yml"), "assets_root: model_assets\n");
+    writeModelAssets(source);
+    chmodSync(source, 0);
+
+    try {
+      await expect(
+        promoteModel({
+          sbv2Root,
+          modelName: "test-voice",
+          sourcePath: source,
+          confirmModelName: "test-voice",
+          jobsRoot,
+          now: () => new Date("2026-06-01T00:00:00.000Z"),
+          randomId: () => "inspect1",
+        }),
+      ).rejects.toThrow();
+    } finally {
+      chmodSync(source, 0o700);
+    }
+
+    const manifest = readFileSync(path.join(jobsRoot, "sbv2-job-20260601000000-inspect1", "manifest.json"), "utf8");
+    expect(manifest).toContain('"state": "failed"');
+  });
+
   it("rejects config model_name mismatches", async () => {
     const sbv2Root = createSbv2Root();
     writeModelAssets(path.join(sbv2Root, "model_assets", "test-voice"), "other-voice");
@@ -626,6 +715,28 @@ describe("SBV2 model registry", () => {
     const outside = tempRoot("sbv2-model-registry-outside-");
     writeModelAssets(source);
     symlinkSync(outside, path.join(source, "extra-cache"));
+
+    await expect(
+      promoteModel({
+        sbv2Root,
+        modelName: "test-voice",
+        sourcePath: source,
+        confirmModelName: "test-voice",
+        jobsRoot: tempRoot("sbv2-model-registry-jobs-"),
+      }),
+    ).rejects.toThrow("unexpected symlink in model source");
+
+    expect(existsSync(path.join(sbv2Root, "model_assets", "test-voice"))).toBe(false);
+  });
+
+  it("rejects hidden checkpoint symlinks in an external source before copying", async () => {
+    const sbv2Root = tempRoot("sbv2-model-registry-root-");
+    mkdirSync(path.join(sbv2Root, "configs"), { recursive: true });
+    writeFileSync(path.join(sbv2Root, "configs", "paths.yml"), "assets_root: model_assets\n");
+    const source = tempRoot("sbv2-model-registry-source-");
+    const outside = tempRoot("sbv2-model-registry-outside-");
+    writeModelAssets(source);
+    symlinkSync(outside, path.join(source, ".cache.safetensors"));
 
     await expect(
       promoteModel({

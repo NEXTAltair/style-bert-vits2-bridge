@@ -21,7 +21,7 @@ export async function promoteModel(options) {
     let backupDir = null;
     let copied = false;
     let cleanupTargetOnFailure = false;
-    let candidate = await inspectModelCandidate(context);
+    let candidate;
     const fail = async (error) => {
         const message = error instanceof Error ? error.message : String(error);
         await createJobManifest({
@@ -44,6 +44,7 @@ export async function promoteModel(options) {
         throw error;
     };
     try {
+        candidate = await inspectModelCandidate(context);
         if (!candidate.promotable) {
             throw new Error(`Model candidate is not promotable: ${candidate.errors.join("; ")}`);
         }
@@ -382,16 +383,15 @@ function validateConfigShape(value) {
     const numStyles = data.num_styles;
     errors.push(...validateIdMap(spk2id, "data.spk2id"));
     errors.push(...validateIdMap(style2id, "data.style2id"));
-    if (numSpeakers !== undefined) {
-        if (typeof numSpeakers !== "number" || !Number.isInteger(numSpeakers) || numSpeakers < 1) {
-            errors.push("config.json data.n_speakers must be a positive integer");
-        }
-        else if (isRecord(spk2id) && Object.keys(spk2id).length !== numSpeakers) {
-            errors.push("config.json data.n_speakers must match data.spk2id size");
-        }
-        else if (isRecord(spk2id) && !isZeroBasedPermutation(Object.values(spk2id), numSpeakers)) {
-            errors.push("config.json data.spk2id values must be a zero-based permutation of data.n_speakers");
-        }
+    const expectedSpeakers = numSpeakers === undefined ? 1 : numSpeakers;
+    if (typeof expectedSpeakers !== "number" || !Number.isInteger(expectedSpeakers) || expectedSpeakers < 1) {
+        errors.push("config.json data.n_speakers must be a positive integer");
+    }
+    else if (isRecord(spk2id) && Object.keys(spk2id).length !== expectedSpeakers) {
+        errors.push("config.json data.n_speakers must match data.spk2id size");
+    }
+    else if (isRecord(spk2id) && !isZeroBasedPermutation(Object.values(spk2id), expectedSpeakers)) {
+        errors.push("config.json data.spk2id values must be a zero-based permutation of data.n_speakers");
     }
     if (typeof numStyles !== "number" || !Number.isInteger(numStyles) || numStyles < 1) {
         errors.push("config.json data.num_styles must be a positive integer");
@@ -454,16 +454,15 @@ function parseNpyHeader(buffer) {
         return undefined;
     }
     const header = buffer.toString("latin1", headerStart, headerEnd);
-    const shapeMatch = header.match(/'shape'\s*:\s*\(([^)]*)\)/);
-    const descrMatch = header.match(/'descr'\s*:\s*'([^']+)'/);
-    if (!shapeMatch || !descrMatch) {
+    const parsedHeader = parseNpyHeaderLiteral(header);
+    if (!parsedHeader) {
         return undefined;
     }
-    const bytesPerElement = parseNpyDescriptorBytes(descrMatch[1]);
+    const bytesPerElement = parseNpyDescriptorBytes(parsedHeader.descr);
     if (!bytesPerElement) {
         return undefined;
     }
-    const shape = shapeMatch[1]
+    const shape = parsedHeader.shape
         .split(",")
         .map((part) => part.trim())
         .filter(Boolean)
@@ -471,6 +470,37 @@ function parseNpyHeader(buffer) {
     return shape.length && shape.every((part) => Number.isInteger(part) && part >= 0)
         ? { shape, dataOffset: headerEnd, bytesPerElement }
         : undefined;
+}
+function parseNpyHeaderLiteral(header) {
+    const trimmed = header.trim();
+    if (!trimmed.startsWith("{") || !trimmed.endsWith("}"))
+        return undefined;
+    const entries = new Map();
+    const entryPattern = /'([^']+)'\s*:\s*('[^']*'|True|False|\([^)]*\))\s*,?/g;
+    let match;
+    let consumed = "{";
+    while ((match = entryPattern.exec(trimmed)) !== null) {
+        entries.set(match[1], match[2]);
+        consumed += match[0];
+    }
+    consumed += "}";
+    if (normalizeNpyHeaderLiteral(consumed) !== normalizeNpyHeaderLiteral(trimmed))
+        return undefined;
+    if (entries.size !== 3 || !entries.has("descr") || !entries.has("fortran_order") || !entries.has("shape"))
+        return undefined;
+    const descr = entries.get("descr");
+    const fortranOrder = entries.get("fortran_order");
+    const shape = entries.get("shape");
+    if (!descr?.startsWith("'") || !descr.endsWith("'"))
+        return undefined;
+    if (fortranOrder !== "False" && fortranOrder !== "True")
+        return undefined;
+    if (!shape?.startsWith("(") || !shape.endsWith(")"))
+        return undefined;
+    return { descr: descr.slice(1, -1), fortranOrder: fortranOrder === "True", shape: shape.slice(1, -1) };
+}
+function normalizeNpyHeaderLiteral(value) {
+    return value.replace(/\s+/g, "").replace(/,}/g, "}");
 }
 function parseNpyDescriptorBytes(descriptor) {
     const match = descriptor.match(/^[<>=|]?([A-Za-z])(\d+)$/);
@@ -603,6 +633,8 @@ async function collectUnexpectedSymlinkErrors(rootDir, currentDir, errors) {
 function isAllowedArtifactSymlink(relativePath) {
     if (relativePath.includes(path.sep))
         return false;
+    if (path.basename(relativePath).startsWith("."))
+        return false;
     return relativePath === "config.json" || relativePath === "style_vectors.npy" || relativePath.endsWith(".safetensors");
 }
 function isZeroBasedPermutation(values, size) {
@@ -664,6 +696,11 @@ async function readSafetensorsHeader(filePath, fileSize) {
 function validateSafetensorsHeader(value, dataBytes, filePath) {
     if (!isRecord(value)) {
         return [`safetensors header must be an object: ${filePath}`];
+    }
+    const metadata = value.__metadata__;
+    if (metadata !== undefined &&
+        (!isRecord(metadata) || !Object.values(metadata).every((metadataValue) => typeof metadataValue === "string"))) {
+        return [`safetensors metadata must be a string map: ${filePath}`];
     }
     const tensorEntries = Object.entries(value).filter(([name]) => name !== "__metadata__");
     if (!tensorEntries.length) {
