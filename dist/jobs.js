@@ -171,7 +171,7 @@ export async function resumeJob(jobId, options = {}) {
     return {
         ok: false,
         job,
-        reason: "Dummy jobs are synchronous terminal jobs and cannot be resumed.",
+        reason: "Synchronous terminal jobs cannot be resumed.",
     };
 }
 export async function retryJob(jobId, options = {}) {
@@ -210,7 +210,7 @@ function isSbv2JobManifest(value) {
     return (isRecord(value) &&
         value.schemaVersion === 1 &&
         typeof value.jobId === "string" &&
-        (value.operation === "dummy" || value.operation === "dataset-ingest") &&
+        (value.operation === "dummy" || value.operation === "dataset-ingest" || value.operation === "dataset-prepare") &&
         typeof value.state === "string" &&
         typeof value.createdAt === "string" &&
         isRecord(value.inputSummary) &&

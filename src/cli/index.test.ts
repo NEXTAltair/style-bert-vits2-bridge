@@ -1,4 +1,4 @@
-import { mkdirSync, symlinkSync, writeFileSync, mkdtempSync } from "node:fs";
+import { chmodSync, mkdirSync, symlinkSync, writeFileSync, mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
@@ -217,5 +217,99 @@ describe("sbv2-bridge CLI", () => {
       ),
     ).resolves.toBe(1);
     expect(stderr.output()).toContain("Missing --use-jp-extra or --no-use-jp-extra");
+  });
+
+  it("prepares an ingested dataset through a fake SBV2 uv command", async () => {
+    const jobsRoot = tempJobsRoot();
+    const datasetsRoot = mkdtempSync(path.join(tmpdir(), "sbv2-cli-datasets-"));
+    const sbv2Root = mkdtempSync(path.join(tmpdir(), "sbv2-cli-root-"));
+    const sourceRoot = mkdtempSync(path.join(tmpdir(), "sbv2-cli-source-"));
+    const binRoot = mkdtempSync(path.join(tmpdir(), "sbv2-cli-bin-"));
+    writeFileSync(path.join(sbv2Root, "slice.py"), "");
+    writeFileSync(path.join(sbv2Root, "transcribe.py"), "");
+    writeFileSync(path.join(sourceRoot, "a.wav"), "a");
+    const fakeUv = path.join(binRoot, "uv");
+    writeFileSync(
+      fakeUv,
+      `#!/usr/bin/env node
+const fs = require("node:fs");
+const path = require("node:path");
+const args = process.argv.slice(2);
+const modelName = args[args.indexOf("--model_name") + 1];
+const root = process.cwd();
+if (args.includes("slice.py")) {
+  const raw = path.join(root, "Data", modelName, "raw");
+  fs.mkdirSync(raw, { recursive: true });
+  fs.writeFileSync(path.join(raw, "a-0.wav"), "a");
+}
+if (args.includes("transcribe.py")) {
+  const dir = path.join(root, "Data", modelName);
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(path.join(dir, "esd.list"), "a-0.wav|" + modelName + "|JP|こんにちは\\n");
+}
+`,
+    );
+    chmodSync(fakeUv, 0o755);
+
+    const previousPath = process.env.PATH;
+    process.env.PATH = `${binRoot}:${previousPath ?? ""}`;
+    try {
+      const ingestOut = createWriter();
+      await expect(
+        runCli(
+          [
+            "datasets",
+            "ingest",
+            "--jobs-dir",
+            jobsRoot,
+            "--datasets-dir",
+            datasetsRoot,
+            "--sbv2-root",
+            sbv2Root,
+            "--model-name",
+            "cli-prepare",
+            "--source",
+            sourceRoot,
+            "--language",
+            "ja",
+            "--use-jp-extra",
+            "--json",
+          ],
+          { stdout: ingestOut.stream, stderr: createWriter().stream },
+        ),
+      ).resolves.toBe(0);
+      const ingested = JSON.parse(ingestOut.output()) as {
+        dataset: { manifestPath: string };
+      };
+
+      const prepareOut = createWriter();
+      const prepareErr = createWriter();
+      await expect(
+        runCli(
+          [
+            "datasets",
+            "prepare",
+            "--jobs-dir",
+            jobsRoot,
+            "--manifest",
+            ingested.dataset.manifestPath,
+            "--json",
+          ],
+          { stdout: prepareOut.stream, stderr: prepareErr.stream },
+        ),
+      ).resolves.toBe(0);
+      expect(prepareErr.output()).toBe("");
+      const prepared = JSON.parse(prepareOut.output()) as {
+        summary: { rawWavCount: number; esdLineCount: number };
+        job: { operation: string };
+      };
+      expect(prepared.summary).toMatchObject({
+        rawWavCount: 1,
+        esdLineCount: 1,
+      });
+      expect(prepared.job.operation).toBe("dataset-prepare");
+    } finally {
+      process.env.PATH = previousPath;
+    }
   });
 });

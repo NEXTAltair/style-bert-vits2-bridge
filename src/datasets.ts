@@ -1,7 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
 import { createReadStream } from "node:fs";
-import { copyFile, mkdir, readdir, stat, writeFile } from "node:fs/promises";
-import { execFile } from "node:child_process";
+import { copyFile, mkdir, readdir, readFile, stat, writeFile } from "node:fs/promises";
+import { execFile, spawn } from "node:child_process";
 import { homedir } from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
@@ -16,6 +16,14 @@ export const DEFAULT_TRANSCRIPTION_MODEL = "litagin/anime-whisper";
 export const DEFAULT_TRANSCRIPTION_BATCH_SIZE = 16;
 export const DEFAULT_YOMI_ERROR = "skip";
 export const DEFAULT_NOT_USE_CUSTOM_BATCH_SAMPLER = false;
+export const DEFAULT_SLICE_MIN_SEC = 2;
+export const DEFAULT_SLICE_MAX_SEC = 12;
+export const DEFAULT_SLICE_MIN_SILENCE_DUR_MS = 700;
+export const DEFAULT_SLICE_NUM_PROCESSES = 3;
+export const DEFAULT_TRANSCRIPTION_FASTER_WHISPER_MODEL = "large-v3";
+export const DEFAULT_TRANSCRIPTION_COMPUTE_TYPE = "bfloat16";
+export const DEFAULT_TRANSCRIPTION_NUM_BEAMS = 1;
+export const DEFAULT_TRANSCRIPTION_INITIAL_PROMPT = "";
 
 const SUPPORTED_AUDIO_EXTENSIONS = new Set([".wav", ".flac", ".mp3", ".ogg", ".opus", ".m4a"]);
 
@@ -97,6 +105,60 @@ export interface IngestDatasetResult {
   job: Sbv2JobManifest;
 }
 
+export interface Sbv2DatasetPrepareSummary {
+  schemaVersion: 1;
+  workspaceId: string;
+  modelName: string;
+  rawDir: string;
+  esdListPath: string;
+  rawWavCount: number;
+  esdLineCount: number;
+  styleGroups: Sbv2DatasetStyleGroup[];
+  missingAudioReferences: string[];
+  untranscribedWavs: string[];
+  warnings: string[];
+  commands: {
+    executable: string;
+    args: string[];
+    cwd: string;
+  }[];
+}
+
+export interface PrepareDatasetCommandResult {
+  stdout?: string;
+  stderr?: string;
+}
+
+export interface PrepareDatasetCommandOptions {
+  cwd: string;
+  onOutput?: (stream: "stdout" | "stderr", chunk: string) => void;
+}
+
+export type PrepareDatasetCommandRunner = (
+  executable: string,
+  args: string[],
+  options: PrepareDatasetCommandOptions,
+) => Promise<PrepareDatasetCommandResult>;
+
+export interface PrepareDatasetOptions {
+  manifestPath: string;
+  jobsRoot?: string;
+  commandRunner?: PrepareDatasetCommandRunner;
+  now?: () => Date;
+  randomId?: () => string;
+}
+
+export interface PrepareDatasetResult {
+  dataset: Sbv2DatasetManifest;
+  summary: Sbv2DatasetPrepareSummary;
+  job: Sbv2JobManifest;
+}
+
+interface Sbv2PathConfigRoots {
+  datasetRoot: string;
+  assetsRoot: string;
+}
+
 interface SourceFile {
   originalPath: string;
   relativePath: string;
@@ -156,6 +218,10 @@ async function pathExists(filePath: string): Promise<boolean> {
     }
     throw error;
   }
+}
+
+function normalizeRelativePath(filePath: string): string {
+  return filePath.split(path.sep).join("/");
 }
 
 async function collectDirectoryFiles(root: string, current: string = root): Promise<string[]> {
@@ -293,8 +359,9 @@ export async function ingestDataset(options: IngestDatasetOptions): Promise<Inge
   const created = now();
   const datasetsRoot = resolveDatasetsRoot(options.datasetsRoot);
   const sbv2Root = resolveSbv2Root(options.sbv2Root);
-  const datasetPath = path.join(sbv2Root, "Data", modelName);
-  const assetsPath = path.join(sbv2Root, "model_assets", modelName);
+  const pathConfig = await readSbv2PathConfig(sbv2Root);
+  const datasetPath = path.join(pathConfig.datasetRoot, modelName);
+  const assetsPath = path.join(pathConfig.assetsRoot, modelName);
 
   if (await pathExists(datasetPath)) {
     throw new Error(`SBV2 dataset already exists: ${datasetPath}`);
@@ -395,6 +462,361 @@ export async function ingestDataset(options: IngestDatasetOptions): Promise<Inge
   });
 
   return { dataset, job };
+}
+
+export async function readDatasetManifest(filePath: string): Promise<Sbv2DatasetManifest> {
+  const resolvedPath = resolveUserPath(filePath);
+  const parsed = JSON.parse(await readFile(resolvedPath, "utf8")) as unknown;
+  if (!isSbv2DatasetManifest(parsed)) {
+    throw new Error(`Invalid SBV2 dataset manifest: ${resolvedPath}`);
+  }
+  return parsed;
+}
+
+export async function prepareDataset(options: PrepareDatasetOptions): Promise<PrepareDatasetResult> {
+  const manifestPath = resolveUserPath(options.manifestPath);
+  const dataset = await readDatasetManifest(manifestPath);
+  const runner = options.commandRunner ?? runSbv2Command;
+  const now = options.now ?? (() => new Date());
+  const randomId = options.randomId ?? randomUUID;
+  const scriptPaths = [path.join(dataset.sbv2Root, "slice.py"), path.join(dataset.sbv2Root, "transcribe.py")];
+  const executedCommands: Sbv2DatasetPrepareSummary["commands"] = [];
+  const logLines: string[] = [`dataset prepare started for ${dataset.modelName}`];
+
+  const fail = async (error: unknown): Promise<never> => {
+    const message = error instanceof Error ? error.message : String(error);
+    await createJobManifest({
+      jobsRoot: options.jobsRoot,
+      operation: "dataset-prepare",
+      state: "failed",
+      inputSummary: {
+        workspaceId: dataset.workspaceId,
+        modelName: dataset.modelName,
+        datasetManifestPath: manifestPath,
+      },
+      artifactPaths: [manifestPath],
+      firstError: message,
+      retryable: false,
+      progressSummary: `Dataset prepare failed for ${dataset.modelName}.`,
+      logLines: [...logLines, message],
+      now,
+      randomId,
+    });
+    throw error;
+  };
+
+  try {
+    const pathConfig = await readSbv2PathConfig(dataset.sbv2Root);
+    const datasetPath = path.join(pathConfig.datasetRoot, dataset.modelName);
+    const assetsPath = path.join(pathConfig.assetsRoot, dataset.modelName);
+    const rawDir = path.join(datasetPath, "raw");
+    const esdListPath = path.join(datasetPath, "esd.list");
+
+    assertLanguage(dataset.language);
+    validateModelName(dataset.modelName);
+    if (!(await pathExists(dataset.originalsDir))) {
+      throw new Error(`Dataset originals directory was not found: ${dataset.originalsDir}`);
+    }
+    for (const scriptPath of scriptPaths) {
+      if (!(await pathExists(scriptPath))) {
+        throw new Error(`Required SBV2 script was not found: ${scriptPath}`);
+      }
+    }
+    if (await pathExists(rawDir)) {
+      throw new Error(`SBV2 raw dataset already exists: ${rawDir}`);
+    }
+    if (await pathExists(esdListPath)) {
+      throw new Error(`SBV2 esd.list already exists: ${esdListPath}`);
+    }
+    if (await pathExists(assetsPath)) {
+      throw new Error(`SBV2 model assets already exist: ${assetsPath}`);
+    }
+
+    const sliceArgs = [
+      "run",
+      "python",
+      "slice.py",
+      "--model_name",
+      dataset.modelName,
+      "--input_dir",
+      dataset.originalsDir,
+      "--min_sec",
+      String(DEFAULT_SLICE_MIN_SEC),
+      "--max_sec",
+      String(DEFAULT_SLICE_MAX_SEC),
+      "--min_silence_dur_ms",
+      String(DEFAULT_SLICE_MIN_SILENCE_DUR_MS),
+      "--num_processes",
+      String(DEFAULT_SLICE_NUM_PROCESSES),
+    ];
+    await runAndLogCommand(runner, "uv", sliceArgs, dataset.sbv2Root, executedCommands, logLines);
+
+    const transcribeArgs = [
+      "run",
+      "python",
+      "transcribe.py",
+      "--model_name",
+      dataset.modelName,
+      "--model",
+      DEFAULT_TRANSCRIPTION_FASTER_WHISPER_MODEL,
+      "--compute_type",
+      DEFAULT_TRANSCRIPTION_COMPUTE_TYPE,
+      "--language",
+      dataset.language,
+      "--initial_prompt",
+      DEFAULT_TRANSCRIPTION_INITIAL_PROMPT,
+      "--num_beams",
+      String(DEFAULT_TRANSCRIPTION_NUM_BEAMS),
+      "--use_hf_whisper",
+      "--hf_repo_id",
+      DEFAULT_TRANSCRIPTION_MODEL,
+      "--batch_size",
+      String(DEFAULT_TRANSCRIPTION_BATCH_SIZE),
+    ];
+    await runAndLogCommand(runner, "uv", transcribeArgs, dataset.sbv2Root, executedCommands, logLines);
+
+    const summary = await buildPrepareSummary(dataset, rawDir, esdListPath, executedCommands);
+    const job = await createJobManifest({
+      jobsRoot: options.jobsRoot,
+      operation: "dataset-prepare",
+      inputSummary: {
+        workspaceId: dataset.workspaceId,
+        modelName: dataset.modelName,
+        datasetManifestPath: manifestPath,
+        datasetPath,
+        assetsPath,
+        rawDir,
+        esdListPath,
+      },
+      artifactPaths: [manifestPath, rawDir, esdListPath],
+      progressSummary: `Dataset prepare completed for ${dataset.modelName}.`,
+      logLines: [
+        ...logLines,
+        `raw wav files: ${summary.rawWavCount}`,
+        `esd.list lines: ${summary.esdLineCount}`,
+        `dataset prepare succeeded for ${dataset.modelName}`,
+      ],
+      now,
+      randomId,
+    });
+    const summaryPath = path.join(job.outputDir, "summary.json");
+    await writeFile(summaryPath, `${JSON.stringify(summary, null, 2)}\n`, "utf8");
+    const updatedJob: Sbv2JobManifest = {
+      ...job,
+      artifactPaths: [...job.artifactPaths, summaryPath],
+    };
+    await writeFile(path.join(job.outputDir, "manifest.json"), `${JSON.stringify(updatedJob, null, 2)}\n`, "utf8");
+    return { dataset, summary, job: updatedJob };
+  } catch (error) {
+    return fail(error);
+  }
+}
+
+async function runSbv2Command(
+  executable: string,
+  args: string[],
+  options: PrepareDatasetCommandOptions,
+): Promise<PrepareDatasetCommandResult> {
+  return new Promise((resolve, reject) => {
+    const child = spawn(executable, args, {
+      cwd: options.cwd,
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    child.stdout?.setEncoding("utf8");
+    child.stderr?.setEncoding("utf8");
+    child.stdout?.on("data", (chunk: string) => {
+      options.onOutput?.("stdout", chunk);
+    });
+    child.stderr?.on("data", (chunk: string) => {
+      options.onOutput?.("stderr", chunk);
+    });
+    child.on("error", reject);
+    child.on("close", (code, signal) => {
+      if (code === 0) {
+        resolve({});
+        return;
+      }
+      const signalText = signal ? ` signal ${signal}` : "";
+      const error = new Error(
+        `${executable} ${args.join(" ")} failed with exit code ${code ?? "unknown"}${signalText}`,
+      );
+      reject(error);
+    });
+  });
+}
+
+async function runAndLogCommand(
+  runner: PrepareDatasetCommandRunner,
+  executable: string,
+  args: string[],
+  cwd: string,
+  commands: Sbv2DatasetPrepareSummary["commands"],
+  logLines: string[],
+): Promise<void> {
+  commands.push({ executable, args, cwd });
+  logLines.push(`running: ${executable} ${args.join(" ")}`);
+  const result = await runner(executable, args, {
+    cwd,
+    onOutput: (stream, chunk) => appendCommandOutput(logLines, stream, chunk),
+  });
+  appendCommandOutput(logLines, "stdout", result.stdout ?? "");
+  appendCommandOutput(logLines, "stderr", result.stderr ?? "");
+}
+
+function appendCommandOutput(logLines: string[], stream: "stdout" | "stderr", chunk: string): void {
+  for (const line of chunk.split(/\r?\n/)) {
+    const trimmed = line.trim();
+    if (trimmed) {
+      logLines.push(`${stream}: ${trimmed}`);
+    }
+  }
+}
+
+async function readSbv2PathConfig(sbv2Root: string): Promise<Sbv2PathConfigRoots> {
+  const pathsPath = path.join(sbv2Root, "configs", "paths.yml");
+  const defaultPathsPath = path.join(sbv2Root, "configs", "default_paths.yml");
+  const configPath = (await pathExists(pathsPath))
+    ? pathsPath
+    : (await pathExists(defaultPathsPath))
+      ? defaultPathsPath
+      : null;
+  if (!configPath) {
+    return {
+      datasetRoot: path.join(sbv2Root, "Data"),
+      assetsRoot: path.join(sbv2Root, "model_assets"),
+    };
+  }
+
+  const text = await readFile(configPath, "utf8");
+  return {
+    datasetRoot: resolveSbv2ConfigPath(sbv2Root, parseSimpleYamlString(text, "dataset_root") ?? "Data"),
+    assetsRoot: resolveSbv2ConfigPath(sbv2Root, parseSimpleYamlString(text, "assets_root") ?? "model_assets"),
+  };
+}
+
+function parseSimpleYamlString(text: string, key: string): string | undefined {
+  for (const line of text.split(/\r?\n/)) {
+    const withoutComment = line.replace(/\s+#.*$/, "");
+    const match = withoutComment.match(/^([A-Za-z_][A-Za-z0-9_-]*)\s*:\s*(.*?)\s*$/);
+    if (!match || match[1] !== key) {
+      continue;
+    }
+    const value = match[2].trim();
+    if (!value) {
+      return undefined;
+    }
+    return value.replace(/^['"]|['"]$/g, "");
+  }
+  return undefined;
+}
+
+function resolveSbv2ConfigPath(sbv2Root: string, value: string): string {
+  return path.isAbsolute(value) ? value : path.join(sbv2Root, value);
+}
+
+async function buildPrepareSummary(
+  dataset: Sbv2DatasetManifest,
+  rawDir: string,
+  esdListPath: string,
+  commands: Sbv2DatasetPrepareSummary["commands"],
+): Promise<Sbv2DatasetPrepareSummary> {
+  const rawFiles = (await collectDirectoryFiles(rawDir))
+    .filter((file) => path.extname(file).toLowerCase() === ".wav")
+    .map((file) => normalizeRelativePath(path.relative(rawDir, file)))
+    .sort((left, right) => left.localeCompare(right));
+  if (!rawFiles.length) {
+    throw new Error(`No sliced WAV files were generated in ${rawDir}`);
+  }
+
+  const esdText = await readFile(esdListPath, "utf8").catch((error: unknown) => {
+    if (isNodeError(error) && error.code === "ENOENT") {
+      throw new Error(`SBV2 esd.list was not generated: ${esdListPath}`);
+    }
+    throw error;
+  });
+  const esdLines = esdText.split(/\r?\n/).filter((line) => line.trim().length > 0);
+  if (!esdLines.length) {
+    throw new Error(`SBV2 esd.list is empty: ${esdListPath}`);
+  }
+
+  const rawSet = new Set(rawFiles);
+  const transcribed = new Set<string>();
+  const missingAudioReferences: string[] = [];
+  const warnings: string[] = [...dataset.warnings];
+
+  for (const [index, line] of esdLines.entries()) {
+    const parts = line.split("|");
+    if (parts.length < 4) {
+      warnings.push(`esd.list line ${index + 1} does not have four pipe-delimited fields`);
+      continue;
+    }
+    const [audioRelativePath, speakerName, languageId, text] = parts;
+    const normalizedAudioPath = normalizeRelativePath(audioRelativePath.trim());
+    transcribed.add(normalizedAudioPath);
+    if (!rawSet.has(normalizedAudioPath)) {
+      missingAudioReferences.push(normalizedAudioPath);
+    }
+    if (speakerName !== dataset.modelName) {
+      warnings.push(`esd.list line ${index + 1} speaker is ${speakerName}, expected ${dataset.modelName}`);
+    }
+    const expectedLanguageId = toSbv2LanguageId(dataset.language);
+    if (languageId !== expectedLanguageId) {
+      warnings.push(`esd.list line ${index + 1} language is ${languageId}, expected ${expectedLanguageId}`);
+    }
+    if (!text.trim()) {
+      warnings.push(`esd.list line ${index + 1} has empty transcription text`);
+    }
+  }
+
+  const untranscribedWavs = rawFiles.filter((file) => !transcribed.has(file));
+  if (missingAudioReferences.length) {
+    warnings.push(`${missingAudioReferences.length} esd.list audio reference(s) were not found under raw`);
+  }
+  if (untranscribedWavs.length) {
+    warnings.push(`${untranscribedWavs.length} raw WAV file(s) were not listed in esd.list`);
+  }
+
+  return {
+    schemaVersion: 1,
+    workspaceId: dataset.workspaceId,
+    modelName: dataset.modelName,
+    rawDir,
+    esdListPath,
+    rawWavCount: rawFiles.length,
+    esdLineCount: esdLines.length,
+    styleGroups: dataset.styleGroups,
+    missingAudioReferences,
+    untranscribedWavs,
+    warnings,
+    commands,
+  };
+}
+
+function toSbv2LanguageId(language: Sbv2DatasetLanguage): string {
+  if (language === "ja") return "JP";
+  if (language === "en") return "EN";
+  return "ZH";
+}
+
+function isSbv2DatasetManifest(value: unknown): value is Sbv2DatasetManifest {
+  if (!isRecord(value)) {
+    return false;
+  }
+  return (
+    value.schemaVersion === 1 &&
+    typeof value.workspaceId === "string" &&
+    typeof value.modelName === "string" &&
+    (value.language === "ja" || value.language === "en" || value.language === "zh") &&
+    typeof value.useJpExtra === "boolean" &&
+    typeof value.originalsDir === "string" &&
+    typeof value.manifestPath === "string" &&
+    typeof value.sbv2Root === "string" &&
+    typeof value.datasetPath === "string" &&
+    typeof value.assetsPath === "string" &&
+    Array.isArray(value.files) &&
+    Array.isArray(value.styleGroups) &&
+    Array.isArray(value.warnings)
+  );
 }
 
 function isNodeError(value: unknown): value is NodeJS.ErrnoException {

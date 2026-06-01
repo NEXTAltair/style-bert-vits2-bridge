@@ -4,9 +4,11 @@ import path from "node:path";
 import { describe, expect, it } from "vitest";
 import {
   ingestDataset,
+  prepareDataset,
   resolveDatasetsRoot,
   resolveSbv2Root,
   type Sbv2AudioProbe,
+  type PrepareDatasetCommandRunner,
 } from "./datasets.js";
 
 function tempRoot(prefix: string): string {
@@ -207,5 +209,227 @@ describe("SBV2 dataset ingest", () => {
 
     expect(result.dataset.warnings).toEqual(["sample.wav: ffprobe failed: not found"]);
     expect(result.dataset.files[0].probeWarning).toBe("ffprobe failed: not found");
+  });
+
+  it("runs SBV2 slice and transcription commands for an ingested manifest", async () => {
+    const datasetsRoot = tempRoot("sbv2-datasets-");
+    const jobsRoot = tempRoot("sbv2-jobs-");
+    const sbv2Root = tempRoot("sbv2-root-");
+    writeFileSync(path.join(sbv2Root, "slice.py"), "");
+    writeFileSync(path.join(sbv2Root, "transcribe.py"), "");
+    const sourceDir = tempRoot("sbv2-source-");
+    mkdirSync(path.join(sourceDir, "happy"), { recursive: true });
+    mkdirSync(path.join(sourceDir, "sad"), { recursive: true });
+    writeFileSync(path.join(sourceDir, "happy", "a.wav"), "a");
+    writeFileSync(path.join(sourceDir, "sad", "b.wav"), "b");
+    const ingested = await ingestDataset({
+      datasetsRoot,
+      jobsRoot,
+      sbv2Root,
+      modelName: "prepare-voice",
+      sourceAudioPath: sourceDir,
+      language: "ja",
+      useJpExtra: true,
+      probeAudio,
+    });
+    const calls: { executable: string; args: string[]; cwd: string }[] = [];
+    const runner: PrepareDatasetCommandRunner = async (executable, args, options) => {
+      calls.push({ executable, args, cwd: options.cwd });
+      if (args.includes("slice.py")) {
+        options.onOutput?.("stdout", "slice progress\n");
+        mkdirSync(path.join(sbv2Root, "Data", "prepare-voice", "raw", "happy"), { recursive: true });
+        mkdirSync(path.join(sbv2Root, "Data", "prepare-voice", "raw", "sad"), { recursive: true });
+        writeFileSync(path.join(sbv2Root, "Data", "prepare-voice", "raw", "happy", "a-0.wav"), "a");
+        writeFileSync(path.join(sbv2Root, "Data", "prepare-voice", "raw", "sad", "b-0.wav"), "b");
+      }
+      if (args.includes("transcribe.py")) {
+        options.onOutput?.("stderr", "transcribe progress\n");
+        writeFileSync(
+          path.join(sbv2Root, "Data", "prepare-voice", "esd.list"),
+          ["happy/a-0.wav|prepare-voice|JP|こんにちは", "sad/b-0.wav|prepare-voice|JP|おやすみ", ""].join("\n"),
+        );
+      }
+      return {};
+    };
+
+    const result = await prepareDataset({
+      jobsRoot,
+      manifestPath: ingested.dataset.manifestPath,
+      commandRunner: runner,
+      now: () => new Date("2026-06-01T00:00:00.000Z"),
+      randomId: () => "prepare123",
+    });
+
+    expect(calls).toHaveLength(2);
+    expect(calls[0]).toMatchObject({
+      executable: "uv",
+      cwd: sbv2Root,
+    });
+    expect(calls[0].args).toEqual(
+      expect.arrayContaining([
+        "run",
+        "python",
+        "slice.py",
+        "--model_name",
+        "prepare-voice",
+        "--input_dir",
+        ingested.dataset.originalsDir,
+        "--min_sec",
+        "2",
+        "--max_sec",
+        "12",
+        "--min_silence_dur_ms",
+        "700",
+      ]),
+    );
+    expect(calls[1].args).toEqual(
+      expect.arrayContaining([
+        "transcribe.py",
+        "--language",
+        "ja",
+        "--initial_prompt",
+        "",
+        "--use_hf_whisper",
+        "--hf_repo_id",
+        "litagin/anime-whisper",
+        "--batch_size",
+        "16",
+      ]),
+    );
+    expect(result.summary).toMatchObject({
+      workspaceId: ingested.dataset.workspaceId,
+      modelName: "prepare-voice",
+      rawWavCount: 2,
+      esdLineCount: 2,
+      missingAudioReferences: [],
+      untranscribedWavs: [],
+    });
+    expect(result.summary.styleGroups.map((group) => group.styleName)).toEqual(["happy", "sad"]);
+    expect(result.job).toMatchObject({
+      operation: "dataset-prepare",
+      state: "succeeded",
+    });
+    expect(readFileSync(result.job.logPath, "utf8")).toContain("stdout: slice progress");
+    expect(readFileSync(result.job.logPath, "utf8")).toContain("stderr: transcribe progress");
+    expect(result.job.artifactPaths).toContain(path.join(result.job.outputDir, "summary.json"));
+    expect(JSON.parse(readFileSync(path.join(result.job.outputDir, "summary.json"), "utf8"))).toEqual(
+      result.summary,
+    );
+  });
+
+  it("honors SBV2 configs/paths.yml when locating prepare outputs", async () => {
+    const sbv2Root = tempRoot("sbv2-root-");
+    const configuredDatasetRoot = path.join(tempRoot("sbv2-configured-data-"), "datasets");
+    const configuredAssetsRoot = path.join(tempRoot("sbv2-configured-assets-"), "assets");
+    mkdirSync(path.join(sbv2Root, "configs"), { recursive: true });
+    writeFileSync(path.join(sbv2Root, "configs", "paths.yml"), `dataset_root: ${configuredDatasetRoot}\nassets_root: ${configuredAssetsRoot}\n`);
+    writeFileSync(path.join(sbv2Root, "slice.py"), "");
+    writeFileSync(path.join(sbv2Root, "transcribe.py"), "");
+    const sourceFile = path.join(tempRoot("sbv2-source-"), "sample.wav");
+    writeFileSync(sourceFile, "audio");
+    const ingested = await ingestDataset({
+      datasetsRoot: tempRoot("sbv2-datasets-"),
+      jobsRoot: tempRoot("sbv2-jobs-"),
+      sbv2Root,
+      modelName: "custom-root-prepare",
+      sourceAudioPath: sourceFile,
+      language: "ja",
+      useJpExtra: true,
+      probeAudio,
+    });
+    expect(ingested.dataset.datasetPath).toBe(path.join(configuredDatasetRoot, "custom-root-prepare"));
+    expect(ingested.dataset.assetsPath).toBe(path.join(configuredAssetsRoot, "custom-root-prepare"));
+    const runner: PrepareDatasetCommandRunner = async (_executable, args) => {
+      const outputDir = path.join(configuredDatasetRoot, "custom-root-prepare");
+      if (args.includes("slice.py")) {
+        mkdirSync(path.join(outputDir, "raw"), { recursive: true });
+        writeFileSync(path.join(outputDir, "raw", "sample-0.wav"), "a");
+      }
+      if (args.includes("transcribe.py")) {
+        writeFileSync(path.join(outputDir, "esd.list"), "sample-0.wav|custom-root-prepare|JP|こんにちは\n");
+      }
+      return {};
+    };
+
+    const result = await prepareDataset({
+      jobsRoot: tempRoot("sbv2-jobs-"),
+      manifestPath: ingested.dataset.manifestPath,
+      commandRunner: runner,
+    });
+
+    expect(result.summary.rawDir).toBe(path.join(configuredDatasetRoot, "custom-root-prepare", "raw"));
+    expect(result.summary.esdListPath).toBe(path.join(configuredDatasetRoot, "custom-root-prepare", "esd.list"));
+    expect(result.job.inputSummary.assetsPath).toBe(path.join(configuredAssetsRoot, "custom-root-prepare"));
+  });
+
+  it("rejects prepare when SBV2 output paths already exist", async () => {
+    const sbv2Root = tempRoot("sbv2-root-");
+    writeFileSync(path.join(sbv2Root, "slice.py"), "");
+    writeFileSync(path.join(sbv2Root, "transcribe.py"), "");
+    const sourceFile = path.join(tempRoot("sbv2-source-"), "sample.wav");
+    writeFileSync(sourceFile, "audio");
+    const ingested = await ingestDataset({
+      datasetsRoot: tempRoot("sbv2-datasets-"),
+      jobsRoot: tempRoot("sbv2-jobs-"),
+      sbv2Root,
+      modelName: "collision-prepare",
+      sourceAudioPath: sourceFile,
+      language: "ja",
+      useJpExtra: true,
+      probeAudio,
+    });
+    mkdirSync(path.join(sbv2Root, "Data", "collision-prepare", "raw"), { recursive: true });
+
+    await expect(
+      prepareDataset({
+        jobsRoot: tempRoot("sbv2-jobs-"),
+        manifestPath: ingested.dataset.manifestPath,
+        commandRunner: async () => ({ stdout: "not reached" }),
+      }),
+    ).rejects.toThrow(/SBV2 raw dataset already exists/);
+  });
+
+  it("summarizes esd.list mismatches as warnings", async () => {
+    const sbv2Root = tempRoot("sbv2-root-");
+    writeFileSync(path.join(sbv2Root, "slice.py"), "");
+    writeFileSync(path.join(sbv2Root, "transcribe.py"), "");
+    const sourceFile = path.join(tempRoot("sbv2-source-"), "sample.wav");
+    writeFileSync(sourceFile, "audio");
+    const ingested = await ingestDataset({
+      datasetsRoot: tempRoot("sbv2-datasets-"),
+      jobsRoot: tempRoot("sbv2-jobs-"),
+      sbv2Root,
+      modelName: "warning-prepare",
+      sourceAudioPath: sourceFile,
+      language: "ja",
+      useJpExtra: true,
+      probeAudio,
+    });
+    const runner: PrepareDatasetCommandRunner = async (_executable, args) => {
+      if (args.includes("slice.py")) {
+        mkdirSync(path.join(sbv2Root, "Data", "warning-prepare", "raw"), { recursive: true });
+        writeFileSync(path.join(sbv2Root, "Data", "warning-prepare", "raw", "sample-0.wav"), "a");
+        writeFileSync(path.join(sbv2Root, "Data", "warning-prepare", "raw", "sample-1.wav"), "b");
+      }
+      if (args.includes("transcribe.py")) {
+        writeFileSync(
+          path.join(sbv2Root, "Data", "warning-prepare", "esd.list"),
+          "missing.wav|wrong-speaker|EN|\n",
+        );
+      }
+      return {};
+    };
+
+    const result = await prepareDataset({
+      jobsRoot: tempRoot("sbv2-jobs-"),
+      manifestPath: ingested.dataset.manifestPath,
+      commandRunner: runner,
+    });
+
+    expect(result.summary.missingAudioReferences).toEqual(["missing.wav"]);
+    expect(result.summary.untranscribedWavs).toEqual(["sample-0.wav", "sample-1.wav"]);
+    expect(result.summary.warnings.join("\n")).toContain("speaker is wrong-speaker");
+    expect(result.summary.warnings.join("\n")).toContain("language is EN, expected JP");
+    expect(result.summary.warnings.join("\n")).toContain("empty transcription text");
   });
 });
