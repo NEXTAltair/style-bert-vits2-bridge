@@ -67,3 +67,11 @@ Valentina 系モデルの style は SBV2 共通の emotion taxonomy ではなく
 3. Valentina 系は `style2id` に存在する style だけを候補にする
 4. `style_weight` はエージェントまたは呼び出し側が文脈に応じて決める
 5. 話速は 0.8〜1.2 の範囲が自然
+
+## 制作系操作の安全確認
+
+音声素材の ingest、dataset prepare、training、evaluation、model promotion、model merge は TTS 再生よりも影響が大きい制作系操作です。長時間処理や GPU/CPU 高負荷処理を開始する前に、入力、出力名、保存先、stage、既存出力に上書きしないことをユーザーへ確認してください。
+
+agent はユーザー確認なしに、既存 model/dataset/checkpoint/job artifact の上書きや削除、生成モデルや音声 artifact の公開、共有、外部 upload、外部送信を行いません。
+
+失敗時は README の制作機能安全運用に従い、`jobs status`、`jobs log`、`summary.json`、入力 manifest、SBV2 `Data/` と `model_assets/`、GPU/依存関係の順で切り分けます。
