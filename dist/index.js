@@ -2,6 +2,7 @@ import { definePluginEntry } from "openclaw/plugin-sdk/plugin-entry";
 import { applyPronunciationReplacements, resolvePronunciationReplacements, } from "./pronunciation.js";
 import { Sbv2Client } from "./sbv2-client.js";
 import { listVoiceProfiles, parseVoiceDirectiveToken, resolveVoiceProfile, } from "./voice-resolver.js";
+const TOOL_STATUS_REWRITE_TEXT = "コマンドが失敗しました。別の方法で進めます。";
 function trimToUndefined(value) {
     return typeof value === "string" && value.trim() ? value.trim() : undefined;
 }
@@ -26,6 +27,35 @@ function rateWpmToLength(value) {
     if (rateWpm === undefined || rateWpm <= 0)
         return undefined;
     return clamp(180 / rateWpm, 0.5, 2);
+}
+function extractExplicitTtsText(value) {
+    const match = value.match(/\[\[tts:text\]\]([\s\S]*?)\[\[\/tts:text\]\]/);
+    return match?.[1]?.trim() || undefined;
+}
+function looksLikeToolStatusText(value) {
+    const text = value.trim();
+    if (!text)
+        return false;
+    const signals = [
+        /(?:^|\s)[⚠🛠][\s️]/u,
+        /\b(?:gh|git|pnpm|npm|yarn|uv|python|node|bash|sh)\s+[a-z0-9:_./-]+/i,
+        /\s--[a-z][a-z0-9-]*(?:[=\s]|$)/i,
+        /\(\s*in\s+(?:~\/|\/|[A-Za-z]:\\)[^)]+\)/i,
+        /(?:^|\s)(?:failed|error|exit code \d+|command failed)(?:\.|$|\s)/i,
+        /\b[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+(?:\/[A-Za-z0-9_.-]+)*\b/,
+    ];
+    const signalCount = signals.filter((signal) => signal.test(text)).length;
+    return signalCount >= 2;
+}
+function prepareSpeechText(value) {
+    const explicitText = extractExplicitTtsText(value);
+    if (explicitText) {
+        return { text: explicitText, textPreparation: "explicit" };
+    }
+    if (looksLikeToolStatusText(value)) {
+        return { text: TOOL_STATUS_REWRITE_TEXT, textPreparation: "tool_status_rewrite" };
+    }
+    return { text: value };
 }
 function parseSbv2VoiceId(value) {
     const raw = trimToUndefined(value);
@@ -109,7 +139,7 @@ function readVoiceContext(config, overrides) {
 }
 function buildTelemetryMetadata(args) {
     const { resolvedVoice } = args;
-    return {
+    const metadata = {
         provider: "style-bert-vits2",
         baseUrl: sanitizeBaseUrl(args.baseUrl),
         voiceId: resolvedVoice.voiceId,
@@ -127,6 +157,9 @@ function buildTelemetryMetadata(args) {
         outputFormat: "wav",
         audioBytes: args.audioBytes,
     };
+    if (args.textPreparation)
+        metadata.textPreparation = args.textPreparation;
+    return metadata;
 }
 function formatTelemetryContext(metadata) {
     const entries = Object.entries(metadata).filter(([, value]) => value !== undefined);
@@ -238,10 +271,11 @@ export function buildSbv2SpeechProvider(options = {}) {
                 }));
             }
             let audioBuffer;
+            const preparedText = prepareSpeechText(req.text);
             try {
                 const pronunciationReplacements = resolvePronunciationReplacements(config);
                 audioBuffer = await client.synthesize({
-                    text: applyPronunciationReplacements(req.text, pronunciationReplacements),
+                    text: applyPronunciationReplacements(preparedText.text, pronunciationReplacements),
                     modelName: resolvedVoice.modelName,
                     modelId: resolvedVoice.modelId,
                     speakerId: resolvedVoice.speakerId,
@@ -261,12 +295,14 @@ export function buildSbv2SpeechProvider(options = {}) {
                 throw withTelemetryContext(error, buildTelemetryMetadata({
                     baseUrl,
                     resolvedVoice,
+                    textPreparation: preparedText.textPreparation,
                 }));
             }
             const metadata = buildTelemetryMetadata({
                 baseUrl,
                 resolvedVoice,
                 audioBytes: audioBuffer.length,
+                textPreparation: preparedText.textPreparation,
             });
             options.logger?.debug?.("style-bert-vits2 synthesis resolved", metadata);
             return {

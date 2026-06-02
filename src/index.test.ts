@@ -20,6 +20,9 @@ const valentinaModelsInfo = {
   },
 };
 
+const observedToolFailureText =
+  '⚠️ 🛠️ gh issue close 2 --repo NEXTAltair/openclaw --reason not planned --comment "Opened in the wrong repository. This belong… (in ~/src/openclaw) failed';
+
 describe("Style-Bert-VITS2 speech provider", () => {
   beforeEach(() => {
     vi.restoreAllMocks();
@@ -151,6 +154,83 @@ describe("Style-Bert-VITS2 speech provider", () => {
     expect(voiceUrl.searchParams.get("speaker_name")).toBe("valentina01_bright");
     expect(voiceUrl.searchParams.get("style")).toBe("00_Neutral");
     expect(voiceUrl.searchParams.get("language")).toBe("JP");
+  });
+
+  it("rewrites raw tool status failure text before calling /voice", async () => {
+    const mockFetch = vi
+      .fn()
+      .mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.resolve(valentinaModelsInfo),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        arrayBuffer: () => Promise.resolve(wavBytes.buffer),
+      });
+    vi.stubGlobal("fetch", mockFetch);
+
+    const provider = buildSbv2SpeechProvider();
+    const result = await provider.synthesize({
+      text: observedToolFailureText,
+      providerConfig: { baseUrl: "http://localhost:5000" },
+    });
+
+    const voiceUrl = new URL(mockFetch.mock.calls[1][0]);
+    const spokenText = voiceUrl.searchParams.get("text");
+    expect(spokenText).toBe("コマンドが失敗しました。別の方法で進めます。");
+    expect(spokenText).not.toContain("gh issue close");
+    expect(spokenText).not.toContain("--repo");
+    expect(spokenText).not.toContain("~/src/openclaw");
+    expect(spokenText).not.toContain("⚠️");
+    expect(result.metadata).toMatchObject({ textPreparation: "tool_status_rewrite" });
+  });
+
+  it("passes ordinary Japanese text through without tool status rewriting", async () => {
+    const mockFetch = vi
+      .fn()
+      .mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.resolve(valentinaModelsInfo),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        arrayBuffer: () => Promise.resolve(wavBytes.buffer),
+      });
+    vi.stubGlobal("fetch", mockFetch);
+
+    const provider = buildSbv2SpeechProvider();
+    const result = await provider.synthesize({
+      text: "GitHub issue のクローズに失敗しました。理由を確認します。",
+      providerConfig: { baseUrl: "http://localhost:5000" },
+    });
+
+    const voiceUrl = new URL(mockFetch.mock.calls[1][0]);
+    expect(voiceUrl.searchParams.get("text")).toBe("GitHub issue のクローズに失敗しました。理由を確認します。");
+    expect(result.metadata).not.toHaveProperty("textPreparation");
+  });
+
+  it("allows explicit tts text to speak command-like text intentionally", async () => {
+    const mockFetch = vi
+      .fn()
+      .mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.resolve(valentinaModelsInfo),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        arrayBuffer: () => Promise.resolve(wavBytes.buffer),
+      });
+    vi.stubGlobal("fetch", mockFetch);
+
+    const provider = buildSbv2SpeechProvider();
+    const result = await provider.synthesize({
+      text: "[[tts:text]]gh issue close 2 --repo NEXTAltair/openclaw failed[[/tts:text]]",
+      providerConfig: { baseUrl: "http://localhost:5000" },
+    });
+
+    const voiceUrl = new URL(mockFetch.mock.calls[1][0]);
+    expect(voiceUrl.searchParams.get("text")).toBe("gh issue close 2 --repo NEXTAltair/openclaw failed");
+    expect(result.metadata).toMatchObject({ textPreparation: "explicit" });
   });
 
   it("passes SBV2 generation tuning defaults through to /voice", async () => {

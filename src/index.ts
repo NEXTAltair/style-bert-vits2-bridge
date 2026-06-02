@@ -37,6 +37,14 @@ interface Sbv2TelemetryMetadata extends Record<string, unknown> {
   language?: string;
   outputFormat: "wav";
   audioBytes?: number;
+  textPreparation?: "explicit" | "tool_status_rewrite";
+}
+
+const TOOL_STATUS_REWRITE_TEXT = "コマンドが失敗しました。別の方法で進めます。";
+
+interface PreparedSpeechText {
+  text: string;
+  textPreparation?: Sbv2TelemetryMetadata["textPreparation"];
 }
 
 function trimToUndefined(value: unknown): string | undefined {
@@ -65,6 +73,41 @@ function rateWpmToLength(value: unknown): number | undefined {
   const rateWpm = asNumber(value);
   if (rateWpm === undefined || rateWpm <= 0) return undefined;
   return clamp(180 / rateWpm, 0.5, 2);
+}
+
+function extractExplicitTtsText(value: string): string | undefined {
+  const match = value.match(/\[\[tts:text\]\]([\s\S]*?)\[\[\/tts:text\]\]/);
+  return match?.[1]?.trim() || undefined;
+}
+
+function looksLikeToolStatusText(value: string): boolean {
+  const text = value.trim();
+  if (!text) return false;
+
+  const signals = [
+    /(?:^|\s)[⚠🛠][\s️]/u,
+    /\b(?:gh|git|pnpm|npm|yarn|uv|python|node|bash|sh)\s+[a-z0-9:_./-]+/i,
+    /\s--[a-z][a-z0-9-]*(?:[=\s]|$)/i,
+    /\(\s*in\s+(?:~\/|\/|[A-Za-z]:\\)[^)]+\)/i,
+    /(?:^|\s)(?:failed|error|exit code \d+|command failed)(?:\.|$|\s)/i,
+    /\b[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+(?:\/[A-Za-z0-9_.-]+)*\b/,
+  ];
+
+  const signalCount = signals.filter((signal) => signal.test(text)).length;
+  return signalCount >= 2;
+}
+
+function prepareSpeechText(value: string): PreparedSpeechText {
+  const explicitText = extractExplicitTtsText(value);
+  if (explicitText) {
+    return { text: explicitText, textPreparation: "explicit" };
+  }
+
+  if (looksLikeToolStatusText(value)) {
+    return { text: TOOL_STATUS_REWRITE_TEXT, textPreparation: "tool_status_rewrite" };
+  }
+
+  return { text: value };
 }
 
 function parseSbv2VoiceId(value: unknown): Record<string, unknown> | undefined {
@@ -166,9 +209,10 @@ function buildTelemetryMetadata(args: {
   baseUrl: string;
   resolvedVoice: Partial<Sbv2ResolvedVoiceProfile>;
   audioBytes?: number;
+  textPreparation?: Sbv2TelemetryMetadata["textPreparation"];
 }): Sbv2TelemetryMetadata {
   const { resolvedVoice } = args;
-  return {
+  const metadata: Sbv2TelemetryMetadata = {
     provider: "style-bert-vits2",
     baseUrl: sanitizeBaseUrl(args.baseUrl),
     voiceId: resolvedVoice.voiceId,
@@ -186,6 +230,8 @@ function buildTelemetryMetadata(args: {
     outputFormat: "wav",
     audioBytes: args.audioBytes,
   };
+  if (args.textPreparation) metadata.textPreparation = args.textPreparation;
+  return metadata;
 }
 
 function formatTelemetryContext(metadata: Sbv2TelemetryMetadata): string {
@@ -304,10 +350,11 @@ export function buildSbv2SpeechProvider(options: Sbv2SpeechProviderOptions = {})
       }
 
       let audioBuffer: Buffer;
+      const preparedText = prepareSpeechText(req.text);
       try {
         const pronunciationReplacements = resolvePronunciationReplacements(config);
         audioBuffer = await client.synthesize({
-          text: applyPronunciationReplacements(req.text, pronunciationReplacements),
+          text: applyPronunciationReplacements(preparedText.text, pronunciationReplacements),
           modelName: resolvedVoice.modelName,
           modelId: resolvedVoice.modelId,
           speakerId: resolvedVoice.speakerId,
@@ -328,6 +375,7 @@ export function buildSbv2SpeechProvider(options: Sbv2SpeechProviderOptions = {})
           buildTelemetryMetadata({
             baseUrl,
             resolvedVoice,
+            textPreparation: preparedText.textPreparation,
           }),
         );
       }
@@ -336,6 +384,7 @@ export function buildSbv2SpeechProvider(options: Sbv2SpeechProviderOptions = {})
         baseUrl,
         resolvedVoice,
         audioBytes: audioBuffer.length,
+        textPreparation: preparedText.textPreparation,
       });
       options.logger?.debug?.("style-bert-vits2 synthesis resolved", metadata);
 
