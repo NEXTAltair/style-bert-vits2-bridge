@@ -7,7 +7,8 @@
     "speechProviders": ["style-bert-vits2"]
   },
   "skills": [
-    "./skills/voice"
+    "./skills/voice",
+    "./skills/model-production"
   ],
   "configSchema": {
     "type": "object",
