@@ -87,6 +87,13 @@ interface ParsedCommand {
   options: CliOptions;
 }
 
+interface Sbv2PathRoles {
+  bridgeState?: string;
+  sbv2Dataset?: string;
+  sbv2LoadableModel?: string;
+  jobLog?: string;
+}
+
 export function isCliEntrypoint(moduleUrl: string, argvPath: string | undefined): boolean {
   if (!argvPath) return false;
 
@@ -475,6 +482,40 @@ function requireValue<T>(value: T | undefined, name: string): T {
   return value;
 }
 
+function stringValue(value: unknown): string | undefined {
+  return typeof value === "string" ? value : undefined;
+}
+
+function datasetPathRoles(
+  dataset: { workspaceDir: string; datasetPath: string; assetsPath: string },
+  job?: { logPath: string },
+): Sbv2PathRoles {
+  return {
+    bridgeState: dataset.workspaceDir,
+    sbv2Dataset: dataset.datasetPath,
+    sbv2LoadableModel: dataset.assetsPath,
+    ...(job ? { jobLog: job.logPath } : {}),
+  };
+}
+
+function preparePathRoles(job: Sbv2JobManifest): Sbv2PathRoles {
+  return {
+    bridgeState: job.outputDir,
+    ...(stringValue(job.inputSummary.datasetPath) ? { sbv2Dataset: stringValue(job.inputSummary.datasetPath) } : {}),
+    ...(stringValue(job.inputSummary.assetsPath) ? { sbv2LoadableModel: stringValue(job.inputSummary.assetsPath) } : {}),
+    jobLog: job.logPath,
+  };
+}
+
+function trainingPathRoles(plan: { datasetPath: string; assetsPath: string }, job?: Sbv2JobManifest): Sbv2PathRoles {
+  return {
+    ...(job ? { bridgeState: job.outputDir } : {}),
+    sbv2Dataset: plan.datasetPath,
+    sbv2LoadableModel: plan.assetsPath,
+    ...(job ? { jobLog: job.logPath } : {}),
+  };
+}
+
 export async function runCli(argv: string[], io: CliIO = {}): Promise<number> {
   const stdout = io.stdout ?? process.stdout;
   const stderr = io.stderr ?? process.stderr;
@@ -494,16 +535,20 @@ export async function runCli(argv: string[], io: CliIO = {}): Promise<number> {
           jobsRoot: options.jobsRoot,
           manifestPath: requireString(options.manifestPath, "--manifest"),
         });
+        const pathRoles = preparePathRoles(result.job);
         if (options.json) {
-          printJson(stdout, { ok: true, dataset: result.dataset, summary: result.summary, job: result.job });
+          printJson(stdout, { ok: true, dataset: result.dataset, summary: result.summary, job: result.job, pathRoles });
         } else {
           writeLine(stdout, `prepared ${result.dataset.workspaceId}`);
           writeLine(stdout, `model: ${result.dataset.modelName}`);
+          if (pathRoles.bridgeState) writeLine(stdout, `bridge state: ${pathRoles.bridgeState}`);
+          if (pathRoles.sbv2Dataset) writeLine(stdout, `SBV2 dataset: ${pathRoles.sbv2Dataset}`);
+          if (pathRoles.sbv2LoadableModel) writeLine(stdout, `SBV2 loadable model: ${pathRoles.sbv2LoadableModel}`);
           writeLine(stdout, `raw wavs: ${result.summary.rawWavCount}`);
           writeLine(stdout, `esd lines: ${result.summary.esdLineCount}`);
           writeLine(stdout, `summary: ${result.job.outputDir}/summary.json`);
           writeLine(stdout, `job: ${result.job.jobId}`);
-          writeLine(stdout, `log: ${result.job.logPath}`);
+          writeLine(stdout, `job log: ${result.job.logPath}`);
         }
         return 0;
       }
@@ -519,15 +564,19 @@ export async function runCli(argv: string[], io: CliIO = {}): Promise<number> {
         language: options.language ?? "ja",
         useJpExtra: requireBoolean(options.useJpExtra, "--use-jp-extra or --no-use-jp-extra"),
       });
+      const pathRoles = datasetPathRoles(result.dataset, result.job);
       if (options.json) {
-        printJson(stdout, { ok: true, dataset: result.dataset, job: result.job });
+        printJson(stdout, { ok: true, dataset: result.dataset, job: result.job, pathRoles });
       } else {
         writeLine(stdout, `ingested ${result.dataset.workspaceId}`);
         writeLine(stdout, `model: ${result.dataset.modelName}`);
         writeLine(stdout, `files: ${result.dataset.files.length}`);
+        writeLine(stdout, `bridge state: ${pathRoles.bridgeState}`);
+        writeLine(stdout, `SBV2 dataset: ${pathRoles.sbv2Dataset}`);
+        writeLine(stdout, `SBV2 loadable model: ${pathRoles.sbv2LoadableModel}`);
         writeLine(stdout, `manifest: ${result.dataset.manifestPath}`);
         writeLine(stdout, `job: ${result.job.jobId}`);
-        writeLine(stdout, `log: ${result.job.logPath}`);
+        writeLine(stdout, `job log: ${result.job.logPath}`);
       }
       return 0;
     }
@@ -540,14 +589,15 @@ export async function runCli(argv: string[], io: CliIO = {}): Promise<number> {
       };
       if (parsed.command === "plan") {
         const result = await createTrainingPlan(planOptions);
+        const pathRoles = trainingPathRoles(result.plan);
         if (options.json) {
-          printJson(stdout, { ok: true, dataset: result.dataset, plan: result.plan });
+          printJson(stdout, { ok: true, dataset: result.dataset, plan: result.plan, pathRoles });
         } else {
           writeLine(stdout, `training plan ${result.plan.workspaceId}`);
           writeLine(stdout, `model: ${result.plan.modelName}`);
           writeLine(stdout, `stages: ${result.plan.stages.join(", ")}`);
-          writeLine(stdout, `dataset: ${result.plan.datasetPath}`);
-          writeLine(stdout, `assets: ${result.plan.assetsPath}`);
+          writeLine(stdout, `SBV2 dataset: ${result.plan.datasetPath}`);
+          writeLine(stdout, `SBV2 loadable model: ${result.plan.assetsPath}`);
           for (const command of result.plan.commands) {
             writeLine(stdout, `${command.stage}: ${command.executable} ${command.args.join(" ")}`);
           }
@@ -559,15 +609,19 @@ export async function runCli(argv: string[], io: CliIO = {}): Promise<number> {
           ...planOptions,
           jobsRoot: options.jobsRoot,
         });
+        const pathRoles = trainingPathRoles(result.plan, result.job);
         if (options.json) {
-          printJson(stdout, { ok: true, dataset: result.dataset, plan: result.plan, job: result.job });
+          printJson(stdout, { ok: true, dataset: result.dataset, plan: result.plan, job: result.job, pathRoles });
         } else {
           writeLine(stdout, `training run ${result.plan.workspaceId}`);
           writeLine(stdout, `model: ${result.plan.modelName}`);
           writeLine(stdout, `stages: ${result.plan.stages.join(", ")}`);
+          writeLine(stdout, `bridge state: ${pathRoles.bridgeState}`);
+          writeLine(stdout, `SBV2 dataset: ${result.plan.datasetPath}`);
+          writeLine(stdout, `SBV2 loadable model: ${result.plan.assetsPath}`);
           writeLine(stdout, `summary: ${result.job.outputDir}/summary.json`);
           writeLine(stdout, `job: ${result.job.jobId}`);
-          writeLine(stdout, `log: ${result.job.logPath}`);
+          writeLine(stdout, `job log: ${result.job.logPath}`);
         }
         return 0;
       }
@@ -582,11 +636,15 @@ export async function runCli(argv: string[], io: CliIO = {}): Promise<number> {
           modelName: options.modelName,
           sourcePath: options.sourceAudioPath,
         });
+        const pathRoles: Sbv2PathRoles = {
+          ...(candidates[0] ? { sbv2LoadableModel: candidates[0].targetDir } : {}),
+        };
         if (options.json) {
-          printJson(stdout, { ok: true, candidates });
+          printJson(stdout, { ok: true, candidates, pathRoles });
         } else {
           for (const candidate of candidates) {
             writeLine(stdout, `${candidate.candidateId}\t${candidate.promotable ? "promotable" : "blocked"}\t${candidate.sourceDir}`);
+            writeLine(stdout, `SBV2 loadable model: ${candidate.targetDir}`);
             for (const error of candidate.errors) {
               writeLine(stdout, `error: ${error}`);
             }
@@ -646,19 +704,25 @@ export async function runCli(argv: string[], io: CliIO = {}): Promise<number> {
           baseUrl: options.baseUrl,
           evaluationPath: options.evaluationPath,
         });
+        const pathRoles: Sbv2PathRoles = {
+          bridgeState: result.job.outputDir,
+          sbv2LoadableModel: result.summary.targetDir,
+          jobLog: result.job.logPath,
+        };
         if (options.json) {
-          printJson(stdout, { ok: true, candidate: result.candidate, summary: result.summary, job: result.job });
+          printJson(stdout, { ok: true, candidate: result.candidate, summary: result.summary, job: result.job, pathRoles });
         } else {
           writeLine(stdout, `promoted ${result.summary.modelName}`);
           writeLine(stdout, `source: ${result.summary.sourceDir}`);
-          writeLine(stdout, `target: ${result.summary.targetDir}`);
+          writeLine(stdout, `bridge state: ${pathRoles.bridgeState}`);
+          writeLine(stdout, `SBV2 loadable model: ${result.summary.targetDir}`);
           if (result.summary.backupDir) writeLine(stdout, `backup: ${result.summary.backupDir}`);
           if (result.summary.refresh) {
             writeLine(stdout, `refresh: ${result.summary.refresh.foundInModelsInfo ? "found" : "missing"}`);
           }
           writeLine(stdout, `summary: ${result.job.outputDir}/summary.json`);
           writeLine(stdout, `job: ${result.job.jobId}`);
-          writeLine(stdout, `log: ${result.job.logPath}`);
+          writeLine(stdout, `job log: ${result.job.logPath}`);
         }
         return 0;
       }
