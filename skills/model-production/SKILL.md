@@ -12,15 +12,28 @@ description: Style-Bert-VITS2 の音声素材 ingest から dataset prepare、tr
 音声素材からモデルを作る標準順は次の通りです。
 
 1. `datasets ingest`: 音声素材を bridge 管理 workspace にコピーし、dataset manifest を作る
-2. `datasets prepare`: SBV2 の slice / transcription を実行し、`Data/<modelName>/raw` と `esd.list` を作る
+2. `datasets prepare`: SBV2 の slice / transcription を実行し、resolved `dataset_root/<modelName>/raw` と `esd.list` を作る
 3. `training plan`: 学習 stage と出力先を確認する
 4. `training run`: `resample`、`preprocess_text`、`bert_gen`、`style_gen`、`train_ms` を job として実行する
 5. `models candidates`: 昇格できる候補ディレクトリを確認する
-6. `models promote`: candidate を `model_assets/<modelName>` に昇格し、SBV2 からロード可能にする
+6. `models promote`: candidate を resolved `assets_root/<modelName>` に昇格し、SBV2 からロード可能にする
 7. `evaluation run`: 昇格後モデルの試聴用 sample と評価 manifest を作る
 8. `evaluation note`: 人間の試聴結果を evaluation manifest に記録する
 
 `modelName` は pipeline 全体のキーです。SBV2 の単一話者 workflow に合わせ、別の speaker name や project name は通常入力として持ちません。
+
+保存先は SBV2 の `configs/paths.yml`、次に `configs/default_paths.yml`、最後に SBV2 既定値から解決します。`Data/<modelName>` と `model_assets/<modelName>` は既定例であり、実際の `dataset_root` / `assets_root` が変わっている環境では CLI の `pathRoles` と表示された path を正としてください。
+
+```text
+bridge state:
+  ingest copy、manifest、job log、summary 用。SBV2 FastAPI からはロードされません。
+
+SBV2 dataset:
+  resolved dataset_root/<modelName>。slice/transcribe/preprocess/training 用です。
+
+SBV2 loadable model:
+  resolved assets_root/<modelName>。/models/info と /voice が使う runtime model です。
+```
 
 ## 実行前確認
 
@@ -29,12 +42,15 @@ description: Style-Bert-VITS2 の音声素材 ingest から dataset prepare、tr
 ```text
 SBV2 の制作処理を開始します。
 入力: <source path または manifest / candidate>
-出力: <datasets workspace / Data/<modelName> / model_assets/<modelName> / jobs>
+bridge state: <ingest workspace または job output/log>
+SBV2 dataset: <resolved dataset_root>/<modelName>
+SBV2 loadable model: <resolved assets_root>/<modelName>
+job log: <jobs path>
 処理: <ingest/prepare/training/evaluation/promote と stage>
 既存出力への上書きは行いません。開始してよいですか。
 ```
 
-ユーザー確認なしに、既存の `Data/<modelName>`、`model_assets/<modelName>`、checkpoint、job artifact を上書きまたは削除しないでください。生成モデル、評価音声、入力音声の公開、共有、外部 upload、外部送信も行いません。
+ユーザー確認なしに、既存の resolved `dataset_root/<modelName>`、resolved `assets_root/<modelName>`、checkpoint、job artifact を上書きまたは削除しないでください。生成モデル、評価音声、入力音声の公開、共有、外部 upload、外部送信も行いません。
 
 ## Dataset ingest
 
@@ -62,7 +78,7 @@ sbv2-bridge datasets ingest \
 
 `--source` は音声ファイルまたはディレクトリです。ディレクトリ直下に複数のサブディレクトリがある場合、その相対構造は style group として manifest に記録されます。
 
-出力の `dataset.manifestPath` を後続工程で使います。
+出力の `dataset.manifestPath` を後続工程で使います。`pathRoles.bridgeState` は一時 workspace、`pathRoles.sbv2Dataset` は SBV2 の学習 dataset、`pathRoles.sbv2LoadableModel` は最終的に FastAPI が読む model assets です。
 
 ## Dataset prepare
 
@@ -74,7 +90,7 @@ sbv2-bridge datasets prepare \
   --json
 ```
 
-既存の `Data/<modelName>/raw`、`Data/<modelName>/esd.list`、`model_assets/<modelName>` がある場合は上書きせず失敗します。失敗したら `jobs status` と `jobs log` を確認してください。
+既存の resolved `dataset_root/<modelName>/raw`、resolved `dataset_root/<modelName>/esd.list`、resolved `assets_root/<modelName>` がある場合は上書きせず失敗します。失敗したら `jobs status` と `jobs log` を確認してください。
 
 ## Training
 
@@ -94,7 +110,7 @@ sbv2-bridge training run \
   --json
 ```
 
-stage を限定する場合は `--stage resample --stage preprocess-text` のように指定します。通常は全 stage を実行します。既存の `Data/<modelName>/models` や `model_assets/<modelName>` は上書きしません。
+stage を限定する場合は `--stage resample --stage preprocess-text` のように指定します。通常は全 stage を実行します。既存の resolved `dataset_root/<modelName>/models` や resolved `assets_root/<modelName>` は上書きしません。
 
 ## Job 確認
 
@@ -105,7 +121,7 @@ sbv2-bridge jobs status <jobId>
 sbv2-bridge jobs log <jobId> --tail 80
 ```
 
-次に `summary.json`、dataset manifest、SBV2 `Data/<modelName>` / `model_assets/<modelName>`、既存出力との衝突、SBV2 script や pretrained directory、GPU/依存関係を確認します。
+次に `summary.json`、dataset manifest、CLI の `pathRoles`、既存出力との衝突、SBV2 script や pretrained directory、GPU/依存関係を確認します。
 
 ## Promotion
 
@@ -117,7 +133,7 @@ sbv2-bridge models candidates \
   --json
 ```
 
-学習済み candidate を `model_assets/<modelName>` に昇格します。実行時は model name の明示確認が必要です。
+学習済み candidate を resolved `assets_root/<modelName>` に昇格します。実行時は model name の明示確認が必要です。
 
 ```bash
 sbv2-bridge models promote \
@@ -128,7 +144,7 @@ sbv2-bridge models promote \
   --json
 ```
 
-`evaluation run` は SBV2 からロード可能な `model_assets/<modelName>` を合成対象にします。学習直後の candidate directory を直接評価せず、先に `models promote` で `model_assets/<modelName>` へ昇格してください。
+`evaluation run` は SBV2 からロード可能な resolved `assets_root/<modelName>` を合成対象にします。学習直後の candidate directory を直接評価せず、先に `models promote` で resolved `assets_root/<modelName>` へ昇格してください。
 
 ## Evaluation
 

@@ -122,6 +122,59 @@ describe("SBV2 model registry", () => {
     expect(candidate.errors.join("\n")).toContain("no non-empty .safetensors files");
   });
 
+  it("explains bridge dataset workspaces passed as candidate sources", async () => {
+    const sbv2Root = createSbv2Root("workspace-voice");
+    const workspace = tempRoot("sbv2-bridge-workspace-");
+    mkdirSync(path.join(workspace, "originals"), { recursive: true });
+    writeFileSync(
+      path.join(workspace, "manifest.json"),
+      JSON.stringify({
+        schemaVersion: 1,
+        workspaceId: "sbv2-dataset-20260601000000-source1",
+        modelName: "workspace-voice",
+        originalsDir: path.join(workspace, "originals"),
+        datasetPath: path.join(sbv2Root, "Data", "workspace-voice"),
+        assetsPath: path.join(sbv2Root, "model_assets", "workspace-voice"),
+      }),
+    );
+
+    const [candidate] = await listModelCandidates({
+      sbv2Root,
+      modelName: "workspace-voice",
+      sourcePath: workspace,
+    });
+
+    expect(candidate.promotable).toBe(false);
+    expect(candidate.errors.join("\n")).toContain("bridge dataset/job workspace");
+    expect(candidate.errors.join("\n")).toContain(path.join(sbv2Root, "model_assets", "workspace-voice"));
+  });
+
+  it("explains bridge job directories passed as candidate sources", async () => {
+    const sbv2Root = createSbv2Root("job-voice");
+    const jobDir = tempRoot("sbv2-bridge-job-");
+    writeFileSync(path.join(jobDir, "job.log"), "job output\n");
+    writeFileSync(
+      path.join(jobDir, "manifest.json"),
+      JSON.stringify({
+        schemaVersion: 1,
+        jobId: "sbv2-job-20260601000000-job12345",
+        operation: "training-run",
+        outputDir: jobDir,
+        logPath: path.join(jobDir, "job.log"),
+      }),
+    );
+
+    const [candidate] = await listModelCandidates({
+      sbv2Root,
+      modelName: "job-voice",
+      sourcePath: jobDir,
+    });
+
+    expect(candidate.promotable).toBe(false);
+    expect(candidate.errors.join("\n")).toContain("bridge dataset/job workspace");
+    expect(candidate.errors.join("\n")).toContain(path.join(sbv2Root, "model_assets", "job-voice"));
+  });
+
   it("requires minimal SBV2 config data maps", async () => {
     const sbv2Root = createSbv2Root();
     const modelDir = path.join(sbv2Root, "model_assets", "test-voice");

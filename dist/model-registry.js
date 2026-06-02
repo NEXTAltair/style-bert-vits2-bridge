@@ -169,6 +169,12 @@ async function inspectModelCandidate(context) {
     else if (!sourceStat.isDirectory) {
         errors.push(`candidate path is not a directory: ${sourceDir}`);
     }
+    if (sourceStat.exists && sourceStat.isDirectory) {
+        const workspaceError = await detectBridgeWorkspaceSource(sourceDir, context.targetDir);
+        if (workspaceError) {
+            errors.push(workspaceError);
+        }
+    }
     const configStat = await nonEmptyFileStat(configJsonPath);
     if (!configStat) {
         errors.push(`config.json is missing or empty: ${configJsonPath}`);
@@ -218,6 +224,44 @@ async function inspectModelCandidate(context) {
         errors,
         promotable: errors.length === 0,
     };
+}
+async function detectBridgeWorkspaceSource(sourceDir, targetDir) {
+    const manifestPath = path.join(sourceDir, "manifest.json");
+    const hasManifest = await pathExists(manifestPath);
+    const hasOriginals = await pathExists(path.join(sourceDir, "originals"));
+    const hasJobLog = await pathExists(path.join(sourceDir, "job.log"));
+    if (!hasManifest || (!hasOriginals && !hasJobLog)) {
+        return undefined;
+    }
+    const manifest = await readJsonFile(manifestPath);
+    const isDatasetWorkspace = hasOriginals &&
+        isRecord(manifest) &&
+        manifest.schemaVersion === 1 &&
+        typeof manifest.workspaceId === "string" &&
+        typeof manifest.originalsDir === "string" &&
+        typeof manifest.datasetPath === "string" &&
+        typeof manifest.assetsPath === "string";
+    const isJobWorkspace = hasJobLog &&
+        isRecord(manifest) &&
+        manifest.schemaVersion === 1 &&
+        typeof manifest.jobId === "string" &&
+        typeof manifest.operation === "string" &&
+        typeof manifest.outputDir === "string" &&
+        typeof manifest.logPath === "string";
+    if (!isDatasetWorkspace && !isJobWorkspace) {
+        return undefined;
+    }
+    return (`This path is a bridge dataset/job workspace, not an SBV2 model candidate: ${sourceDir}. ` +
+        "Use a model directory containing config.json, style_vectors.npy, and .safetensors, " +
+        `or use the resolved SBV2 loadable model target: ${targetDir}.`);
+}
+async function readJsonFile(filePath) {
+    try {
+        return JSON.parse(await readFile(filePath, "utf8"));
+    }
+    catch {
+        return undefined;
+    }
 }
 async function resolveModelContext(options) {
     const fromManifest = options.manifestPath ? await readDatasetManifest(resolveUserPath(options.manifestPath)) : undefined;

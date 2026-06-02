@@ -432,7 +432,14 @@ if (args.includes("transcribe.py")) {
       ).resolves.toBe(0);
       const ingested = JSON.parse(ingestOut.output()) as {
         dataset: { manifestPath: string };
+        pathRoles: { bridgeState: string; sbv2Dataset: string; sbv2LoadableModel: string; jobLog: string };
       };
+      expect(ingested.pathRoles).toMatchObject({
+        sbv2Dataset: path.join(sbv2Root, "Data", "cli-prepare"),
+        sbv2LoadableModel: path.join(sbv2Root, "model_assets", "cli-prepare"),
+      });
+      expect(ingested.pathRoles.bridgeState).toContain(datasetsRoot);
+      expect(ingested.pathRoles.jobLog).toContain(jobsRoot);
 
       const prepareOut = createWriter();
       const prepareErr = createWriter();
@@ -454,12 +461,18 @@ if (args.includes("transcribe.py")) {
       const prepared = JSON.parse(prepareOut.output()) as {
         summary: { rawWavCount: number; esdLineCount: number };
         job: { operation: string };
+        pathRoles: { bridgeState: string; sbv2Dataset: string; sbv2LoadableModel: string; jobLog: string };
       };
       expect(prepared.summary).toMatchObject({
         rawWavCount: 1,
         esdLineCount: 1,
       });
       expect(prepared.job.operation).toBe("dataset-prepare");
+      expect(prepared.pathRoles).toMatchObject({
+        sbv2Dataset: path.join(sbv2Root, "Data", "cli-prepare"),
+        sbv2LoadableModel: path.join(sbv2Root, "model_assets", "cli-prepare"),
+      });
+      expect(prepared.pathRoles.bridgeState).toContain(jobsRoot);
     } finally {
       process.env.PATH = previousPath;
     }
@@ -469,10 +482,15 @@ if (args.includes("transcribe.py")) {
     const jobsRoot = tempJobsRoot();
     const datasetsRoot = mkdtempSync(path.join(tmpdir(), "sbv2-cli-datasets-"));
     const sbv2Root = mkdtempSync(path.join(tmpdir(), "sbv2-cli-root-"));
+    const configuredDatasetRoot = mkdtempSync(path.join(tmpdir(), "sbv2-cli-configured-data-"));
+    const configuredAssetsRoot = mkdtempSync(path.join(tmpdir(), "sbv2-cli-configured-assets-"));
     const sourceRoot = mkdtempSync(path.join(tmpdir(), "sbv2-cli-source-"));
     const binRoot = mkdtempSync(path.join(tmpdir(), "sbv2-cli-bin-"));
     mkdirSync(path.join(sbv2Root, "configs"), { recursive: true });
-    writeFileSync(path.join(sbv2Root, "configs", "paths.yml"), "dataset_root: Data\nassets_root: model_assets\n");
+    writeFileSync(
+      path.join(sbv2Root, "configs", "paths.yml"),
+      `dataset_root: ${configuredDatasetRoot}\nassets_root: ${configuredAssetsRoot}\n`,
+    );
     writeFileSync(path.join(sbv2Root, "resample.py"), "");
     writeFileSync(path.join(sourceRoot, "a.wav"), "a");
     const fakeUv = path.join(binRoot, "uv");
@@ -516,10 +534,15 @@ if (args.includes("resample.py")) {
     ).resolves.toBe(0);
     const ingested = JSON.parse(ingestOut.output()) as {
       dataset: { manifestPath: string };
+      pathRoles: { sbv2Dataset: string; sbv2LoadableModel: string };
     };
-    mkdirSync(path.join(sbv2Root, "Data", "cli-train", "raw"), { recursive: true });
-    writeFileSync(path.join(sbv2Root, "Data", "cli-train", "raw", "a-0.wav"), "a");
-    writeFileSync(path.join(sbv2Root, "Data", "cli-train", "esd.list"), "a-0.wav|cli-train|JP|こんにちは\n");
+    expect(ingested.pathRoles).toMatchObject({
+      sbv2Dataset: path.join(configuredDatasetRoot, "cli-train"),
+      sbv2LoadableModel: path.join(configuredAssetsRoot, "cli-train"),
+    });
+    mkdirSync(path.join(configuredDatasetRoot, "cli-train", "raw"), { recursive: true });
+    writeFileSync(path.join(configuredDatasetRoot, "cli-train", "raw", "a-0.wav"), "a");
+    writeFileSync(path.join(configuredDatasetRoot, "cli-train", "esd.list"), "a-0.wav|cli-train|JP|こんにちは\n");
 
     const planOut = createWriter();
     await expect(
@@ -540,9 +563,31 @@ if (args.includes("resample.py")) {
     ).resolves.toBe(0);
     const planned = JSON.parse(planOut.output()) as {
       plan: { stages: string[]; settings: { batchSize: number } };
+      pathRoles: { sbv2Dataset: string; sbv2LoadableModel: string };
     };
     expect(planned.plan.stages).toEqual(["resample"]);
     expect(planned.plan.settings.batchSize).toBe(4);
+    expect(planned.pathRoles).toMatchObject({
+      sbv2Dataset: path.join(configuredDatasetRoot, "cli-train"),
+      sbv2LoadableModel: path.join(configuredAssetsRoot, "cli-train"),
+    });
+
+    const textPlanOut = createWriter();
+    await expect(
+      runCli(
+        [
+          "training",
+          "plan",
+          "--manifest",
+          ingested.dataset.manifestPath,
+          "--stage",
+          "resample",
+        ],
+        { stdout: textPlanOut.stream, stderr: createWriter().stream },
+      ),
+    ).resolves.toBe(0);
+    expect(textPlanOut.output()).toContain(`SBV2 dataset: ${path.join(configuredDatasetRoot, "cli-train")}`);
+    expect(textPlanOut.output()).toContain(`SBV2 loadable model: ${path.join(configuredAssetsRoot, "cli-train")}`);
 
     const previousPath = process.env.PATH;
     process.env.PATH = `${binRoot}:${previousPath ?? ""}`;
@@ -567,9 +612,15 @@ if (args.includes("resample.py")) {
       const ran = JSON.parse(runOut.output()) as {
         job: { operation: string };
         plan: { stages: string[] };
+        pathRoles: { bridgeState: string; sbv2Dataset: string; sbv2LoadableModel: string; jobLog: string };
       };
       expect(ran.job.operation).toBe("training-run");
       expect(ran.plan.stages).toEqual(["resample"]);
+      expect(ran.pathRoles).toMatchObject({
+        sbv2Dataset: path.join(configuredDatasetRoot, "cli-train"),
+        sbv2LoadableModel: path.join(configuredAssetsRoot, "cli-train"),
+      });
+      expect(ran.pathRoles.bridgeState).toContain(jobsRoot);
     } finally {
       process.env.PATH = previousPath;
     }
@@ -598,11 +649,13 @@ if (args.includes("resample.py")) {
     ).resolves.toBe(0);
     const candidates = JSON.parse(candidatesOut.output()) as {
       candidates: Array<{ modelName: string; promotable: boolean }>;
+      pathRoles: { sbv2LoadableModel: string };
     };
     expect(candidates.candidates[0]).toMatchObject({
       modelName: "cli-model",
       promotable: true,
     });
+    expect(candidates.pathRoles.sbv2LoadableModel).toBe(modelDir);
 
     const promoteOut = createWriter();
     await expect(
@@ -626,9 +679,12 @@ if (args.includes("resample.py")) {
     const promoted = JSON.parse(promoteOut.output()) as {
       summary: { modelName: string; copied: boolean };
       job: { operation: string };
+      pathRoles: { bridgeState: string; sbv2LoadableModel: string; jobLog: string };
     };
     expect(promoted.summary).toMatchObject({ modelName: "cli-model", copied: false });
     expect(promoted.job.operation).toBe("model-promote");
+    expect(promoted.pathRoles.sbv2LoadableModel).toBe(modelDir);
+    expect(promoted.pathRoles.bridgeState).toContain(jobsRoot);
   });
 
   it("passes --source through when listing model candidates", async () => {
@@ -665,6 +721,64 @@ if (args.includes("resample.py")) {
       candidates: Array<{ sourceDir: string; promotable: boolean }>;
     };
     expect(result.candidates[0]).toMatchObject({ sourceDir: source, promotable: true });
+  });
+
+  it("explains bridge workspaces passed as model candidate sources", async () => {
+    const datasetsRoot = mkdtempSync(path.join(tmpdir(), "sbv2-cli-datasets-"));
+    const sbv2Root = mkdtempSync(path.join(tmpdir(), "sbv2-cli-root-"));
+    const sourceRoot = mkdtempSync(path.join(tmpdir(), "sbv2-cli-source-"));
+    writeFileSync(path.join(sourceRoot, "a.wav"), "a");
+
+    const ingestOut = createWriter();
+    await expect(
+      runCli(
+        [
+          "datasets",
+          "ingest",
+          "--datasets-dir",
+          datasetsRoot,
+          "--sbv2-root",
+          sbv2Root,
+          "--model-name",
+          "workspace-source",
+          "--source",
+          sourceRoot,
+          "--language",
+          "ja",
+          "--use-jp-extra",
+          "--json",
+        ],
+        { stdout: ingestOut.stream, stderr: createWriter().stream },
+      ),
+    ).resolves.toBe(0);
+    const ingested = JSON.parse(ingestOut.output()) as {
+      pathRoles: { bridgeState: string };
+    };
+
+    const candidatesOut = createWriter();
+    await expect(
+      runCli(
+        [
+          "models",
+          "candidates",
+          "--sbv2-root",
+          sbv2Root,
+          "--model-name",
+          "workspace-source",
+          "--source",
+          ingested.pathRoles.bridgeState,
+          "--json",
+        ],
+        { stdout: candidatesOut.stream, stderr: createWriter().stream },
+      ),
+    ).resolves.toBe(0);
+
+    const result = JSON.parse(candidatesOut.output()) as {
+      candidates: Array<{ errors: string[]; promotable: boolean }>;
+    };
+    expect(result.candidates[0].promotable).toBe(false);
+    expect(result.candidates[0].errors.join("\n")).toContain("bridge dataset/job workspace");
+    expect(result.candidates[0].errors.join("\n")).toContain(path.join(sbv2Root, "model_assets", "workspace-source"));
   });
 
   it("requires exact confirmation before model promotion", async () => {

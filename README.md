@@ -196,14 +196,17 @@ SBV2 の制作系 CLI は、TTS 再生よりも処理時間、GPU/CPU 負荷、�
 ```text
 SBV2 の長時間処理を開始します。
 入力: <manifest または model_assets>
-出力: <Data/model_assets/jobs の対象 path>
+bridge state: <ingest workspace または job output/log>
+SBV2 dataset: <resolved dataset_root>/<modelName>
+SBV2 loadable model: <resolved assets_root>/<modelName>
+job log: <jobs path>
 処理: <prepare/training/evaluation/merge と stage>
 既存出力への上書きは行いません。開始してよいですか。
 ```
 
 agent は次の操作を自動実行しません。実行する場合は、対象、理由、退避または復旧方針を明示して人間の確認を挟みます。
 
-- 既存の `Data/<modelName>`、`model_assets/<modelName>`、checkpoint、job artifact の上書き
+- 既存の resolved `dataset_root/<modelName>`、resolved `assets_root/<modelName>`、checkpoint、job artifact の上書き
 - dataset、model、checkpoint、job log、evaluation sample の削除
 - model artifact、評価音声、入力音声の公開、共有、外部 upload、外部送信
 - SBV2 root 外や plugin state 外へ大きな artifact を移動する操作
@@ -216,7 +219,9 @@ artifact と log の既定保存先:
 - SBV2 model assets: `<SBV2 root>/model_assets/<modelName>`
 - evaluation / merge summary: 各 job の output directory と `artifactPaths`
 
-失敗時は、まず `sbv2-bridge jobs status <jobId>` と `sbv2-bridge jobs log <jobId> --tail 80` を確認します。次に job の `summary.json`、入力 manifest、SBV2 root の `Data/<modelName>` / `model_assets/<modelName>`、既存出力との衝突、SBV2 script や pretrained directory の有無、GPU/依存関係の状態を切り分けます。
+SBV2 dataset output と model assets は既定例です。実際の path は SBV2 の `configs/paths.yml`、次に `configs/default_paths.yml`、最後に SBV2 既定値から解決されます。CLI JSON の `pathRoles.sbv2Dataset` と `pathRoles.sbv2LoadableModel`、または非 JSON 出力の `SBV2 dataset:` / `SBV2 loadable model:` を正として扱ってください。bridge state は ingest copy、manifest、job log、summary 用であり、SBV2 FastAPI の `/models/info` / `/voice` は bridge state から model をロードしません。
+
+失敗時は、まず `sbv2-bridge jobs status <jobId>` と `sbv2-bridge jobs log <jobId> --tail 80` を確認します。次に job の `summary.json`、入力 manifest、CLI の `pathRoles`、既存出力との衝突、SBV2 script や pretrained directory の有無、GPU/依存関係の状態を切り分けます。
 
 ## モデル作成用データセット
 
@@ -239,9 +244,9 @@ sbv2-bridge datasets prepare \
   --json
 ```
 
-`datasets prepare` は SBV2 root で `uv run python slice.py ...` と `uv run python transcribe.py ...` を呼び、`Data/<modelName>/raw` と `Data/<modelName>/esd.list` を作成します。文字起こしは `litagin/anime-whisper`、batch size 16、初期プロンプト空文字を既定にします。
+`datasets prepare` は SBV2 root で `uv run python slice.py ...` と `uv run python transcribe.py ...` を呼び、resolved `dataset_root/<modelName>/raw` と resolved `dataset_root/<modelName>/esd.list` を作成します。文字起こしは `litagin/anime-whisper`、batch size 16、初期プロンプト空文字を既定にします。
 
-サブディレクトリごとに音声を置いた場合、その相対構造は SBV2 の `raw/` に渡されるため、style ごとの素材分けに使えます。既存の `Data/<modelName>/raw`、`Data/<modelName>/esd.list`、`model_assets/<modelName>` がある場合は上書きせず失敗します。
+サブディレクトリごとに音声を置いた場合、その相対構造は SBV2 の `raw/` に渡されるため、style ごとの素材分けに使えます。既存の resolved `dataset_root/<modelName>/raw`、resolved `dataset_root/<modelName>/esd.list`、resolved `assets_root/<modelName>` がある場合は上書きせず失敗します。
 
 この段階で行う品質確認は `esd.list` と raw wav の対応、speaker/language/text の軽量検証までです。SBV2 の auto preprocess、`resample`、`preprocess_text`、`bert_gen`、`style_gen`、学習、モデルマージは別工程として扱います。
 
@@ -261,7 +266,7 @@ sbv2-bridge training run \
   --json
 ```
 
-`--stage resample --stage preprocess-text` のように stage を限定できます。既存の `Data/<modelName>/models` や `model_assets/<modelName>` は上書きしません。実 SBV2 での training 完走検証は bridge の wrapper test では行わず、CLI は計画、preflight、job log、summary、失敗分類を提供します。
+`--stage resample --stage preprocess-text` のように stage を限定できます。既存の resolved `dataset_root/<modelName>/models` や resolved `assets_root/<modelName>` は上書きしません。実 SBV2 での training 完走検証は bridge の wrapper test では行わず、CLI は計画、preflight、job log、summary、失敗分類を提供します。
 
 学習済みまたは既存の `model_assets` は、SBV2 のモデル本体マージ相当の flow で派生モデルにできます。まず dry-run 相当の plan を確認します。
 
@@ -380,7 +385,7 @@ SBV2 の非再生機能は、まず bridge 内 CLI の `sbv2-bridge` から段�
 
 job manifest と log は、agent workspace ではなくユーザー環境の plugin runtime state として保存します。既定の保存先は `~/.openclaw/state/style-bert-vits2-bridge/jobs` です。
 
-dataset ingest workspace も agent workspace ではなく plugin runtime state に保存します。既定の保存先は `~/.openclaw/state/style-bert-vits2-bridge/datasets` です。#32 の ingest は SBV2 の `Data/<modelName>` や `model_assets/<modelName>` へ直接書き込まず、原本を壊さないコピーと manifest 作成だけを行います。
+dataset ingest workspace も agent workspace ではなく plugin runtime state に保存します。既定の保存先は `~/.openclaw/state/style-bert-vits2-bridge/datasets` です。#32 の ingest は SBV2 の resolved `dataset_root/<modelName>` や resolved `assets_root/<modelName>` へ直接書き込まず、原本を壊さないコピーと manifest 作成だけを行います。
 
 `modelName` は SBV2 production pipeline 全体のキーとして扱い、後続の slice / transcribe / preprocess / train で同じ値を使います。別の `speakerName`、project 名、dataset 名、利用許諾メモは初期 ingest 入力として扱いません。音声ディレクトリに 2 個以上の直下サブディレクトリがある場合は、SBV2 2.5+ の通常挙動に合わせ、サブディレクトリ名を style group として manifest に記録します。
 
