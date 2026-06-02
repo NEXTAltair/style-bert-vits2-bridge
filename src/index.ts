@@ -89,10 +89,10 @@ function looksLikeToolStatusText(value: string): boolean {
   if (!text) return false;
 
   const hasOperatorPrefix = /(?:^|\s)[⚠🛠][\s️]/u.test(text);
-  const hasCommandLine = /(?:^|\n)\s*(?:[⚠🛠️\s]+)?(?:gh|git|pnpm|npm|yarn|uv|python|node|bash|sh)\s+(?!command\b)[a-z0-9:_./-]+/i.test(text);
-  const hasCliFlag = /\s--[a-z][a-z0-9-]*(?:[=\s]|$)/i.test(text);
+  const hasCommandLine = /(?:^|\n)\s*(?:[⚠🛠️\s]+)?(?:gh|git|pnpm|npm|yarn|uv|python|node|bash|sh)\s+(?!command\b|failed\b|fails\b|error\b|errored\b)(?:-{1,2}[a-z][a-z0-9-]*|[a-z0-9:_./-]+)/i.test(text);
+  const hasCliFlag = /\s-{1,2}[a-z][a-z0-9-]*(?:[=\s]|$)/i.test(text);
   const hasCwdSuffix = /\(\s*in\s+(?:~\/|\/|[A-Za-z]:\\)[^)]+\)/i.test(text);
-  const hasFailureStatus = /(?:^|\s)(?:failed|error|exit code \d+|command failed)(?:\.|$|\s)/i.test(text);
+  const hasFailureStatus = /(?:^|\s)(?:failed|error|exit code \d+|command failed)(?:[:.]|$|\s)/i.test(text);
 
   return (
     hasFailureStatus &&
