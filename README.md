@@ -222,6 +222,46 @@ sbv2-bridge training run \
 
 `--stage resample --stage preprocess-text` のように stage を限定できます。既存の `Data/<modelName>/models` や `model_assets/<modelName>` は上書きしません。実 SBV2 での training 完走検証は bridge の wrapper test では行わず、CLI は計画、preflight、job log、summary、失敗分類を提供します。
 
+学習済みまたは既存の `model_assets` は、SBV2 のモデル本体マージ相当の flow で派生モデルにできます。まず dry-run 相当の plan を確認します。
+
+```bash
+sbv2-bridge models merge-plan \
+  --method usual \
+  --model-a voice_a \
+  --model-b voice_b \
+  --output-model-name voice_mix \
+  --voice-weight 0.4 \
+  --voice-pitch-weight 0.2 \
+  --speech-style-weight 0.6 \
+  --tempo-weight 0.3 \
+  --json
+```
+
+対応する method は `usual`、`add-diff`、`weighted-sum`、`add-null` です。`usual` / `add-diff` / `add-null` は声質、声の高さ、話し方、テンポの4 weight を指定します。`weighted-sum` は `--model-a-coeff`、`--model-b-coeff`、`--model-c-coeff` を指定します。
+
+各モデルディレクトリに `.safetensors` が1つだけある場合は自動選択します。複数ある場合は `--model-a-file model_a.safetensors` のように、モデルディレクトリ直下のファイル名を明示します。
+
+実行時は出力名の明示確認が必要です。
+
+```bash
+sbv2-bridge models merge-run \
+  --method weighted-sum \
+  --model-a voice_a \
+  --model-b voice_b \
+  --model-c voice_c \
+  --output-model-name voice_weighted \
+  --confirm-output-model-name voice_weighted \
+  --model-a-coeff 1 \
+  --model-b-coeff -1 \
+  --model-c-coeff 0 \
+  --base-url http://127.0.0.1:5000 \
+  --json
+```
+
+`models merge-run` は `model-merge` job、`summary.json`、`recipe.json`、生成された `config.json` / `style_vectors.npy` / `.safetensors` を記録します。`--base-url` を渡すと SBV2 `/models/refresh` 後に `/models/info` で出力モデルが見えるか確認します。既存の出力モデル名や入力モデル名と同じ出力名は拒否し、上書きはしません。
+
+複数 style の Style ベクトルマージはモデル本体マージとは別操作です。この bridge の初期モデル本体マージは SBV2 upstream と同じく `Neutral` 1件の style を生成し、複数 style の対応表作成や `style_vectors.npy` 更新は #47 の対象です。
+
 学習済み candidate は、固定テスト文セットで一括生成して評価 artifact を作れます。
 
 ```bash

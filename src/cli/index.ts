@@ -18,6 +18,12 @@ import {
 } from "../evaluation.js";
 import { listModelCandidates, promoteModel } from "../model-registry.js";
 import {
+  createModelMergePlan,
+  parseModelMergeMethod,
+  runModelMerge,
+  type Sbv2ModelMergeMethod,
+} from "../model-merge.js";
+import {
   cancelJob,
   createDummyJob,
   listJobManifests,
@@ -53,6 +59,23 @@ interface CliOptions {
   evaluationPath?: string;
   caseId?: string;
   decision?: Sbv2EvaluationDecision;
+  mergeMethod?: Sbv2ModelMergeMethod;
+  outputModelName?: string;
+  confirmOutputModelName?: string;
+  modelA?: string;
+  modelAFile?: string;
+  modelB?: string;
+  modelBFile?: string;
+  modelC?: string;
+  modelCFile?: string;
+  voiceWeight?: number;
+  voicePitchWeight?: number;
+  speechStyleWeight?: number;
+  tempoWeight?: number;
+  modelACoeff?: number;
+  modelBCoeff?: number;
+  modelCCoeff?: number;
+  slerp?: boolean;
   stages?: Sbv2TrainingStage[];
   trainingSettings: Partial<Sbv2TrainingSettings>;
 }
@@ -89,6 +112,8 @@ Commands:
   training plan          Print an agent-safe SBV2 training plan without running it.
   training run           Run selected SBV2 training stages and write a job.
   models candidates      List promotable SBV2 model artifact candidates.
+  models merge-plan      Print an agent-safe SBV2 model merge plan without running it.
+  models merge-run       Run a planned SBV2 model merge and write a job.
   models promote         Promote model artifacts into SBV2 model_assets.
   evaluation run         Generate sample WAVs and an evaluation report for a model candidate.
   evaluation note        Add or update a human listening note in an evaluation report.
@@ -106,11 +131,31 @@ Options:
   --datasets-dir <path>    Dataset workspace root. Defaults to ~/.openclaw/state/style-bert-vits2-bridge/datasets.
   --sbv2-root <path>       SBV2 repository root. Defaults to SBV2_ROOT, then ~/src/Style-Bert-VITS2.
   --model-name <name>      SBV2 model name for dataset ingest.
+  --method <name>          Model merge method: usual, add-diff, weighted-sum, add-null.
+  --output-model-name <name>
+                            New model name for model merge output.
   --source <path>          Source audio file or directory for dataset ingest.
                             For models promote, source model artifact directory.
   --manifest <path>        Dataset manifest path for datasets prepare/training.
   --confirm-model-name <name>
                             Required exact model name confirmation for models promote.
+  --confirm-output-model-name <name>
+                            Required exact output model name confirmation for models merge-run.
+  --model-a <name>         Model A for model merge.
+  --model-a-file <name>    Model A top-level safetensors filename inside its model directory.
+  --model-b <name>         Model B for model merge.
+  --model-b-file <name>    Model B top-level safetensors filename inside its model directory.
+  --model-c <name>         Model C for add-diff and weighted-sum.
+  --model-c-file <name>    Model C top-level safetensors filename inside its model directory.
+  --voice-weight <n>       Voice quality weight for usual/add-diff/add-null.
+  --voice-pitch-weight <n> Voice pitch weight for usual/add-diff/add-null.
+  --speech-style-weight <n>
+                            Speech style weight for usual/add-diff/add-null.
+  --tempo-weight <n>       Tempo weight for usual/add-diff/add-null.
+  --model-a-coeff <n>      Model A coefficient for weighted-sum.
+  --model-b-coeff <n>      Model B coefficient for weighted-sum.
+  --model-c-coeff <n>      Model C coefficient for weighted-sum.
+  --slerp                  Use spherical interpolation for usual merge.
   --backup-existing        Back up an existing model_assets target before promoting.
   --base-url <url>         SBV2 API base URL for /models/refresh and /models/info checks.
   --test-set <path>        JSON evaluation test set. Defaults to built-in Japanese cases.
@@ -154,6 +199,14 @@ function parseNonNegativeInteger(value: string | undefined, name: string): numbe
   const parsed = Number(value);
   if (!Number.isInteger(parsed) || parsed < 0) {
     throw new Error(`${name} must be a non-negative integer`);
+  }
+  return parsed;
+}
+
+function parseFiniteNumber(value: string | undefined, name: string): number {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) {
+    throw new Error(`${name} must be a finite number`);
   }
   return parsed;
 }
@@ -207,12 +260,62 @@ function parseArgs(argv: string[]): ParsedCommand {
     } else if (arg === "--model-name" && next) {
       options.modelName = next;
       index += 1;
+    } else if (arg === "--method" && next) {
+      options.mergeMethod = parseModelMergeMethod(next);
+      index += 1;
+    } else if (arg === "--output-model-name" && next) {
+      options.outputModelName = next;
+      index += 1;
     } else if (arg === "--source" && next) {
       options.sourceAudioPath = next;
       index += 1;
     } else if (arg === "--confirm-model-name" && next) {
       options.confirmModelName = next;
       index += 1;
+    } else if (arg === "--confirm-output-model-name" && next) {
+      options.confirmOutputModelName = next;
+      index += 1;
+    } else if (arg === "--model-a" && next) {
+      options.modelA = next;
+      index += 1;
+    } else if (arg === "--model-a-file" && next) {
+      options.modelAFile = next;
+      index += 1;
+    } else if (arg === "--model-b" && next) {
+      options.modelB = next;
+      index += 1;
+    } else if (arg === "--model-b-file" && next) {
+      options.modelBFile = next;
+      index += 1;
+    } else if (arg === "--model-c" && next) {
+      options.modelC = next;
+      index += 1;
+    } else if (arg === "--model-c-file" && next) {
+      options.modelCFile = next;
+      index += 1;
+    } else if (arg === "--voice-weight" && next) {
+      options.voiceWeight = parseFiniteNumber(next, "--voice-weight");
+      index += 1;
+    } else if (arg === "--voice-pitch-weight" && next) {
+      options.voicePitchWeight = parseFiniteNumber(next, "--voice-pitch-weight");
+      index += 1;
+    } else if (arg === "--speech-style-weight" && next) {
+      options.speechStyleWeight = parseFiniteNumber(next, "--speech-style-weight");
+      index += 1;
+    } else if (arg === "--tempo-weight" && next) {
+      options.tempoWeight = parseFiniteNumber(next, "--tempo-weight");
+      index += 1;
+    } else if (arg === "--model-a-coeff" && next) {
+      options.modelACoeff = parseFiniteNumber(next, "--model-a-coeff");
+      index += 1;
+    } else if (arg === "--model-b-coeff" && next) {
+      options.modelBCoeff = parseFiniteNumber(next, "--model-b-coeff");
+      index += 1;
+    } else if (arg === "--model-c-coeff" && next) {
+      options.modelCCoeff = parseFiniteNumber(next, "--model-c-coeff");
+      index += 1;
+    } else if (arg === "--slerp") {
+      options.slerp = true;
     } else if (arg === "--backup-existing") {
       options.backupExisting = true;
     } else if (arg === "--base-url" && next) {
@@ -339,6 +442,39 @@ function requireBoolean(value: boolean | undefined, name: string): boolean {
   return value;
 }
 
+function buildModelMergeOptions(options: CliOptions) {
+  return {
+    sbv2Root: options.sbv2Root,
+    method: requireValue(options.mergeMethod, "--method"),
+    outputModelName: requireString(options.outputModelName, "--output-model-name"),
+    modelA: requireString(options.modelA, "--model-a"),
+    modelAFile: options.modelAFile,
+    modelB: requireString(options.modelB, "--model-b"),
+    modelBFile: options.modelBFile,
+    modelC: options.modelC,
+    modelCFile: options.modelCFile,
+    weights: {
+      voiceWeight: options.voiceWeight,
+      voicePitchWeight: options.voicePitchWeight,
+      speechStyleWeight: options.speechStyleWeight,
+      tempoWeight: options.tempoWeight,
+    },
+    coefficients: {
+      modelACoeff: options.modelACoeff,
+      modelBCoeff: options.modelBCoeff,
+      modelCCoeff: options.modelCCoeff,
+    },
+    slerp: options.slerp,
+  };
+}
+
+function requireValue<T>(value: T | undefined, name: string): T {
+  if (value === undefined) {
+    throw new Error(`Missing ${name}`);
+  }
+  return value;
+}
+
 export async function runCli(argv: string[], io: CliIO = {}): Promise<number> {
   const stdout = io.stdout ?? process.stdout;
   const stderr = io.stderr ?? process.stderr;
@@ -458,6 +594,43 @@ export async function runCli(argv: string[], io: CliIO = {}): Promise<number> {
               writeLine(stdout, `warning: ${warning}`);
             }
           }
+        }
+        return 0;
+      }
+      if (parsed.command === "merge-plan") {
+        const result = await createModelMergePlan(buildModelMergeOptions(options));
+        if (options.json) {
+          printJson(stdout, { ok: true, plan: result });
+        } else {
+          writeLine(stdout, `model merge plan ${result.outputModelName}`);
+          writeLine(stdout, `method: ${result.method}`);
+          writeLine(stdout, `output: ${result.outputDir}`);
+          writeLine(stdout, `compatible: ${result.compatibility.compatible ? "yes" : "no"}`);
+          for (const error of result.compatibility.errors) writeLine(stdout, `error: ${error}`);
+          for (const warning of result.compatibility.warnings) writeLine(stdout, `warning: ${warning}`);
+          writeLine(stdout, `command: ${result.command.executable} ${result.command.args.slice(0, 3).join(" ")}`);
+        }
+        return result.compatibility.compatible ? 0 : 1;
+      }
+      if (parsed.command === "merge-run") {
+        const result = await runModelMerge({
+          ...buildModelMergeOptions(options),
+          jobsRoot: options.jobsRoot,
+          confirmOutputModelName: requireString(options.confirmOutputModelName, "--confirm-output-model-name"),
+          baseUrl: options.baseUrl,
+        });
+        if (options.json) {
+          printJson(stdout, { ok: true, plan: result.plan, candidate: result.candidate, summary: result.summary, job: result.job });
+        } else {
+          writeLine(stdout, `merged ${result.summary.outputModelName}`);
+          writeLine(stdout, `method: ${result.summary.method}`);
+          writeLine(stdout, `output: ${result.summary.outputDir}`);
+          if (result.summary.refresh) {
+            writeLine(stdout, `refresh: ${result.summary.refresh.foundInModelsInfo ? "found" : "missing"}`);
+          }
+          writeLine(stdout, `summary: ${result.job.outputDir}/summary.json`);
+          writeLine(stdout, `job: ${result.job.jobId}`);
+          writeLine(stdout, `log: ${result.job.logPath}`);
         }
         return 0;
       }
