@@ -6,6 +6,7 @@ import { describe, expect, it } from "vitest";
 import {
   cancelJob,
   createDummyJob,
+  createJobManifest,
   listJobManifests,
   readJobManifest,
   resolveJobsRoot,
@@ -51,6 +52,29 @@ describe("SBV2 jobs", () => {
     const manifest = await readJobManifest(job.jobId, { jobsRoot });
     expect(manifest).toEqual(job);
     expect(readFileSync(job.logPath, "utf8")).toContain("dummy check");
+  });
+
+  it("creates running job manifests without a finished timestamp", async () => {
+    const jobsRoot = tempJobsRoot();
+    const job = await createJobManifest({
+      jobsRoot,
+      operation: "model-evaluate",
+      state: "running",
+      inputSummary: { modelName: "eval-voice" },
+      progressSummary: "Model evaluation started.",
+      now: () => new Date("2026-06-01T00:00:00.000Z"),
+      randomId: () => "running",
+    });
+
+    expect(job).toMatchObject({
+      state: "running",
+      cancellation: {
+        supported: false,
+        reason: "Cancellation is not supported for this job.",
+      },
+    });
+    expect(job.finishedAt).toBeUndefined();
+    await expect(readJobManifest(job.jobId, { jobsRoot })).resolves.toEqual(job);
   });
 
   it("lists jobs newest first", async () => {

@@ -39,8 +39,8 @@ export async function createJobManifest(options) {
     const jobDir = path.join(root, jobId);
     const resolvedLogPath = logPath(jobDir);
     const startedAt = now().toISOString();
-    const finishedAt = now().toISOString();
     const state = options.state ?? "succeeded";
+    const finishedAt = state === "running" ? undefined : now().toISOString();
     await mkdir(jobDir, { recursive: true });
     const manifest = {
         schemaVersion: 1,
@@ -49,24 +49,30 @@ export async function createJobManifest(options) {
         state,
         createdAt: created.toISOString(),
         startedAt,
-        finishedAt,
+        ...(finishedAt ? { finishedAt } : {}),
         inputSummary: options.inputSummary,
         outputDir: jobDir,
         artifactPaths: options.artifactPaths ?? [],
         logPath: resolvedLogPath,
         firstError: options.firstError ?? null,
         retryable: options.retryable ?? false,
-        cancellation: options.cancellation ?? {
-            supported: false,
-            reason: "This job is already complete and cannot be cancelled.",
-        },
+        cancellation: options.cancellation ??
+            (state === "running"
+                ? {
+                    supported: false,
+                    reason: "Cancellation is not supported for this job.",
+                }
+                : {
+                    supported: false,
+                    reason: "This job is already complete and cannot be cancelled.",
+                }),
         progressSummary: options.progressSummary,
     };
     const logLines = options.logLines ?? [options.progressSummary];
     await writeFile(resolvedLogPath, [
         `[${startedAt}] ${options.operation} job started`,
-        ...logLines.map((line) => `[${finishedAt}] ${line}`),
-        `[${finishedAt}] ${options.operation} job ${state}`,
+        ...logLines.map((line) => `[${finishedAt ?? startedAt}] ${line}`),
+        `[${finishedAt ?? startedAt}] ${options.operation} job ${state}`,
         "",
     ].join("\n"), "utf8");
     await writeFile(manifestPath(jobDir), `${JSON.stringify(manifest, null, 2)}\n`, "utf8");

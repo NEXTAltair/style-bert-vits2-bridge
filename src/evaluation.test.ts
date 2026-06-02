@@ -110,6 +110,7 @@ describe("SBV2 model evaluation", () => {
   it("generates sample WAVs, an evaluation manifest, and a model-evaluate job", async () => {
     const sbv2Root = createSbv2Root();
     const jobsRoot = tempRoot("sbv2-eval-jobs-");
+    const jobId = "sbv2-job-20260602000000-abcdef12";
     const calls: unknown[] = [];
 
     const result = await evaluateModelCandidate({
@@ -120,6 +121,12 @@ describe("SBV2 model evaluation", () => {
       client: {
         synthesize: async (params) => {
           calls.push(params);
+          const manifest = JSON.parse(readFileSync(path.join(jobsRoot, jobId, "manifest.json"), "utf8")) as {
+            state: string;
+            finishedAt?: string;
+          };
+          expect(manifest.state).toBe("running");
+          expect(manifest.finishedAt).toBeUndefined();
           return makeWav();
         },
       },
@@ -140,9 +147,11 @@ describe("SBV2 model evaluation", () => {
       recommendation: "adopt_candidate",
     });
     expect(result.job).toMatchObject({
-      jobId: "sbv2-job-20260602000000-abcdef12",
+      jobId,
       operation: "model-evaluate",
+      state: "succeeded",
     });
+    expect(result.job.finishedAt).toBeDefined();
     expect(result.evaluation.baseUrl).toBe("http://localhost:5000");
     expect(result.job.artifactPaths.some((entry) => entry.endsWith("evaluation.json"))).toBe(true);
     expect(readFileSync(path.join(result.job.outputDir, "summary.json"), "utf8")).toContain("adopt_candidate");
@@ -222,6 +231,29 @@ describe("SBV2 model evaluation", () => {
       "001-a_b.wav",
       "002-a_b.wav",
     ]);
+  });
+
+  it("rejects duplicate custom evaluation case ids", async () => {
+    const sbv2Root = createSbv2Root();
+    const testSetPath = path.join(tempRoot("sbv2-eval-test-set-"), "test-set.json");
+    writeFileSync(
+      testSetPath,
+      JSON.stringify([
+        { id: "same", text: "ひとつめ" },
+        { id: "same", text: "ふたつめ" },
+      ]),
+    );
+
+    await expect(
+      evaluateModelCandidate({
+        jobsRoot: tempRoot("sbv2-eval-jobs-"),
+        sbv2Root,
+        modelName: "eval-voice",
+        baseUrl: "http://localhost:5000",
+        testSetPath,
+        client: { synthesize: async () => makeWav() },
+      }),
+    ).rejects.toThrow(/Evaluation test case id must be unique: same/);
   });
 
   it("rejects evaluation of external candidate sources that SBV2 cannot sample directly", async () => {
@@ -321,5 +353,19 @@ describe("SBV2 model evaluation", () => {
     expect(check.sampleRate).toBeUndefined();
     expect(check.bitsPerSample).toBeUndefined();
     expect(check.dataBytes).toBe(12);
+  });
+
+  it("rejects WAV buffers with invalid format fields", () => {
+    const zeroRate = makeWav();
+    zeroRate.writeUInt32LE(0, 24);
+    expect(analyzeWavBuffer(zeroRate).errors).toContain("WAV sample rate must be greater than zero");
+
+    const nonPcm = makeWav();
+    nonPcm.writeUInt16LE(3, 20);
+    expect(analyzeWavBuffer(nonPcm).errors).toContain("WAV audio format must be PCM");
+
+    const unsupportedBits = makeWav();
+    unsupportedBits.writeUInt16LE(12, 34);
+    expect(analyzeWavBuffer(unsupportedBits).errors).toContain("WAV bits per sample must be 8, 16, 24, or 32");
   });
 });

@@ -39,6 +39,7 @@ export async function evaluateModelCandidate(options) {
     const initialJob = await createJobManifest({
         jobsRoot: options.jobsRoot,
         operation: "model-evaluate",
+        state: "running",
         inputSummary: {
             modelName: candidate.modelName,
             sourceDir: candidate.sourceDir,
@@ -103,14 +104,20 @@ export async function evaluateModelCandidate(options) {
     ];
     const job = {
         ...initialJob,
+        state: "succeeded",
+        finishedAt: now().toISOString(),
         artifactPaths,
+        cancellation: {
+            supported: false,
+            reason: "This job is already complete and cannot be cancelled.",
+        },
         progressSummary: `Model evaluation completed for ${candidate.modelName}: ${summary.recommendation}.`,
     };
     await writeFile(path.join(initialJob.outputDir, "manifest.json"), `${JSON.stringify(job, null, 2)}\n`, "utf8");
     await writeFile(initialJob.logPath, [
         `[${initialJob.startedAt ?? createdAt}] model-evaluate job started`,
-        ...logLines.map((line) => `[${initialJob.finishedAt ?? createdAt}] ${line}`),
-        `[${initialJob.finishedAt ?? createdAt}] model-evaluate job succeeded`,
+        ...logLines.map((line) => `[${job.finishedAt ?? createdAt}] ${line}`),
+        `[${job.finishedAt ?? createdAt}] model-evaluate job succeeded`,
         "",
     ].join("\n"), "utf8");
     return { evaluation, summary, job };
@@ -220,9 +227,24 @@ export function analyzeWavBuffer(buffer) {
     if (!data || data.size <= 0)
         errors.push("WAV data chunk is missing or empty");
     const readableFmt = fmt && fmt.size >= 16 ? fmt : undefined;
+    const audioFormat = readableFmt ? buffer.readUInt16LE(readableFmt.offset) : undefined;
     const channels = readableFmt ? buffer.readUInt16LE(readableFmt.offset + 2) : undefined;
     const sampleRate = readableFmt ? buffer.readUInt32LE(readableFmt.offset + 4) : undefined;
     const bitsPerSample = readableFmt ? buffer.readUInt16LE(readableFmt.offset + 14) : undefined;
+    if (readableFmt) {
+        if (audioFormat !== 1)
+            errors.push("WAV audio format must be PCM");
+        if (!channels)
+            errors.push("WAV channel count must be greater than zero");
+        if (!sampleRate)
+            errors.push("WAV sample rate must be greater than zero");
+        if (!bitsPerSample) {
+            errors.push("WAV bits per sample must be greater than zero");
+        }
+        else if (![8, 16, 24, 32].includes(bitsPerSample)) {
+            errors.push("WAV bits per sample must be 8, 16, 24, or 32");
+        }
+    }
     const bytesPerSecond = sampleRate && channels && bitsPerSample ? sampleRate * channels * (bitsPerSample / 8) : undefined;
     const durationSec = data && bytesPerSecond ? data.size / bytesPerSecond : undefined;
     if (durationSec !== undefined && durationSec < 0.15)
@@ -252,11 +274,16 @@ async function readEvaluationTestSet(filePath) {
     if (!Array.isArray(parsed) || !parsed.length) {
         throw new Error("Evaluation test set must be a non-empty JSON array");
     }
+    const seenIds = new Set();
     return parsed.map((item, index) => {
         if (!isRecord(item) || typeof item.text !== "string" || !item.text.trim()) {
             throw new Error(`Evaluation test case at index ${index} must include text`);
         }
         const id = typeof item.id === "string" && item.id.trim() ? item.id.trim() : `case-${index + 1}`;
+        if (seenIds.has(id)) {
+            throw new Error(`Evaluation test case id must be unique: ${id}`);
+        }
+        seenIds.add(id);
         const language = item.language === "JP" || item.language === "EN" || item.language === "ZH" ? item.language : undefined;
         return {
             id,
