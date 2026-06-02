@@ -177,6 +177,37 @@ SBV2_BASE_URL=http://127.0.0.1:5000 pnpm test
 
 live smoke test は `/status`、`/models/info`、短文 `/voice`、WAV header、invalid model 指定時の失敗を確認します。
 
+## 制作機能の安全運用
+
+SBV2 の制作系 CLI は、TTS 再生よりも処理時間、GPU/CPU 負荷、生成 artifact の量が大きくなります。agent が `datasets prepare`、`training run`、`evaluation run`、`models merge-run` のような長時間処理を始める前には、対象 manifest、入力モデル、出力モデル名、実行 stage、保存先、想定される負荷をユーザーに提示して確認します。
+
+確認文言の例:
+
+```text
+SBV2 の長時間処理を開始します。
+入力: <manifest または model_assets>
+出力: <Data/model_assets/jobs の対象 path>
+処理: <prepare/training/evaluation/merge と stage>
+既存出力への上書きは行いません。開始してよいですか。
+```
+
+agent は次の操作を自動実行しません。実行する場合は、対象、理由、退避または復旧方針を明示して人間の確認を挟みます。
+
+- 既存の `Data/<modelName>`、`model_assets/<modelName>`、checkpoint、job artifact の上書き
+- dataset、model、checkpoint、job log、evaluation sample の削除
+- model artifact、評価音声、入力音声の公開、共有、外部 upload、外部送信
+- SBV2 root 外や plugin state 外へ大きな artifact を移動する操作
+
+artifact と log の既定保存先:
+
+- job manifest / status / log: `~/.openclaw/state/style-bert-vits2-bridge/jobs`
+- dataset ingest workspace: `~/.openclaw/state/style-bert-vits2-bridge/datasets`
+- SBV2 dataset output: `<SBV2 root>/Data/<modelName>`
+- SBV2 model assets: `<SBV2 root>/model_assets/<modelName>`
+- evaluation / merge summary: 各 job の output directory と `artifactPaths`
+
+失敗時は、まず `sbv2-bridge jobs status <jobId>` と `sbv2-bridge jobs log <jobId> --tail 80` を確認します。次に job の `summary.json`、入力 manifest、SBV2 root の `Data/<modelName>` / `model_assets/<modelName>`、既存出力との衝突、SBV2 script や pretrained directory の有無、GPU/依存関係の状態を切り分けます。
+
 ## モデル作成用データセット
 
 bridge は SBV2 の GUI でいう「データセット作成」タブ相当の素材準備を CLI から実行できます。まず音声を bridge workspace に取り込みます。
