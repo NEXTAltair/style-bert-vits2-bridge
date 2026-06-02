@@ -2,7 +2,7 @@ import { chmodSync, mkdirSync, symlinkSync, writeFileSync, mkdtempSync } from "n
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { isCliEntrypoint, runCli } from "./index.js";
 
 function tempJobsRoot(): string {
@@ -60,7 +60,33 @@ function makeSafetensors(): Buffer {
   return result;
 }
 
+function makeWav(samples = 3200, value = 1000): Buffer {
+  const dataBytes = samples * 2;
+  const buffer = Buffer.alloc(44 + dataBytes);
+  buffer.write("RIFF", 0, "ascii");
+  buffer.writeUInt32LE(36 + dataBytes, 4);
+  buffer.write("WAVE", 8, "ascii");
+  buffer.write("fmt ", 12, "ascii");
+  buffer.writeUInt32LE(16, 16);
+  buffer.writeUInt16LE(1, 20);
+  buffer.writeUInt16LE(1, 22);
+  buffer.writeUInt32LE(16000, 24);
+  buffer.writeUInt32LE(32000, 28);
+  buffer.writeUInt16LE(2, 32);
+  buffer.writeUInt16LE(16, 34);
+  buffer.write("data", 36, "ascii");
+  buffer.writeUInt32LE(dataBytes, 40);
+  for (let offset = 44; offset + 1 < buffer.length; offset += 2) {
+    buffer.writeInt16LE(value, offset);
+  }
+  return buffer;
+}
+
 describe("sbv2-bridge CLI", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
   it("detects invocation through a package bin symlink", () => {
     const dir = tempJobsRoot();
     const target = path.join(dir, "index.js");
@@ -560,6 +586,8 @@ if (args.includes("resample.py")) {
         [
           "models",
           "promote",
+          "--jobs-dir",
+          tempJobsRoot(),
           "--sbv2-root",
           mkdtempSync(path.join(tmpdir(), "sbv2-cli-model-root-")),
           "--model-name",
@@ -571,5 +599,137 @@ if (args.includes("resample.py")) {
       ),
     ).resolves.toBe(1);
     expect(stderr.output()).toContain("--confirm-model-name must exactly match cli-model");
+  });
+
+  it("runs evaluation commands and records listening notes", async () => {
+    const jobsRoot = tempJobsRoot();
+    const sbv2Root = mkdtempSync(path.join(tmpdir(), "sbv2-cli-eval-root-"));
+    const modelDir = path.join(sbv2Root, "model_assets", "eval-model");
+    mkdirSync(path.join(sbv2Root, "configs"), { recursive: true });
+    mkdirSync(modelDir, { recursive: true });
+    writeFileSync(path.join(sbv2Root, "configs", "paths.yml"), "assets_root: model_assets\n");
+    writeFileSync(path.join(modelDir, "config.json"), JSON.stringify(makeModelConfig("eval-model")));
+    writeFileSync(path.join(modelDir, "style_vectors.npy"), makeNpy([1, 2]));
+    writeFileSync(path.join(modelDir, "eval-model_e1_s100.safetensors"), makeSafetensors());
+
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => ({
+        ok: true,
+        arrayBuffer: async () => makeWav().buffer,
+      })),
+    );
+
+    const evalOut = createWriter();
+    await expect(
+      runCli(
+        [
+          "evaluation",
+          "run",
+          "--jobs-dir",
+          jobsRoot,
+          "--sbv2-root",
+          sbv2Root,
+          "--model-name",
+          "eval-model",
+          "--base-url",
+          "http://localhost:5000",
+          "--json",
+        ],
+        { stdout: evalOut.stream, stderr: createWriter().stream },
+      ),
+    ).resolves.toBe(0);
+
+    const evaluated = JSON.parse(evalOut.output()) as {
+      summary: { recommendation: string; successCount: number };
+      job: { outputDir: string; operation: string };
+    };
+    expect(evaluated.summary).toMatchObject({
+      recommendation: "adopt_candidate",
+      successCount: 5,
+    });
+    expect(evaluated.job.operation).toBe("model-evaluate");
+
+    const evaluationPath = path.join(evaluated.job.outputDir, "evaluation.json");
+    const noteOut = createWriter();
+    await expect(
+      runCli(
+        [
+          "evaluation",
+          "note",
+          "--evaluation",
+          evaluationPath,
+          "--case",
+          "ja-short",
+          "--decision",
+          "hold",
+          "--message",
+          "needs listening review",
+          "--json",
+        ],
+        { stdout: noteOut.stream, stderr: createWriter().stream },
+      ),
+    ).resolves.toBe(0);
+    const noted = JSON.parse(noteOut.output()) as {
+      evaluation: { decision: string; recommendation: string; notes: unknown[] };
+    };
+    expect(noted.evaluation).toMatchObject({
+      decision: "hold",
+      recommendation: "hold",
+    });
+    expect(noted.evaluation.notes).toHaveLength(1);
+
+    const summaryOut = createWriter();
+    await expect(
+      runCli(["evaluation", "summary", "--evaluation", evaluationPath], {
+        stdout: summaryOut.stream,
+        stderr: createWriter().stream,
+      }),
+    ).resolves.toBe(0);
+    expect(summaryOut.output()).toContain("eval-model");
+    expect(summaryOut.output()).toContain("hold");
+  });
+
+  it("blocks promotion when an evaluation explicitly rejects the model", async () => {
+    const sbv2Root = mkdtempSync(path.join(tmpdir(), "sbv2-cli-eval-root-"));
+    const modelDir = path.join(sbv2Root, "model_assets", "rejected-model");
+    mkdirSync(path.join(sbv2Root, "configs"), { recursive: true });
+    mkdirSync(modelDir, { recursive: true });
+    writeFileSync(path.join(sbv2Root, "configs", "paths.yml"), "assets_root: model_assets\n");
+    writeFileSync(path.join(modelDir, "config.json"), JSON.stringify(makeModelConfig("rejected-model")));
+    writeFileSync(path.join(modelDir, "style_vectors.npy"), makeNpy([1, 2]));
+    writeFileSync(path.join(modelDir, "rejected-model_e1_s100.safetensors"), makeSafetensors());
+    const evaluationPath = path.join(mkdtempSync(path.join(tmpdir(), "sbv2-cli-eval-")), "evaluation.json");
+    writeFileSync(
+      evaluationPath,
+      JSON.stringify({
+        schemaVersion: 1,
+        modelName: "rejected-model",
+        decision: "reject",
+        recommendation: "reject",
+      }),
+    );
+
+    const stderr = createWriter();
+    await expect(
+      runCli(
+        [
+          "models",
+          "promote",
+          "--jobs-dir",
+          tempJobsRoot(),
+          "--sbv2-root",
+          sbv2Root,
+          "--model-name",
+          "rejected-model",
+          "--confirm-model-name",
+          "rejected-model",
+          "--evaluation",
+          evaluationPath,
+        ],
+        { stdout: createWriter().stream, stderr: stderr.stream },
+      ),
+    ).resolves.toBe(1);
+    expect(stderr.output()).toContain("Model evaluation does not allow promotion");
   });
 });

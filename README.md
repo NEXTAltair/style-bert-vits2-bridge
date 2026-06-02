@@ -222,6 +222,29 @@ sbv2-bridge training run \
 
 `--stage resample --stage preprocess-text` のように stage を限定できます。既存の `Data/<modelName>/models` や `model_assets/<modelName>` は上書きしません。実 SBV2 での training 完走検証は bridge の wrapper test では行わず、CLI は計画、preflight、job log、summary、失敗分類を提供します。
 
+学習済み candidate は、固定テスト文セットで一括生成して評価 artifact を作れます。
+
+```bash
+sbv2-bridge evaluation run \
+  --model-name valentina_custom \
+  --base-url http://127.0.0.1:5000 \
+  --json
+```
+
+`evaluation run` は `samples/*.wav`、`evaluation.json`、`summary.json` を `model-evaluate` job に記録します。既定では日本語の短文、長文、句読点、英数字混在、neutral 指定のテスト文を使います。独自のテスト文セットは `--test-set /path/to/test-set.json` で渡せます。
+
+人間の試聴結果は evaluation manifest に追記できます。
+
+```bash
+sbv2-bridge evaluation note \
+  --evaluation /path/to/evaluation.json \
+  --case ja-short \
+  --decision hold \
+  --message "語尾が少し不安定"
+```
+
+`models promote` に `--evaluation /path/to/evaluation.json` を渡すと、明示的な `reject` または reject recommendation の model は昇格を止めます。
+
 ### Healthcheck / lifecycle 境界
 
 この bridge は SBV2 FastAPI server manager ではありません。SBV2 server の起動、停止、GPU/backend 選択、モデルファイルの配置、モデルロードは SBV2 側または運用スクリプトの責務です。bridge は設定済みの `baseUrl` に対して `/models/info` と `/voice` を呼び、失敗時に operator が切り分けやすいエラーを返します。

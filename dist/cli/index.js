@@ -3,6 +3,7 @@ import { realpathSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { ingestDataset, prepareDataset } from "../datasets.js";
 import { createTrainingPlan, parseTrainingStage, runTraining, } from "../training.js";
+import { evaluateModelCandidate, readEvaluationManifest, updateEvaluationNote, } from "../evaluation.js";
 import { listModelCandidates, promoteModel } from "../model-registry.js";
 import { cancelJob, createDummyJob, listJobManifests, readJobManifest, resumeJob, retryJob, tailJobLog, } from "../jobs.js";
 export function isCliEntrypoint(moduleUrl, argvPath) {
@@ -28,6 +29,9 @@ Commands:
   training run           Run selected SBV2 training stages and write a job.
   models candidates      List promotable SBV2 model artifact candidates.
   models promote         Promote model artifacts into SBV2 model_assets.
+  evaluation run         Generate sample WAVs and an evaluation report for a model candidate.
+  evaluation note        Add or update a human listening note in an evaluation report.
+  evaluation summary     Print an evaluation report summary.
   jobs start-dummy         Start a synchronous dummy job and write manifest/log files.
   jobs list                List known jobs.
   jobs status <jobId>      Print a job manifest.
@@ -48,6 +52,10 @@ Options:
                             Required exact model name confirmation for models promote.
   --backup-existing        Back up an existing model_assets target before promoting.
   --base-url <url>         SBV2 API base URL for /models/refresh and /models/info checks.
+  --test-set <path>        JSON evaluation test set. Defaults to built-in Japanese cases.
+  --evaluation <path>      Evaluation manifest path for evaluation note/summary.
+  --case <id>              Evaluation test case id for evaluation note.
+  --decision <mode>        Listening decision: adopt, hold, or reject.
   --stage <name>           Training stage. May be repeated. Defaults to all stages.
   --batch-size <n>         Training batch size. Default 2.
   --epochs <n>             Training epochs. Default 100.
@@ -96,6 +104,12 @@ function parseYomiError(value) {
         return value;
     }
     throw new Error("--yomi-error must be one of: raise, skip, use");
+}
+function parseEvaluationDecision(value) {
+    if (value === "adopt" || value === "hold" || value === "reject") {
+        return value;
+    }
+    throw new Error("--decision must be one of: adopt, hold, reject");
 }
 function parseArgs(argv) {
     const options = { json: false, fail: false, trainingSettings: {} };
@@ -148,6 +162,22 @@ function parseArgs(argv) {
         }
         else if (arg === "--manifest" && next) {
             options.manifestPath = next;
+            index += 1;
+        }
+        else if (arg === "--test-set" && next) {
+            options.testSetPath = next;
+            index += 1;
+        }
+        else if (arg === "--evaluation" && next) {
+            options.evaluationPath = next;
+            index += 1;
+        }
+        else if (arg === "--case" && next) {
+            options.caseId = next;
+            index += 1;
+        }
+        else if (arg === "--decision" && next) {
+            options.decision = parseEvaluationDecision(next);
             index += 1;
         }
         else if (arg === "--stage" && next) {
@@ -225,8 +255,12 @@ function parseArgs(argv) {
     if (positional[0] === "help") {
         return { group: "help", command: "help", args: [], options };
     }
-    if (positional[0] !== "jobs" && positional[0] !== "datasets" && positional[0] !== "training" && positional[0] !== "models") {
-        throw new Error("Expected command group: jobs, datasets, training, or models");
+    if (positional[0] !== "jobs" &&
+        positional[0] !== "datasets" &&
+        positional[0] !== "training" &&
+        positional[0] !== "models" &&
+        positional[0] !== "evaluation") {
+        throw new Error("Expected command group: jobs, datasets, training, models, or evaluation");
     }
     return {
         group: positional[0],
@@ -392,6 +426,7 @@ export async function runCli(argv, io = {}) {
                     confirmModelName: requireString(options.confirmModelName, "--confirm-model-name"),
                     backupExisting: options.backupExisting,
                     baseUrl: options.baseUrl,
+                    evaluationPath: options.evaluationPath,
                 });
                 if (options.json) {
                     printJson(stdout, { ok: true, candidate: result.candidate, summary: result.summary, job: result.job });
@@ -412,6 +447,63 @@ export async function runCli(argv, io = {}) {
                 return 0;
             }
             throw new Error(`Unknown models command: ${parsed.command}`);
+        }
+        if (parsed.group === "evaluation") {
+            if (parsed.command === "run") {
+                const result = await evaluateModelCandidate({
+                    jobsRoot: options.jobsRoot,
+                    manifestPath: options.manifestPath,
+                    sbv2Root: options.sbv2Root,
+                    modelName: options.modelName,
+                    sourcePath: options.sourceAudioPath,
+                    baseUrl: requireString(options.baseUrl, "--base-url"),
+                    testSetPath: options.testSetPath,
+                });
+                if (options.json) {
+                    printJson(stdout, { ok: true, evaluation: result.evaluation, summary: result.summary, job: result.job });
+                }
+                else {
+                    writeLine(stdout, `evaluated ${result.summary.modelName}`);
+                    writeLine(stdout, `samples: ${result.summary.successCount}/${result.summary.sampleCount}`);
+                    writeLine(stdout, `recommendation: ${result.summary.recommendation}`);
+                    writeLine(stdout, `evaluation: ${result.job.outputDir}/evaluation.json`);
+                    writeLine(stdout, `summary: ${result.job.outputDir}/summary.json`);
+                    writeLine(stdout, `job: ${result.job.jobId}`);
+                    writeLine(stdout, `log: ${result.job.logPath}`);
+                }
+                return 0;
+            }
+            if (parsed.command === "note") {
+                const evaluation = await updateEvaluationNote({
+                    evaluationPath: requireString(options.evaluationPath, "--evaluation"),
+                    caseId: requireString(options.caseId, "--case"),
+                    decision: options.decision ?? "hold",
+                    note: requireString(options.message, "--message"),
+                });
+                if (options.json) {
+                    printJson(stdout, { ok: true, evaluation });
+                }
+                else {
+                    writeLine(stdout, `noted ${evaluation.modelName}`);
+                    writeLine(stdout, `decision: ${evaluation.decision ?? "none"}`);
+                    writeLine(stdout, `recommendation: ${evaluation.recommendation}`);
+                }
+                return 0;
+            }
+            if (parsed.command === "summary") {
+                const evaluation = await readEvaluationManifest(requireString(options.evaluationPath, "--evaluation"));
+                if (options.json) {
+                    printJson(stdout, { ok: true, summary: evaluation });
+                }
+                else {
+                    writeLine(stdout, `${evaluation.modelName}\t${evaluation.recommendation}\t${evaluation.successCount}/${evaluation.sampleCount}`);
+                    for (const reason of evaluation.rationale) {
+                        writeLine(stdout, `reason: ${reason}`);
+                    }
+                }
+                return 0;
+            }
+            throw new Error(`Unknown evaluation command: ${parsed.command}`);
         }
         if (parsed.command === "start-dummy") {
             const job = await createDummyJob({
