@@ -264,6 +264,94 @@ describe("sbv2-bridge CLI", () => {
     expect(status.job.operation).toBe("dataset-ingest");
   });
 
+  it("prints a weighted-sum model merge plan as JSON", async () => {
+    const sbv2Root = mkdtempSync(path.join(tmpdir(), "sbv2-cli-merge-root-"));
+    mkdirSync(path.join(sbv2Root, "configs"), { recursive: true });
+    writeFileSync(path.join(sbv2Root, "configs", "paths.yml"), "assets_root: model_assets\n");
+    for (const modelName of ["model-a", "model-b", "model-c"]) {
+      const modelDir = path.join(sbv2Root, "model_assets", modelName);
+      mkdirSync(modelDir, { recursive: true });
+      writeFileSync(path.join(modelDir, "config.json"), JSON.stringify(makeModelConfig(modelName)));
+      writeFileSync(path.join(modelDir, "style_vectors.npy"), makeNpy([1, 2]));
+      writeFileSync(path.join(modelDir, `${modelName}.safetensors`), makeSafetensors());
+    }
+
+    const stdout = createWriter();
+    const stderr = createWriter();
+    await expect(
+      runCli(
+        [
+          "models",
+          "merge-plan",
+          "--sbv2-root",
+          sbv2Root,
+          "--method",
+          "weighted-sum",
+          "--output-model-name",
+          "merged",
+          "--model-a",
+          "model-a",
+          "--model-b",
+          "model-b",
+          "--model-c",
+          "model-c",
+          "--model-a-coeff",
+          "1",
+          "--model-b-coeff",
+          "-1",
+          "--model-c-coeff",
+          "0",
+          "--json",
+        ],
+        { stdout: stdout.stream, stderr: stderr.stream },
+      ),
+    ).resolves.toBe(0);
+    expect(stderr.output()).toBe("");
+
+    const parsed = JSON.parse(stdout.output()) as { plan: { method: string; coefficients: Record<string, number> } };
+    expect(parsed.plan.method).toBe("weighted-sum");
+    expect(parsed.plan.coefficients).toEqual({ modelACoeff: 1, modelBCoeff: -1, modelCCoeff: 0 });
+  });
+
+  it("rejects mismatched model merge parameters at the CLI layer", async () => {
+    const stdout = createWriter();
+    const stderr = createWriter();
+    await expect(
+      runCli(
+        [
+          "models",
+          "merge-plan",
+          "--method",
+          "weighted-sum",
+          "--output-model-name",
+          "merged",
+          "--model-a",
+          "model-a",
+          "--model-b",
+          "model-b",
+          "--model-c",
+          "model-c",
+          "--voice-weight",
+          "0.1",
+          "--voice-pitch-weight",
+          "0.2",
+          "--speech-style-weight",
+          "0.3",
+          "--tempo-weight",
+          "0.4",
+          "--model-a-coeff",
+          "1",
+          "--model-b-coeff",
+          "-1",
+          "--model-c-coeff",
+          "0",
+        ],
+        { stdout: stdout.stream, stderr: stderr.stream },
+      ),
+    ).resolves.toBe(1);
+    expect(stderr.output()).toContain("part weights are not valid for weighted-sum");
+  });
+
   it("requires an explicit JP-Extra choice for dataset ingest", async () => {
     const stdout = createWriter();
     const stderr = createWriter();

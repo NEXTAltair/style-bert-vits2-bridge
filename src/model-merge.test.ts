@@ -1,0 +1,227 @@
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import path from "node:path";
+import { describe, expect, it } from "vitest";
+import { createModelMergePlan, runModelMerge } from "./model-merge.js";
+
+function tempRoot(prefix: string): string {
+  return mkdtempSync(path.join(tmpdir(), prefix));
+}
+
+function createSbv2Root(): string {
+  const sbv2Root = tempRoot("sbv2-model-merge-root-");
+  mkdirSync(path.join(sbv2Root, "configs"), { recursive: true });
+  writeFileSync(path.join(sbv2Root, "configs", "paths.yml"), "assets_root: model_assets\n");
+  return sbv2Root;
+}
+
+function writeModelAssets(sbv2Root: string, modelName: string, shape = [1], styleShape = [1, 2]): void {
+  const modelDir = path.join(sbv2Root, "model_assets", modelName);
+  mkdirSync(modelDir, { recursive: true });
+  writeFileSync(path.join(modelDir, "config.json"), JSON.stringify(makeConfig(modelName)));
+  writeFileSync(path.join(modelDir, "style_vectors.npy"), makeNpy(styleShape));
+  writeFileSync(path.join(modelDir, `${modelName}.safetensors`), makeSafetensors(shape));
+}
+
+function makeConfig(modelName: string): Record<string, unknown> {
+  return {
+    model_name: modelName,
+    model: {},
+    train: {},
+    data: {
+      n_speakers: 1,
+      num_styles: 1,
+      spk2id: { [modelName]: 0 },
+      style2id: { Neutral: 0 },
+    },
+  };
+}
+
+function makeNpy(shape: number[]): Buffer {
+  const shapeText = shape.length === 1 ? `${shape[0]},` : shape.join(", ");
+  const header = `{'descr': '<f4', 'fortran_order': False, 'shape': (${shapeText}), }`;
+  const magicLength = 10;
+  const padding = 16 - ((magicLength + header.length + 1) % 16);
+  const paddedHeader = `${header}${" ".repeat(padding)}\n`;
+  const result = Buffer.alloc(magicLength + paddedHeader.length + shape.reduce((total, value) => total * value, 1) * 4);
+  result.write("\x93NUMPY", 0, "latin1");
+  result[6] = 1;
+  result[7] = 0;
+  result.writeUInt16LE(paddedHeader.length, 8);
+  result.write(paddedHeader, magicLength, "latin1");
+  return result;
+}
+
+function makeSafetensors(shape = [1]): Buffer {
+  const payload = Buffer.alloc(Math.max(1, shape.reduce((total, value) => total * value, 1)) * 4);
+  const header = Buffer.from(
+    JSON.stringify({ weight: { dtype: "F32", shape, data_offsets: [0, payload.length] } }),
+    "utf8",
+  );
+  const result = Buffer.alloc(8 + header.length + payload.length);
+  result.writeBigUInt64LE(BigInt(header.length), 0);
+  header.copy(result, 8);
+  payload.copy(result, 8 + header.length);
+  return result;
+}
+
+function commonWeightOptions(sbv2Root: string) {
+  return {
+    sbv2Root,
+    outputModelName: "merged",
+    modelA: "model-a",
+    modelB: "model-b",
+    weights: {
+      voiceWeight: 0.1,
+      voicePitchWeight: 0.2,
+      speechStyleWeight: 0.3,
+      tempoWeight: 0.4,
+    },
+  };
+}
+
+describe("SBV2 model merge", () => {
+  it("creates a usual merge plan with explicit GUI-equivalent weights", async () => {
+    const sbv2Root = createSbv2Root();
+    writeModelAssets(sbv2Root, "model-a");
+    writeModelAssets(sbv2Root, "model-b");
+
+    const plan = await createModelMergePlan({
+      ...commonWeightOptions(sbv2Root),
+      method: "usual",
+      slerp: true,
+    });
+
+    expect(plan).toMatchObject({
+      method: "usual",
+      outputModelName: "merged",
+      slerp: true,
+      compatibility: { compatible: true, errors: [] },
+      weights: {
+        voiceWeight: 0.1,
+        voicePitchWeight: 0.2,
+        speechStyleWeight: 0.3,
+        tempoWeight: 0.4,
+      },
+    });
+    expect(plan.command.args[3]).toContain("merge_models_usual");
+  });
+
+  it("requires model C for add-diff and exposes the part weights", async () => {
+    const sbv2Root = createSbv2Root();
+    writeModelAssets(sbv2Root, "model-a");
+    writeModelAssets(sbv2Root, "model-b");
+    writeModelAssets(sbv2Root, "model-c");
+
+    const plan = await createModelMergePlan({
+      ...commonWeightOptions(sbv2Root),
+      method: "add-diff",
+      modelC: "model-c",
+    });
+
+    expect(plan.inputModels.c?.modelName).toBe("model-c");
+    expect(plan.weights?.tempoWeight).toBe(0.4);
+  });
+
+  it("uses coefficients instead of part weights for weighted-sum", async () => {
+    const sbv2Root = createSbv2Root();
+    writeModelAssets(sbv2Root, "model-a");
+    writeModelAssets(sbv2Root, "model-b");
+    writeModelAssets(sbv2Root, "model-c");
+
+    const plan = await createModelMergePlan({
+      sbv2Root,
+      method: "weighted-sum",
+      outputModelName: "merged",
+      modelA: "model-a",
+      modelB: "model-b",
+      modelC: "model-c",
+      coefficients: { modelACoeff: 1, modelBCoeff: -1, modelCCoeff: 0 },
+    });
+
+    expect(plan.coefficients).toEqual({ modelACoeff: 1, modelBCoeff: -1, modelCCoeff: 0 });
+    expect(plan.weights).toBeUndefined();
+  });
+
+  it("rejects weighted-sum part weights and non-usual slerp", async () => {
+    const sbv2Root = createSbv2Root();
+    await expect(
+      createModelMergePlan({
+        ...commonWeightOptions(sbv2Root),
+        method: "weighted-sum",
+        modelC: "model-c",
+        coefficients: { modelACoeff: 1, modelBCoeff: -1, modelCCoeff: 0 },
+      }),
+    ).rejects.toThrow("part weights are not valid for weighted-sum");
+
+    await expect(
+      createModelMergePlan({
+        ...commonWeightOptions(sbv2Root),
+        method: "add-null",
+        slerp: true,
+      }),
+    ).rejects.toThrow("--slerp is only valid for usual");
+  });
+
+  it("requires an explicit safetensors file when a model has multiple candidates", async () => {
+    const sbv2Root = createSbv2Root();
+    writeModelAssets(sbv2Root, "model-a");
+    writeFileSync(path.join(sbv2Root, "model_assets", "model-a", "alternate.safetensors"), makeSafetensors());
+    writeModelAssets(sbv2Root, "model-b");
+
+    await expect(createModelMergePlan({ ...commonWeightOptions(sbv2Root), method: "usual" })).rejects.toThrow(
+      "multiple .safetensors files",
+    );
+
+    const plan = await createModelMergePlan({
+      ...commonWeightOptions(sbv2Root),
+      method: "usual",
+      modelAFile: "model-a.safetensors",
+    });
+    expect(path.basename(plan.inputModels.a.safetensorsPath)).toBe("model-a.safetensors");
+  });
+
+  it("reports incompatible tensor and style vector shapes before running", async () => {
+    const sbv2Root = createSbv2Root();
+    writeModelAssets(sbv2Root, "model-a", [1], [1, 2]);
+    writeModelAssets(sbv2Root, "model-b", [2], [1, 3]);
+
+    const plan = await createModelMergePlan({ ...commonWeightOptions(sbv2Root), method: "usual" });
+
+    expect(plan.compatibility.compatible).toBe(false);
+    expect(plan.compatibility.errors.join("\n")).toContain("style vector dimensions");
+    expect(plan.compatibility.errors.join("\n")).toContain("shape differs");
+  });
+
+  it("runs a merge through an injected command runner and records a model-merge job", async () => {
+    const sbv2Root = createSbv2Root();
+    const jobsRoot = tempRoot("sbv2-model-merge-jobs-");
+    writeModelAssets(sbv2Root, "model-a");
+    writeModelAssets(sbv2Root, "model-b");
+
+    const result = await runModelMerge({
+      ...commonWeightOptions(sbv2Root),
+      method: "usual",
+      confirmOutputModelName: "merged",
+      jobsRoot,
+      commandRunner: async (_executable, _args, options) => {
+        const outputDir = path.join(options.cwd, "model_assets", "merged");
+        mkdirSync(outputDir, { recursive: true });
+        writeFileSync(path.join(outputDir, "config.json"), JSON.stringify(makeConfig("merged")));
+        writeFileSync(path.join(outputDir, "style_vectors.npy"), makeNpy([1, 2]));
+        writeFileSync(path.join(outputDir, "merged.safetensors"), makeSafetensors());
+        writeFileSync(path.join(outputDir, "recipe.json"), JSON.stringify({ method: "usual" }));
+        return { stdout: "merged" };
+      },
+      now: () => new Date("2026-06-02T00:00:00.000Z"),
+      randomId: () => "abcdef12",
+    });
+
+    expect(result.job).toMatchObject({
+      operation: "model-merge",
+      state: "succeeded",
+    });
+    expect(result.candidate.promotable).toBe(true);
+    expect(readFileSync(path.join(result.job.outputDir, "summary.json"), "utf8")).toContain('"outputModelName": "merged"');
+  });
+});

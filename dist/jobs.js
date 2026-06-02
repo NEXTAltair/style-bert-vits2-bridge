@@ -220,6 +220,7 @@ function isSbv2JobManifest(value) {
             value.operation === "dataset-ingest" ||
             value.operation === "dataset-prepare" ||
             value.operation === "training-run" ||
+            value.operation === "model-merge" ||
             value.operation === "model-promote" ||
             value.operation === "model-evaluate") &&
         typeof value.state === "string" &&
