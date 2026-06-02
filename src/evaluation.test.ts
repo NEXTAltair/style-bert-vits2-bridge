@@ -88,6 +88,24 @@ function makeWav(samples = 3200, value = 1000): Buffer {
   return buffer;
 }
 
+function makeShortFmtWav(): Buffer {
+  const dataBytes = 12;
+  const buffer = Buffer.alloc(44);
+  buffer.write("RIFF", 0, "ascii");
+  buffer.writeUInt32LE(36, 4);
+  buffer.write("WAVE", 8, "ascii");
+  buffer.write("fmt ", 12, "ascii");
+  buffer.writeUInt32LE(4, 16);
+  buffer.writeUInt16LE(1, 20);
+  buffer.writeUInt16LE(1, 22);
+  buffer.write("data", 24, "ascii");
+  buffer.writeUInt32LE(dataBytes, 28);
+  for (let offset = 32; offset + 1 < buffer.length; offset += 2) {
+    buffer.writeInt16LE(1000, offset);
+  }
+  return buffer;
+}
+
 describe("SBV2 model evaluation", () => {
   it("generates sample WAVs, an evaluation manifest, and a model-evaluate job", async () => {
     const sbv2Root = createSbv2Root();
@@ -292,5 +310,16 @@ describe("SBV2 model evaluation", () => {
     const silent = analyzeWavBuffer(makeWav(1600, 0));
     expect(silent.validWav).toBe(true);
     expect(silent.warnings).toContain("WAV appears mostly silent");
+  });
+
+  it("reports short WAV fmt chunks without reading past the chunk", () => {
+    const check = analyzeWavBuffer(makeShortFmtWav());
+
+    expect(check.validWav).toBe(false);
+    expect(check.errors).toContain("WAV fmt chunk is missing or too small");
+    expect(check.channels).toBeUndefined();
+    expect(check.sampleRate).toBeUndefined();
+    expect(check.bitsPerSample).toBeUndefined();
+    expect(check.dataBytes).toBe(12);
   });
 });

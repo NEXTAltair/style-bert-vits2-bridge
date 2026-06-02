@@ -219,9 +219,10 @@ export function analyzeWavBuffer(buffer) {
         errors.push("WAV fmt chunk is missing or too small");
     if (!data || data.size <= 0)
         errors.push("WAV data chunk is missing or empty");
-    const channels = fmt ? buffer.readUInt16LE(fmt.offset + 2) : undefined;
-    const sampleRate = fmt ? buffer.readUInt32LE(fmt.offset + 4) : undefined;
-    const bitsPerSample = fmt ? buffer.readUInt16LE(fmt.offset + 14) : undefined;
+    const readableFmt = fmt && fmt.size >= 16 ? fmt : undefined;
+    const channels = readableFmt ? buffer.readUInt16LE(readableFmt.offset + 2) : undefined;
+    const sampleRate = readableFmt ? buffer.readUInt32LE(readableFmt.offset + 4) : undefined;
+    const bitsPerSample = readableFmt ? buffer.readUInt16LE(readableFmt.offset + 14) : undefined;
     const bytesPerSecond = sampleRate && channels && bitsPerSample ? sampleRate * channels * (bitsPerSample / 8) : undefined;
     const durationSec = data && bytesPerSecond ? data.size / bytesPerSecond : undefined;
     if (durationSec !== undefined && durationSec < 0.15)
