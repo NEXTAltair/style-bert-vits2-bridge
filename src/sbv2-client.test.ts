@@ -1,5 +1,11 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { Sbv2Client, Sbv2UnavailableError, normalizeModelsInfo } from "./sbv2-client.js";
+import {
+  SBV2_FALLBACK_VOICE_TEXT_MAX_CHARS,
+  Sbv2Client,
+  Sbv2UnavailableError,
+  extractVoiceTextMaxLengthFromOpenApi,
+  normalizeModelsInfo,
+} from "./sbv2-client.js";
 
 const wavBytes = new Uint8Array([
   0x52, 0x49, 0x46, 0x46, // "RIFF"
@@ -303,6 +309,69 @@ describe("Sbv2Client", () => {
       speakers: [{ id: 0, name: "demo" }],
       styles: [{ id: 0, name: "Neutral" }],
     });
+  });
+
+  it("extracts the /voice text max length from OpenAPI", () => {
+    expect(
+      extractVoiceTextMaxLengthFromOpenApi({
+        paths: {
+          "/voice": {
+            post: {
+              parameters: [
+                { name: "model_name", schema: { type: "string" } },
+                { name: "text", schema: { type: "string", minLength: 1, maxLength: 400 } },
+              ],
+            },
+          },
+        },
+      }),
+    ).toBe(400);
+  });
+
+  it("fetches SBV2 text capabilities from /openapi.json", async () => {
+    const mockFetch = vi.fn().mockResolvedValue({
+      ok: true,
+      json: () =>
+        Promise.resolve({
+          paths: {
+            "/voice": {
+              post: {
+                parameters: [{ name: "text", schema: { type: "string", maxLength: 320 } }],
+              },
+            },
+          },
+        }),
+    });
+    vi.stubGlobal("fetch", mockFetch);
+
+    const client = new Sbv2Client({ baseUrl: "http://localhost:5000" });
+    await expect(client.getTextCapabilities()).resolves.toEqual({ maxInputChars: 320 });
+
+    expect(mockFetch).toHaveBeenCalledOnce();
+    const url = new URL(mockFetch.mock.calls[0][0]);
+    expect(url.pathname).toBe("/openapi.json");
+  });
+
+  it("falls back to the known SBV2 text limit when OpenAPI is unavailable", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new Error("connect ECONNREFUSED")));
+
+    const client = new Sbv2Client({ baseUrl: "http://localhost:5000" });
+    await expect(client.getTextCapabilities()).resolves.toEqual({
+      maxInputChars: SBV2_FALLBACK_VOICE_TEXT_MAX_CHARS,
+    });
+  });
+
+  it("preserves unlimited SBV2 text capabilities when OpenAPI has no text maxLength", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({
+        ok: true,
+        json: () => Promise.resolve({ paths: { "/voice": { post: { parameters: [] } } } }),
+      }),
+    );
+
+    const client = new Sbv2Client({ baseUrl: "http://localhost:5000" });
+    await expect(client.getTextCapabilities()).resolves.toEqual({});
   });
 
   it("normalizes array-shaped /models/info payloads", () => {

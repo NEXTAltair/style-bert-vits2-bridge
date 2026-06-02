@@ -23,6 +23,10 @@ export interface Sbv2ClientOptions {
   timeoutMs?: number;
 }
 
+export interface Sbv2TextCapabilities {
+  maxInputChars?: number;
+}
+
 export interface Sbv2NamedItem {
   id?: number;
   name: string;
@@ -70,6 +74,7 @@ const PARAM_KEY_MAP: Record<string, string> = {
 };
 
 const MAX_ERROR_BODY_CHARS = 500;
+export const SBV2_FALLBACK_VOICE_TEXT_MAX_CHARS = 100;
 
 export class Sbv2UnavailableError extends Error {
   constructor(message: string, options?: ErrorOptions) {
@@ -213,6 +218,36 @@ function formatHttpError(endpoint: string, response: Response, body: string): Er
       : `SBV2 ${endpoint} failed: ${status}`;
 
   return new Error(bodyText ? `${prefix}. ${bodyText}` : prefix);
+}
+
+function getOpenApiPaths(value: unknown): Record<string, unknown> | undefined {
+  return isRecord(value) && isRecord(value.paths) ? value.paths : undefined;
+}
+
+function extractMaxLengthFromParameter(value: unknown): number | undefined {
+  if (!isRecord(value)) return undefined;
+  const name = asNonEmptyString(value.name);
+  if (name !== "text") return undefined;
+
+  const schema = isRecord(value.schema) ? value.schema : undefined;
+  const maxLength = asFiniteNumber(schema?.maxLength);
+  return maxLength && maxLength > 0 ? maxLength : undefined;
+}
+
+export function extractVoiceTextMaxLengthFromOpenApi(value: unknown): number | undefined {
+  const paths = getOpenApiPaths(value);
+  const voicePath = isRecord(paths?.["/voice"]) ? paths["/voice"] : undefined;
+  if (!voicePath) return undefined;
+
+  for (const operation of Object.values(voicePath)) {
+    if (!isRecord(operation) || !Array.isArray(operation.parameters)) continue;
+    for (const parameter of operation.parameters) {
+      const maxLength = extractMaxLengthFromParameter(parameter);
+      if (maxLength !== undefined) return maxLength;
+    }
+  }
+
+  return undefined;
 }
 
 function isWavBuffer(value: Buffer): boolean {
@@ -404,6 +439,26 @@ export class Sbv2Client {
     }
 
     return normalizeModelsInfo(await response.json());
+  }
+
+  async getTextCapabilities(): Promise<Sbv2TextCapabilities> {
+    const url = new URL("/openapi.json", this.baseUrl);
+
+    try {
+      const response = await fetch(url, {
+        method: "GET",
+        signal: AbortSignal.timeout(this.timeoutMs),
+      });
+
+      if (!response.ok) {
+        return { maxInputChars: SBV2_FALLBACK_VOICE_TEXT_MAX_CHARS };
+      }
+
+      const maxInputChars = extractVoiceTextMaxLengthFromOpenApi(await response.json());
+      return maxInputChars === undefined ? {} : { maxInputChars };
+    } catch {
+      return { maxInputChars: SBV2_FALLBACK_VOICE_TEXT_MAX_CHARS };
+    }
   }
 
   async synthesize(params: Sbv2SynthesizeParams): Promise<Buffer> {

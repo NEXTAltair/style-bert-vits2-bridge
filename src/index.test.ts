@@ -23,6 +23,38 @@ const valentinaModelsInfo = {
 const observedToolFailureText =
   '⚠️ 🛠️ gh issue close 2 --repo NEXTAltair/openclaw --reason not planned --comment "Opened in the wrong repository. This belong… (in ~/src/openclaw) failed';
 
+function openApiTextLimit(maxLength: number) {
+  return {
+    ok: true,
+    json: () =>
+      Promise.resolve({
+        paths: {
+          "/voice": {
+            post: {
+              parameters: [{ name: "text", schema: { maxLength } }],
+            },
+          },
+        },
+      }),
+  };
+}
+
+function openApiUnlimitedText() {
+  return {
+    ok: true,
+    json: () =>
+      Promise.resolve({
+        paths: {
+          "/voice": {
+            post: {
+              parameters: [{ name: "text", schema: { type: "string" } }],
+            },
+          },
+        },
+      }),
+  };
+}
+
 describe("Style-Bert-VITS2 speech provider", () => {
   beforeEach(() => {
     vi.restoreAllMocks();
@@ -39,7 +71,181 @@ describe("Style-Bert-VITS2 speech provider", () => {
     expect(provider).toMatchObject({
       id: "style-bert-vits2",
       label: "Style-Bert-VITS2",
+      capabilities: {
+        text: {
+          maxInputChars: 100,
+        },
+      },
     });
+  });
+
+  it("reports dynamic SBV2 text capabilities from OpenAPI when configured", async () => {
+    const mockFetch = vi.fn().mockResolvedValue({
+      ok: true,
+      json: () =>
+        Promise.resolve({
+          paths: {
+            "/voice": {
+              post: {
+                parameters: [{ name: "text", schema: { maxLength: 320 } }],
+              },
+            },
+          },
+        }),
+    });
+    vi.stubGlobal("fetch", mockFetch);
+
+    const provider = buildSbv2SpeechProvider();
+    await expect(
+      provider.resolveCapabilities?.({ providerConfig: { baseUrl: "http://localhost:5000" } }),
+    ).resolves.toEqual({
+      text: {
+        maxInputChars: 320,
+      },
+    });
+
+    const url = new URL(mockFetch.mock.calls[0][0]);
+    expect(url.pathname).toBe("/openapi.json");
+  });
+
+  it("rejects text over the SBV2 hard limit before sending /voice", async () => {
+    const mockFetch = vi.fn().mockResolvedValue(openApiTextLimit(400));
+    vi.stubGlobal("fetch", mockFetch);
+
+    const provider = buildSbv2SpeechProvider();
+    await expect(
+      provider.synthesize({
+        text: "あ".repeat(401),
+        providerConfig: { baseUrl: "http://localhost:5000" },
+      }),
+    ).rejects.toThrow(/SBV2 \/voice text is too long: 401 chars exceeds provider hard limit 400/);
+
+    expect(mockFetch).toHaveBeenCalledOnce();
+    const url = new URL(mockFetch.mock.calls[0][0]);
+    expect(url.pathname).toBe("/openapi.json");
+  });
+
+  it("allows text at the SBV2 hard limit", async () => {
+    const mockFetch = vi
+      .fn()
+      .mockResolvedValueOnce(openApiTextLimit(400))
+      .mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.resolve(valentinaModelsInfo),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        arrayBuffer: () => Promise.resolve(wavBytes.buffer),
+      });
+    vi.stubGlobal("fetch", mockFetch);
+
+    const provider = buildSbv2SpeechProvider();
+    await provider.synthesize({
+      text: "あ".repeat(400),
+      providerConfig: { baseUrl: "http://localhost:5000" },
+    });
+
+    const voiceUrl = new URL(mockFetch.mock.calls[2][0]);
+    expect(voiceUrl.pathname).toBe("/voice");
+    expect(voiceUrl.searchParams.get("text")).toBe("あ".repeat(400));
+  });
+
+  it("uses the OpenAPI text limit for synthesis preflight", async () => {
+    const mockFetch = vi.fn().mockResolvedValue(openApiTextLimit(320));
+    vi.stubGlobal("fetch", mockFetch);
+
+    const provider = buildSbv2SpeechProvider();
+    await expect(
+      provider.synthesize({
+        text: "あ".repeat(321),
+        providerConfig: { baseUrl: "http://localhost:5000" },
+      }),
+    ).rejects.toThrow(/exceeds provider hard limit 320/);
+
+    expect(mockFetch).toHaveBeenCalledOnce();
+    const url = new URL(mockFetch.mock.calls[0][0]);
+    expect(url.pathname).toBe("/openapi.json");
+  });
+
+  it("counts Unicode code points for the SBV2 text limit", async () => {
+    const mockFetch = vi
+      .fn()
+      .mockResolvedValueOnce(openApiTextLimit(100))
+      .mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.resolve(valentinaModelsInfo),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        arrayBuffer: () => Promise.resolve(wavBytes.buffer),
+      });
+    vi.stubGlobal("fetch", mockFetch);
+
+    const provider = buildSbv2SpeechProvider();
+    await provider.synthesize({
+      text: "😀".repeat(51),
+      providerConfig: { baseUrl: "http://localhost:5000" },
+    });
+
+    const voiceUrl = new URL(mockFetch.mock.calls[2][0]);
+    expect(voiceUrl.pathname).toBe("/voice");
+    expect(voiceUrl.searchParams.get("text")).toBe("😀".repeat(51));
+  });
+
+  it("reports over-limit Unicode text by code point count", async () => {
+    const mockFetch = vi.fn().mockResolvedValue(openApiTextLimit(100));
+    vi.stubGlobal("fetch", mockFetch);
+
+    const provider = buildSbv2SpeechProvider();
+    await expect(
+      provider.synthesize({
+        text: "😀".repeat(101),
+        providerConfig: { baseUrl: "http://localhost:5000" },
+      }),
+    ).rejects.toThrow(/SBV2 \/voice text is too long: 101 chars exceeds provider hard limit 100/);
+  });
+
+  it("validates the pronunciation-adjusted text sent to SBV2", async () => {
+    const mockFetch = vi.fn().mockResolvedValue(openApiTextLimit(100));
+    vi.stubGlobal("fetch", mockFetch);
+
+    const provider = buildSbv2SpeechProvider();
+    await expect(
+      provider.synthesize({
+        text: "SBV2",
+        providerConfig: {
+          baseUrl: "http://localhost:5000",
+          pronunciationReplacements: { SBV2: "あ".repeat(101) },
+        },
+      }),
+    ).rejects.toThrow(/SBV2 \/voice text is too long: 101 chars exceeds provider hard limit 100/);
+
+    expect(mockFetch).toHaveBeenCalledOnce();
+  });
+
+  it("does not cap synthesis when reachable OpenAPI has no text maxLength", async () => {
+    const mockFetch = vi
+      .fn()
+      .mockResolvedValueOnce(openApiUnlimitedText())
+      .mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.resolve(valentinaModelsInfo),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        arrayBuffer: () => Promise.resolve(wavBytes.buffer),
+      });
+    vi.stubGlobal("fetch", mockFetch);
+
+    const provider = buildSbv2SpeechProvider();
+    await provider.synthesize({
+      text: "あ".repeat(401),
+      providerConfig: { baseUrl: "http://localhost:5000" },
+    });
+
+    const voiceUrl = new URL(mockFetch.mock.calls[2][0]);
+    expect(voiceUrl.pathname).toBe("/voice");
+    expect(voiceUrl.searchParams.get("text")).toBe("あ".repeat(401));
   });
 
   it("lists voices from SBV2 models info", async () => {
@@ -127,6 +333,7 @@ describe("Style-Bert-VITS2 speech provider", () => {
   it("resolves voice params before calling /voice", async () => {
     const mockFetch = vi
       .fn()
+      .mockResolvedValueOnce(openApiTextLimit(400))
       .mockResolvedValueOnce({
         ok: true,
         json: () => Promise.resolve(valentinaModelsInfo),
@@ -144,10 +351,12 @@ describe("Style-Bert-VITS2 speech provider", () => {
     });
 
     expect(result.outputFormat).toBe("wav");
-    expect(mockFetch).toHaveBeenCalledTimes(2);
-    const modelsUrl = new URL(mockFetch.mock.calls[0][0]);
-    const voiceUrl = new URL(mockFetch.mock.calls[1][0]);
+    expect(mockFetch).toHaveBeenCalledTimes(3);
+    const openApiUrl = new URL(mockFetch.mock.calls[0][0]);
+    const modelsUrl = new URL(mockFetch.mock.calls[1][0]);
+    const voiceUrl = new URL(mockFetch.mock.calls[2][0]);
 
+    expect(openApiUrl.pathname).toBe("/openapi.json");
     expect(modelsUrl.pathname).toBe("/models/info");
     expect(voiceUrl.pathname).toBe("/voice");
     expect(voiceUrl.searchParams.get("model_name")).toBe("valentina01_bright");
@@ -159,6 +368,7 @@ describe("Style-Bert-VITS2 speech provider", () => {
   it("rewrites raw tool status failure text before calling /voice", async () => {
     const mockFetch = vi
       .fn()
+      .mockResolvedValueOnce(openApiTextLimit(400))
       .mockResolvedValueOnce({
         ok: true,
         json: () => Promise.resolve(valentinaModelsInfo),
@@ -175,7 +385,7 @@ describe("Style-Bert-VITS2 speech provider", () => {
       providerConfig: { baseUrl: "http://localhost:5000" },
     });
 
-    const voiceUrl = new URL(mockFetch.mock.calls[1][0]);
+    const voiceUrl = new URL(mockFetch.mock.calls[2][0]);
     const spokenText = voiceUrl.searchParams.get("text");
     expect(spokenText).toBe("コマンドが失敗しました。別の方法で進めます。");
     expect(spokenText).not.toContain("gh issue close");
@@ -188,6 +398,7 @@ describe("Style-Bert-VITS2 speech provider", () => {
   it("uses the resolved synthesis language for rewritten tool status text", async () => {
     const mockFetch = vi
       .fn()
+      .mockResolvedValueOnce(openApiTextLimit(400))
       .mockResolvedValueOnce({
         ok: true,
         json: () => Promise.resolve(valentinaModelsInfo),
@@ -204,7 +415,7 @@ describe("Style-Bert-VITS2 speech provider", () => {
       providerConfig: { baseUrl: "http://localhost:5000", defaultLanguage: "EN" },
     });
 
-    const voiceUrl = new URL(mockFetch.mock.calls[1][0]);
+    const voiceUrl = new URL(mockFetch.mock.calls[2][0]);
     expect(voiceUrl.searchParams.get("text")).toBe("The command failed. I will try another way.");
     expect(voiceUrl.searchParams.get("language")).toBe("EN");
   });
@@ -212,6 +423,7 @@ describe("Style-Bert-VITS2 speech provider", () => {
   it("passes ordinary Japanese text through without tool status rewriting", async () => {
     const mockFetch = vi
       .fn()
+      .mockResolvedValueOnce(openApiTextLimit(400))
       .mockResolvedValueOnce({
         ok: true,
         json: () => Promise.resolve(valentinaModelsInfo),
@@ -228,7 +440,7 @@ describe("Style-Bert-VITS2 speech provider", () => {
       providerConfig: { baseUrl: "http://localhost:5000" },
     });
 
-    const voiceUrl = new URL(mockFetch.mock.calls[1][0]);
+    const voiceUrl = new URL(mockFetch.mock.calls[2][0]);
     expect(voiceUrl.searchParams.get("text")).toBe("GitHub issue のクローズに失敗しました。理由を確認します。");
     expect(result.metadata).not.toHaveProperty("textPreparation");
   });
@@ -236,6 +448,7 @@ describe("Style-Bert-VITS2 speech provider", () => {
   it("does not rewrite natural narration about a failed command", async () => {
     const mockFetch = vi
       .fn()
+      .mockResolvedValueOnce(openApiTextLimit(400))
       .mockResolvedValueOnce({
         ok: true,
         json: () => Promise.resolve(valentinaModelsInfo),
@@ -252,7 +465,7 @@ describe("Style-Bert-VITS2 speech provider", () => {
       providerConfig: { baseUrl: "http://localhost:5000", defaultLanguage: "EN" },
     });
 
-    const voiceUrl = new URL(mockFetch.mock.calls[1][0]);
+    const voiceUrl = new URL(mockFetch.mock.calls[2][0]);
     expect(voiceUrl.searchParams.get("text")).toBe(
       "The git command failed for NEXTAltair/openclaw, so I will check the repository state.",
     );
@@ -262,6 +475,7 @@ describe("Style-Bert-VITS2 speech provider", () => {
   it("does not turn emoji-prefixed non-failure warnings into command failures", async () => {
     const mockFetch = vi
       .fn()
+      .mockResolvedValueOnce(openApiTextLimit(400))
       .mockResolvedValueOnce({
         ok: true,
         json: () => Promise.resolve(valentinaModelsInfo),
@@ -278,7 +492,7 @@ describe("Style-Bert-VITS2 speech provider", () => {
       providerConfig: { baseUrl: "http://localhost:5000", defaultLanguage: "EN" },
     });
 
-    const voiceUrl = new URL(mockFetch.mock.calls[1][0]);
+    const voiceUrl = new URL(mockFetch.mock.calls[2][0]);
     expect(voiceUrl.searchParams.get("text")).toBe("⚠️ High CPU usage detected.");
     expect(result.metadata).not.toHaveProperty("textPreparation");
   });
@@ -286,6 +500,7 @@ describe("Style-Bert-VITS2 speech provider", () => {
   it("does not turn emoji-prefixed running tool status into command failures", async () => {
     const mockFetch = vi
       .fn()
+      .mockResolvedValueOnce(openApiTextLimit(400))
       .mockResolvedValueOnce({
         ok: true,
         json: () => Promise.resolve(valentinaModelsInfo),
@@ -302,7 +517,7 @@ describe("Style-Bert-VITS2 speech provider", () => {
       providerConfig: { baseUrl: "http://localhost:5000", defaultLanguage: "EN" },
     });
 
-    const voiceUrl = new URL(mockFetch.mock.calls[1][0]);
+    const voiceUrl = new URL(mockFetch.mock.calls[2][0]);
     expect(voiceUrl.searchParams.get("text")).toBe("🛠️ git status is still running.");
     expect(result.metadata).not.toHaveProperty("textPreparation");
   });
@@ -310,6 +525,7 @@ describe("Style-Bert-VITS2 speech provider", () => {
   it("allows explicit tts text to speak command-like text intentionally", async () => {
     const mockFetch = vi
       .fn()
+      .mockResolvedValueOnce(openApiTextLimit(400))
       .mockResolvedValueOnce({
         ok: true,
         json: () => Promise.resolve(valentinaModelsInfo),
@@ -329,7 +545,7 @@ describe("Style-Bert-VITS2 speech provider", () => {
       },
     });
 
-    const voiceUrl = new URL(mockFetch.mock.calls[1][0]);
+    const voiceUrl = new URL(mockFetch.mock.calls[2][0]);
     expect(voiceUrl.searchParams.get("text")).toBe("gh issue close 2 --repo NEXTAltair/openclaw failed");
     expect(result.metadata).toMatchObject({ textPreparation: "explicit" });
   });
@@ -337,6 +553,7 @@ describe("Style-Bert-VITS2 speech provider", () => {
   it("passes SBV2 generation tuning defaults through to /voice", async () => {
     const mockFetch = vi
       .fn()
+      .mockResolvedValueOnce(openApiTextLimit(400))
       .mockResolvedValueOnce({
         ok: true,
         json: () => Promise.resolve(valentinaModelsInfo),
@@ -358,7 +575,7 @@ describe("Style-Bert-VITS2 speech provider", () => {
       },
     });
 
-    const voiceUrl = new URL(mockFetch.mock.calls[1][0]);
+    const voiceUrl = new URL(mockFetch.mock.calls[2][0]);
     expect(voiceUrl.searchParams.get("sdp_ratio")).toBe("0.15");
     expect(voiceUrl.searchParams.get("noise")).toBe("0.45");
     expect(voiceUrl.searchParams.get("noisew")).toBe("0.55");
@@ -387,6 +604,7 @@ describe("Style-Bert-VITS2 speech provider", () => {
   it("returns safe telemetry metadata for the resolved SBV2 profile", async () => {
     const mockFetch = vi
       .fn()
+      .mockResolvedValueOnce(openApiTextLimit(400))
       .mockResolvedValueOnce({
         ok: true,
         json: () => Promise.resolve(valentinaModelsInfo),
@@ -441,6 +659,7 @@ describe("Style-Bert-VITS2 speech provider", () => {
   it("uses selected SBV2 voice overrides before configured defaults", async () => {
     const mockFetch = vi
       .fn()
+      .mockResolvedValueOnce(openApiTextLimit(400))
       .mockResolvedValueOnce({
         ok: true,
         json: () => Promise.resolve(valentinaModelsInfo),
@@ -465,7 +684,7 @@ describe("Style-Bert-VITS2 speech provider", () => {
       },
     });
 
-    const url = new URL(mockFetch.mock.calls[1][0]);
+    const url = new URL(mockFetch.mock.calls[2][0]);
     expect(url.searchParams.get("model_name")).toBe("valentina01_bright");
     expect(url.searchParams.get("speaker_name")).toBe("valentina01_bright");
     expect(url.searchParams.get("speaker_id")).toBeNull();
@@ -475,6 +694,7 @@ describe("Style-Bert-VITS2 speech provider", () => {
   it("lets style overrides change expression without changing selected model and speaker", async () => {
     const mockFetch = vi
       .fn()
+      .mockResolvedValueOnce(openApiTextLimit(400))
       .mockResolvedValueOnce({
         ok: true,
         json: () =>
@@ -501,7 +721,7 @@ describe("Style-Bert-VITS2 speech provider", () => {
       },
     });
 
-    const url = new URL(mockFetch.mock.calls[1][0]);
+    const url = new URL(mockFetch.mock.calls[2][0]);
     expect(url.searchParams.get("model_name")).toBe("valentina01_bright");
     expect(url.searchParams.get("speaker_name")).toBe("valentina01_bright");
     expect(url.searchParams.get("style")).toBe("Happy");
@@ -510,6 +730,7 @@ describe("Style-Bert-VITS2 speech provider", () => {
   it("uses speakerless voice ids without sending inherited speaker or style defaults", async () => {
     const mockFetch = vi
       .fn()
+      .mockResolvedValueOnce(openApiTextLimit(400))
       .mockResolvedValueOnce({
         ok: true,
         json: () =>
@@ -538,7 +759,7 @@ describe("Style-Bert-VITS2 speech provider", () => {
       },
     });
 
-    const url = new URL(mockFetch.mock.calls[1][0]);
+    const url = new URL(mockFetch.mock.calls[2][0]);
     expect(url.searchParams.get("model_name")).toBe("speakerless");
     expect(url.searchParams.get("speaker_name")).toBeNull();
     expect(url.searchParams.get("style")).toBe("Neutral");
@@ -691,6 +912,7 @@ describe("Style-Bert-VITS2 speech provider", () => {
   it("adds safe profile context to SBV2 voice request errors", async () => {
     const mockFetch = vi
       .fn()
+      .mockResolvedValueOnce(openApiTextLimit(400))
       .mockResolvedValueOnce({
         ok: true,
         json: () => Promise.resolve(valentinaModelsInfo),
@@ -721,6 +943,7 @@ describe("Style-Bert-VITS2 speech provider", () => {
   it("surfaces SBV2 FastAPI unavailability with provider and baseUrl context", async () => {
     const mockFetch = vi
       .fn()
+      .mockResolvedValueOnce(openApiTextLimit(400))
       .mockResolvedValueOnce({
         ok: true,
         json: () => Promise.resolve(valentinaModelsInfo),

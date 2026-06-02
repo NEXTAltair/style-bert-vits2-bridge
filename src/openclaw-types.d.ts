@@ -68,6 +68,20 @@ declare module "openclaw/plugin-sdk/speech" {
     label: string;
     autoSelectOrder?: number;
     models?: readonly string[];
+    capabilities?: {
+      text?: {
+        maxInputChars?: number;
+      };
+    };
+    resolveCapabilities?: (ctx: {
+      providerConfig?: SpeechProviderConfig;
+      apiKey?: string;
+      baseUrl?: string;
+    }) => Promise<{
+      text?: {
+        maxInputChars?: number;
+      };
+    }>;
     resolveConfig?: (ctx: { rawConfig: Record<string, unknown> }) => unknown;
     parseDirectiveToken?: (
       ctx: SpeechDirectiveTokenParseContext,

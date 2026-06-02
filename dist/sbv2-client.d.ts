@@ -21,6 +21,9 @@ export interface Sbv2ClientOptions {
     baseUrl: string;
     timeoutMs?: number;
 }
+export interface Sbv2TextCapabilities {
+    maxInputChars?: number;
+}
 export interface Sbv2NamedItem {
     id?: number;
     name: string;
@@ -51,9 +54,11 @@ export interface Sbv2ModelInfo {
     raw: unknown;
     [key: string]: unknown;
 }
+export declare const SBV2_FALLBACK_VOICE_TEXT_MAX_CHARS = 100;
 export declare class Sbv2UnavailableError extends Error {
     constructor(message: string, options?: ErrorOptions);
 }
+export declare function extractVoiceTextMaxLengthFromOpenApi(value: unknown): number | undefined;
 export declare function normalizeModelsInfo(value: unknown): Sbv2ModelInfo[];
 export declare class Sbv2Client {
     private readonly baseUrl;
@@ -61,5 +66,6 @@ export declare class Sbv2Client {
     constructor(options: Sbv2ClientOptions);
     getModelsInfo(): Promise<Sbv2ModelInfo[]>;
     refreshModels(): Promise<Sbv2ModelInfo[]>;
+    getTextCapabilities(): Promise<Sbv2TextCapabilities>;
     synthesize(params: Sbv2SynthesizeParams): Promise<Buffer>;
 }
