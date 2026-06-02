@@ -536,4 +536,49 @@ describe("Style-Bert-VITS2 speech provider", () => {
       /SBV2 telemetry context: provider=style-bert-vits2, baseUrl=http:\/\/localhost:5000, voiceId=valentina01_bright, modelName=valentina01_bright, speakerName=valentina01_bright, style=00_Neutral/,
     );
   });
+
+  it("surfaces SBV2 FastAPI unavailability with provider and baseUrl context", async () => {
+    const mockFetch = vi
+      .fn()
+      .mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.resolve(valentinaModelsInfo),
+      })
+      .mockRejectedValueOnce(
+        Object.assign(new TypeError("fetch failed"), {
+          cause: { code: "ECONNREFUSED", message: "connect ECONNREFUSED 127.0.0.1:5000" },
+        }),
+      );
+    vi.stubGlobal("fetch", mockFetch);
+
+    const provider = buildSbv2SpeechProvider();
+
+    try {
+      await provider.synthesize({
+        text: "ログに出してはいけない本文",
+        providerConfig: {
+          baseUrl: "http://user:secret@localhost:5000?token=hidden",
+          defaultAssistText: "ログに出してはいけない補助テキスト",
+        },
+      });
+      throw new Error("expected synthesize to fail");
+    } catch (error) {
+      expect(error).toBeInstanceOf(Error);
+      const message = (error as Error).message;
+      expect(message).toMatch(
+        /SBV2 FastAPI server is unavailable or unreachable: \/voice request failed for baseUrl http:\/\/localhost:5000/,
+      );
+      expect(message).toContain("provider=style-bert-vits2");
+      expect(message).toContain("baseUrl=http://localhost:5000");
+      expect(message).toContain("voiceId=valentina01_bright");
+      expect(message).toContain("modelName=valentina01_bright");
+      expect(message).toContain("speakerName=valentina01_bright");
+      expect(message).toContain("style=00_Neutral");
+      expect(message).toContain("ECONNREFUSED");
+      expect(message).not.toContain("ログに出してはいけない本文");
+      expect(message).not.toContain("ログに出してはいけない補助テキスト");
+      expect(message).not.toContain("secret");
+      expect(message).not.toContain("token=hidden");
+    }
+  });
 });

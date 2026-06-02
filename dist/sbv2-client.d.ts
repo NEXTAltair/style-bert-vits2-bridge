@@ -51,6 +51,9 @@ export interface Sbv2ModelInfo {
     raw: unknown;
     [key: string]: unknown;
 }
+export declare class Sbv2UnavailableError extends Error {
+    constructor(message: string, options?: ErrorOptions);
+}
 export declare function normalizeModelsInfo(value: unknown): Sbv2ModelInfo[];
 export declare class Sbv2Client {
     private readonly baseUrl;

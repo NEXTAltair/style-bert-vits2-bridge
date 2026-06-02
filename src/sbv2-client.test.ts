@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { Sbv2Client, normalizeModelsInfo } from "./sbv2-client.js";
+import { Sbv2Client, Sbv2UnavailableError, normalizeModelsInfo } from "./sbv2-client.js";
 
 const wavBytes = new Uint8Array([
   0x52, 0x49, 0x46, 0x46, // "RIFF"
@@ -383,12 +383,11 @@ describe("Sbv2Client", () => {
     );
 
     const client = new Sbv2Client({ baseUrl: "http://localhost:5000" });
+    await expect(client.getModelsInfo()).rejects.toThrow(Sbv2UnavailableError);
     await expect(client.getModelsInfo()).rejects.toThrow(
-      /SBV2 \/models\/info request failed for http:\/\/localhost:5000/,
+      /SBV2 FastAPI server is unavailable or unreachable: \/models\/info request failed for baseUrl http:\/\/localhost:5000/,
     );
-    await expect(client.getModelsInfo()).rejects.toThrow(
-      /Check that the SBV2 API is running and reachable at http:\/\/localhost:5000\/status/,
-    );
+    await expect(client.getModelsInfo()).rejects.toThrow(/verify http:\/\/localhost:5000\/status or \/models\/info/);
   });
 
   it("formats /voice connection failures with baseUrl and status guidance", async () => {
@@ -402,11 +401,12 @@ describe("Sbv2Client", () => {
     );
 
     const client = new Sbv2Client({ baseUrl: "http://localhost:5000" });
+    await expect(client.synthesize({ text: "テスト" })).rejects.toThrow(Sbv2UnavailableError);
     await expect(client.synthesize({ text: "テスト" })).rejects.toThrow(
-      /SBV2 \/voice request failed for http:\/\/localhost:5000/,
+      /SBV2 FastAPI server is unavailable or unreachable: \/voice request failed for baseUrl http:\/\/localhost:5000/,
     );
     await expect(client.synthesize({ text: "テスト" })).rejects.toThrow(
-      /GET|status|ECONNREFUSED/,
+      /verify http:\/\/localhost:5000\/status or \/models\/info.*ECONNREFUSED/,
     );
   });
 
@@ -431,6 +431,7 @@ describe("Sbv2Client", () => {
       expect(message).not.toContain("user:secret");
       expect(message).not.toContain("token=hidden");
       expect(message).not.toContain("#fragment");
+      expect((error as Error).cause).toBeUndefined();
     }
   });
 
@@ -466,6 +467,7 @@ describe("Sbv2Client", () => {
       expect(message).not.toContain("user:secret");
       expect(message).not.toContain("token=hidden");
       expect(message).not.toContain("#fragment");
+      expect((error as Error).cause).toBeUndefined();
     }
   });
 
@@ -476,8 +478,9 @@ describe("Sbv2Client", () => {
     );
 
     const client = new Sbv2Client({ baseUrl: "http://localhost:5000", timeoutMs: 1234 });
+    await expect(client.getModelsInfo()).rejects.toThrow(Sbv2UnavailableError);
     await expect(client.getModelsInfo()).rejects.toThrow(
-      /SBV2 \/models\/info request timed out after 1234ms/,
+      /SBV2 FastAPI server is unavailable or unreachable: \/models\/info request timed out after 1234ms for baseUrl http:\/\/localhost:5000/,
     );
   });
 });

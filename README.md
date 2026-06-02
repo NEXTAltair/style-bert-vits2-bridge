@@ -125,7 +125,7 @@ OpenClaw の policy が許可している場合、directive や Talk params か�
 2. `openclaw plugins inspect style-bert-vits2-bridge --runtime --json` で `speechProviderIds` に `style-bert-vits2` が含まれることを確認する。
 3. `/models/info` の model / speaker / style と、OpenClaw config の `defaultModelName` / `defaultSpeakerName` / `defaultStyle` が一致していることを確認する。
 4. `/tts audio`、voice override、Talk mode の順で実際の合成経路を確認する。
-5. `/tts status` と OpenClaw の debug log で `style-bert-vits2` 以外の provider が選ばれていないか、または SBV2 validation error が出ていないか確認する。
+5. `/tts status` と OpenClaw の debug log で、実際の `provider`、`fallbackFrom`、`attempts` を確認する。音声が出ていても、fallback により `style-bert-vits2` 以外の provider が使われている場合がある。
 
 SBV2 API 単体の起動確認:
 
@@ -327,11 +327,11 @@ sbv2-bridge evaluation note \
 
 ### Telemetry / debug
 
-OpenClaw の `/tts status` は、直近の TTS 試行について fallback と attempted providers を表示します。SBV2 を使ったつもりで別 provider が使われた疑いがある場合は、まず `/tts status` の `Fallback`、`Attempts`、provider detail を確認してください。
+OpenClaw の `/tts status` は、直近の TTS 試行について `provider`、`fallbackFrom`、`attemptedProviders`、`attempts` を表示します。SBV2 を使ったつもりで別 provider の音声が出た疑いがある場合は、まず `/tts status` で実際の provider と fallback 元を確認してください。
 
 bridge 側では合成成功時に、安全な telemetry metadata と debug log へ resolved profile を出します。確認できる主な項目は `provider=style-bert-vits2`、sanitized `baseUrl`、`voiceId`、`modelName`、`modelId`、`speakerName`、`speakerId`、`style`、`styleWeight`、`length`、`language`、`outputFormat=wav`、`audioBytes` です。
 
-エラー時も同じ安全な context をエラーメッセージ末尾に付けます。`/models/info` の model / speaker / style 不一致、SBV2 server 未起動、`baseUrl` 誤りを切り分ける用途です。
+エラー時も同じ安全な context をエラーメッセージ末尾に付けます。SBV2 FastAPI server 未起動、`baseUrl` 誤り、`/models/info` の model / speaker / style 不一致を切り分ける用途です。primary の `style-bert-vits2` が失敗してfallback providerが成功した場合でも、bridge由来の失敗理由は OpenClaw の `attempts` に残ります。
 
 debug log と telemetry には、読み上げ本文、`assistText`、音声バイナリ、base64、URL の user/password/query/hash は出しません。secret を `baseUrl` の query や userinfo に入れている場合でも、ログ上は除去されます。
 

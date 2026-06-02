@@ -12,6 +12,12 @@ const PARAM_KEY_MAP = {
     styleWeight: "style_weight",
 };
 const MAX_ERROR_BODY_CHARS = 500;
+export class Sbv2UnavailableError extends Error {
+    constructor(message, options) {
+        super(message, options);
+        this.name = "Sbv2UnavailableError";
+    }
+}
 function isRecord(value) {
     return typeof value === "object" && value !== null && !Array.isArray(value);
 }
@@ -62,12 +68,12 @@ function formatRequestError(endpoint, baseUrl, timeoutMs, error) {
     const safeStatusUrl = sanitizeUrl(statusUrl);
     const detail = formatError(error);
     if (looksLikeTimeout(error)) {
-        return new Error(`SBV2 ${endpoint} request timed out after ${timeoutMs}ms for ${safeBaseUrl}. ` +
-            `Check that the SBV2 API responds at ${safeStatusUrl}, or increase timeoutMs. ` +
+        return new Sbv2UnavailableError(`SBV2 FastAPI server is unavailable or unreachable: ${endpoint} request timed out after ${timeoutMs}ms for baseUrl ${safeBaseUrl}. ` +
+            `Start or restart the SBV2 FastAPI server, then verify ${safeStatusUrl} or /models/info; increase timeoutMs only if the server responds slowly. ` +
             `Original error: ${detail}`);
     }
-    return new Error(`SBV2 ${endpoint} request failed for ${safeBaseUrl}. ` +
-        `Check that the SBV2 API is running and reachable at ${safeStatusUrl}. ` +
+    return new Sbv2UnavailableError(`SBV2 FastAPI server is unavailable or unreachable: ${endpoint} request failed for baseUrl ${safeBaseUrl}. ` +
+        `Start or restart the SBV2 FastAPI server, then verify ${safeStatusUrl} or /models/info. ` +
         `Original error: ${detail}`);
 }
 function truncateErrorBody(value) {
