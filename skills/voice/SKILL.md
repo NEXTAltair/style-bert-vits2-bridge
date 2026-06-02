@@ -5,7 +5,9 @@ description: Style-Bert-VITS2 の声色・スタイル・スピーカー選択�
 
 # Voice — Style-Bert-VITS2 声色選択ガイド
 
-このスキルは、Style-Bert-VITS2 (SBV2) で音声を生成する際の声色・スタイル選択をガイドします。
+このスキルは、Style-Bert-VITS2 (SBV2) で音声を生成する際のモデル・スピーカー・スタイル選択をガイドします。
+
+基本ルール: model / speaker は声の同一性を決め、style は選択済みモデル内の表情・トーンを決めます。別の声にしたい場合は model / speaker を選び直し、現在の声の表現だけを変えたい場合に style を選びます。
 
 ## モデル
 
@@ -14,12 +16,16 @@ SBV2 は `model_assets/` 内のディレクトリ名でモデルを指定しま�
 - `model_name`: ディレクトリ名で指定（`model_id` より優先）
 - `model_id`: 数値で指定（デフォルト 0）
 
+モデルは声質・学習済み話者の土台です。「どの声を使うか」を決めるときは style ではなく model を選びます。
+
 ## スピーカー
 
 複数話者モデルでは、`esd.list` の登場順で `speaker_id` が決まります（0始まり）。
 
 - `speaker_name`: 話者名で指定（`speaker_id` より優先）
 - `speaker_id`: 数値で指定（デフォルト 0）
+
+スピーカーは同じモデル内の話者を決めます。単一話者モデルでは model name と speaker name が同じになることがあります。
 
 ## スタイル
 
@@ -28,6 +34,8 @@ SBV2 は `model_assets/` 内のディレクトリ名でモデルを指定しま�
 - `style`: スタイル名（デフォルト "Neutral"）
 - `style_weight`: スタイルの強さ（デフォルト 1.0）
   - **1.0 を超えると音声が崩壊する可能性があります**。0.0〜1.0 の範囲で調整してください。
+
+スタイルは「どの声が良いか」を決める項目ではありません。選択済みの model / speaker を保ったまま、明るい、落ち着いた、注意喚起などの表情を切り替える項目です。
 
 ## 話速
 
@@ -46,27 +54,31 @@ SBV2 は `model_assets/` 内のディレクトリ名でモデルを指定しま�
 
 Valentina 系モデルの style は SBV2 共通の emotion taxonomy ではなく、モデルごとの `style2id` に定義された style 名です。`/docs` は API 仕様確認用であり、ロード済みモデル情報は `/models/info` で確認できます。
 
+Valentina などの style 対応モデルでは、まず現在使う `model_name` と `speaker_name` を声の同一性として固定します。その後、現在の感情、文脈、応答温度に合わせて `style2id` 内の style を動的に選びます。
+
 `clear`、`soft`、`serious`、`alert` などの tone は、エージェントが文脈に応じて style を選ぶための分類名であり、SBV2 に送る style 名ではありません。
 
 ### 選択ルール
 
-1. `/models/info` の `style2id` に含まれる style 名だけを `/voice` に渡す。
-2. tone 分類は固定 mapping ではなく、エージェントが文脈と `style2id` を見て判断する。
-3. style を分類する場合は、必要に応じて以下の用途で考える。
+1. model / speaker を声の同一性として先に決める。
+2. `/models/info` の `style2id` に含まれる style 名だけを `/voice` に渡す。
+3. tone 分類は固定 mapping ではなく、エージェントが文脈と `style2id` を見て判断する。
+4. style を分類する場合は、必要に応じて以下の用途で考える。
    - `clear`: 明るく聞き取りやすい説明
    - `soft`: 柔らかい応答、落ち着いた相槌
    - `serious`: 注意、事務的な確認、低めの温度感
    - `alert`: 短い警告、割り込み、重要通知
-4. `style_weight` はエージェントまたは呼び出し側が文脈に応じて決める。スキル内で tone ごとの固定値を持たない。
-5. `assist_text` は style だけで足りない場合にだけ使う。
+5. `style_weight` はエージェントまたは呼び出し側が文脈に応じて決める。スキル内で tone ごとの固定値を持たない。
+6. `assist_text` は style だけで足りない場合にだけ使う。
 
 ## 選択の指針
 
 1. まず `/models/info` でロード済みモデルとスピーカーを確認する
-2. ユーザーの要望に近い声色のモデル・スピーカーを選ぶ
-3. Valentina 系は `style2id` に存在する style だけを候補にする
-4. `style_weight` はエージェントまたは呼び出し側が文脈に応じて決める
-5. 話速は 0.8〜1.2 の範囲が自然
+2. ユーザーの要望に近い声色の model / speaker を選ぶ
+3. 同じ声の表情だけを変える場合は model / speaker を維持し、style だけを変える
+4. Valentina 系は `style2id` に存在する style だけを候補にする
+5. `style_weight` はエージェントまたは呼び出し側が文脈に応じて決める
+6. 話速は 0.8〜1.2 の範囲が自然
 
 ## 制作系操作の安全確認
 
