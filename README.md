@@ -4,7 +4,7 @@ OpenClaw の TTS プロバイダープラグイン。ローカルで稼働する
 
 ## 前提条件
 
-- OpenClaw `>= 2026.3.24-beta.2`
+- OpenClaw `>= 2026.5.28`
 - Node.js `>= 22`
 - Style-Bert-VITS2 API サーバーが起動済みであること（デフォルト `http://127.0.0.1:5000`）
 
@@ -156,6 +156,8 @@ openclaw plugins inspect style-bert-vits2-bridge --runtime --json
 ```
 
 `speechProviderIds` に `style-bert-vits2` が含まれれば、OpenClaw runtime から provider が見えています。`dist/index.js` は OpenClaw plugin runtime から読み込まれる前提の entrypoint です。通常の Node.js script から直接 import すると、`openclaw/plugin-sdk/*` 解決や runtime mock が無いため失敗することがあります。
+
+この bridge は `v0.1.0` から OpenClaw `2026.5.28` を安定版の互換性下限にしています。`openclaw/plugin-sdk/plugin-entry`、`openclaw/plugin-sdk/speech`、`definePluginEntry(...)`、`api.registerSpeechProvider(...)` は 2026.5 系でも継続利用できます。
 
 `/tts audio` では、通常合成と voice override の両方を確認します。
 

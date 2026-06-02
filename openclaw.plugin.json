@@ -2,7 +2,7 @@
   "id": "style-bert-vits2-bridge",
   "name": "Style-Bert-VITS2 Bridge",
   "description": "Bridge OpenClaw to a Style-Bert-VITS2 API server for speech generation.",
-  "version": "0.0.1",
+  "version": "0.1.0",
   "contracts": {
     "speechProviders": ["style-bert-vits2"]
   },
