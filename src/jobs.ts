@@ -6,7 +6,13 @@ import { randomUUID } from "node:crypto";
 export const DEFAULT_JOBS_ROOT = "~/.openclaw/state/style-bert-vits2-bridge/jobs";
 
 export type Sbv2JobState = "running" | "succeeded" | "failed" | "cancelled";
-export type Sbv2JobOperation = "dummy" | "dataset-ingest" | "dataset-prepare" | "training-run" | "model-promote";
+export type Sbv2JobOperation =
+  | "dummy"
+  | "dataset-ingest"
+  | "dataset-prepare"
+  | "training-run"
+  | "model-promote"
+  | "model-evaluate";
 
 export interface Sbv2JobCancellation {
   supported: boolean;
@@ -125,8 +131,8 @@ export async function createJobManifest(options: CreateJobManifestOptions): Prom
   const jobDir = path.join(root, jobId);
   const resolvedLogPath = logPath(jobDir);
   const startedAt = now().toISOString();
-  const finishedAt = now().toISOString();
   const state = options.state ?? "succeeded";
+  const finishedAt = state === "running" ? undefined : now().toISOString();
 
   await mkdir(jobDir, { recursive: true });
 
@@ -137,17 +143,24 @@ export async function createJobManifest(options: CreateJobManifestOptions): Prom
     state,
     createdAt: created.toISOString(),
     startedAt,
-    finishedAt,
+    ...(finishedAt ? { finishedAt } : {}),
     inputSummary: options.inputSummary,
     outputDir: jobDir,
     artifactPaths: options.artifactPaths ?? [],
     logPath: resolvedLogPath,
     firstError: options.firstError ?? null,
     retryable: options.retryable ?? false,
-    cancellation: options.cancellation ?? {
-      supported: false,
-      reason: "This job is already complete and cannot be cancelled.",
-    },
+    cancellation:
+      options.cancellation ??
+      (state === "running"
+        ? {
+            supported: false,
+            reason: "Cancellation is not supported for this job.",
+          }
+        : {
+            supported: false,
+            reason: "This job is already complete and cannot be cancelled.",
+          }),
     progressSummary: options.progressSummary,
   };
 
@@ -156,8 +169,8 @@ export async function createJobManifest(options: CreateJobManifestOptions): Prom
     resolvedLogPath,
     [
       `[${startedAt}] ${options.operation} job started`,
-      ...logLines.map((line) => `[${finishedAt}] ${line}`),
-      `[${finishedAt}] ${options.operation} job ${state}`,
+      ...logLines.map((line) => `[${finishedAt ?? startedAt}] ${line}`),
+      `[${finishedAt ?? startedAt}] ${options.operation} job ${state}`,
       "",
     ].join("\n"),
     "utf8",
@@ -333,7 +346,8 @@ function isSbv2JobManifest(value: unknown): value is Sbv2JobManifest {
       value.operation === "dataset-ingest" ||
       value.operation === "dataset-prepare" ||
       value.operation === "training-run" ||
-      value.operation === "model-promote") &&
+      value.operation === "model-promote" ||
+      value.operation === "model-evaluate") &&
     typeof value.state === "string" &&
     typeof value.createdAt === "string" &&
     isRecord(value.inputSummary) &&

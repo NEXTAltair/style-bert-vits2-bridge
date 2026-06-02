@@ -663,6 +663,67 @@ describe("SBV2 model registry", () => {
     expect(existsSync(path.join(result.job.outputDir, "summary.json"))).toBe(true);
   });
 
+  it("accepts a non-reject evaluation only for the same candidate source", async () => {
+    const sbv2Root = createSbv2Root();
+    const modelDir = path.join(sbv2Root, "model_assets", "test-voice");
+    writeModelAssets(modelDir);
+    const evaluationPath = path.join(tempRoot("sbv2-model-registry-eval-"), "evaluation.json");
+    writeFileSync(
+      evaluationPath,
+      JSON.stringify({
+        schemaVersion: 1,
+        modelName: "test-voice",
+        sourceDir: modelDir,
+        decision: "adopt",
+        recommendation: "adopt_candidate",
+      }),
+    );
+
+    const result = await promoteModel({
+      sbv2Root,
+      modelName: "test-voice",
+      confirmModelName: "test-voice",
+      evaluationPath,
+      jobsRoot: tempRoot("sbv2-model-registry-jobs-"),
+    });
+
+    expect(result.summary.evaluation).toMatchObject({
+      evaluationPath,
+      accepted: true,
+      recommendation: "adopt_candidate",
+    });
+  });
+
+  it("rejects evaluation manifests from a different candidate source", async () => {
+    const sbv2Root = createSbv2Root();
+    const modelDir = path.join(sbv2Root, "model_assets", "test-voice");
+    writeModelAssets(modelDir);
+    const oldSource = tempRoot("sbv2-model-registry-old-source-");
+    writeModelAssets(oldSource);
+    const evaluationPath = path.join(tempRoot("sbv2-model-registry-eval-"), "evaluation.json");
+    writeFileSync(
+      evaluationPath,
+      JSON.stringify({
+        schemaVersion: 1,
+        modelName: "test-voice",
+        sourceDir: oldSource,
+        candidate: { sourceDir: oldSource },
+        decision: "adopt",
+        recommendation: "adopt_candidate",
+      }),
+    );
+
+    await expect(
+      promoteModel({
+        sbv2Root,
+        modelName: "test-voice",
+        confirmModelName: "test-voice",
+        evaluationPath,
+        jobsRoot: tempRoot("sbv2-model-registry-jobs-"),
+      }),
+    ).rejects.toThrow("does not match candidate source");
+  });
+
   it("copies an external source into model_assets", async () => {
     const sbv2Root = tempRoot("sbv2-model-registry-root-");
     mkdirSync(path.join(sbv2Root, "configs"), { recursive: true });

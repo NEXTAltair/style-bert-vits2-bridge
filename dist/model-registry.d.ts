@@ -29,6 +29,7 @@ export interface PromoteModelOptions extends ListModelCandidatesOptions {
     confirmModelName: string;
     backupExisting?: boolean;
     baseUrl?: string;
+    evaluationPath?: string;
     now?: () => Date;
     randomId?: () => string;
 }
@@ -46,11 +47,19 @@ export interface Sbv2ModelPromotionSummary {
         foundInModelsInfo: boolean;
         modelsInfoCount: number;
     };
+    evaluation?: Sbv2PromotionEvaluationGate;
 }
 export interface PromoteModelResult {
     candidate: Sbv2ModelCandidate;
     summary: Sbv2ModelPromotionSummary;
     job: Sbv2JobManifest;
 }
+interface Sbv2PromotionEvaluationGate {
+    evaluationPath: string;
+    decision: string | null;
+    recommendation: string;
+    accepted: boolean;
+}
 export declare function listModelCandidates(options: ListModelCandidatesOptions): Promise<Sbv2ModelCandidate[]>;
 export declare function promoteModel(options: PromoteModelOptions): Promise<PromoteModelResult>;
+export {};
