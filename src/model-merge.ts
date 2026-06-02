@@ -223,10 +223,11 @@ export async function runModelMerge(options: ModelMergeRunOptions): Promise<Mode
   const runner = options.commandRunner ?? runSbv2Command;
   const logLines: string[] = [`model merge started for ${plan.outputModelName}`];
   const outputExistedBeforeRun = await pathExists(plan.outputDir);
+  let cleanupOutputOnFailure = !outputExistedBeforeRun;
 
   const fail = async (error: unknown): Promise<never> => {
     const message = error instanceof Error ? error.message : String(error);
-    if (!outputExistedBeforeRun && (await pathExists(plan.outputDir))) {
+    if (cleanupOutputOnFailure && (await pathExists(plan.outputDir))) {
       await cleanupOutputDir(plan.outputDir, logLines);
     }
     await createJobManifest({
@@ -260,6 +261,7 @@ export async function runModelMerge(options: ModelMergeRunOptions): Promise<Mode
     if (!candidate?.promotable) {
       throw new Error(`Merged model candidate is not promotable: ${candidate?.errors.join("; ") ?? "not found"}`);
     }
+    cleanupOutputOnFailure = false;
 
     const summary: Sbv2ModelMergeSummary = {
       schemaVersion: 1,
@@ -350,8 +352,14 @@ async function resolveModelSafetensors(modelDir: string, modelFile: string | und
   if (modelFile) {
     const resolved = path.resolve(modelDir, modelFile);
     const relative = path.relative(modelDir, resolved);
-    if (relative.startsWith("..") || path.isAbsolute(relative) || !resolved.endsWith(".safetensors")) {
-      throw new Error(`${label} file must be a .safetensors file inside ${modelDir}`);
+    if (
+      relative.startsWith("..") ||
+      path.isAbsolute(relative) ||
+      relative.includes(path.sep) ||
+      path.basename(relative).startsWith(".") ||
+      !resolved.endsWith(".safetensors")
+    ) {
+      throw new Error(`${label} file must be a top-level .safetensors filename inside ${modelDir}`);
     }
     await requireNonEmptyFile(resolved, `${label} file`);
     return resolved;

@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
@@ -181,6 +181,22 @@ describe("SBV2 model merge", () => {
     expect(path.basename(plan.inputModels.a.safetensorsPath)).toBe("model-a.safetensors");
   });
 
+  it("rejects nested explicit safetensors paths", async () => {
+    const sbv2Root = createSbv2Root();
+    writeModelAssets(sbv2Root, "model-a");
+    mkdirSync(path.join(sbv2Root, "model_assets", "model-a", "checkpoints"));
+    writeFileSync(path.join(sbv2Root, "model_assets", "model-a", "checkpoints", "G_100.safetensors"), makeSafetensors());
+    writeModelAssets(sbv2Root, "model-b");
+
+    await expect(
+      createModelMergePlan({
+        ...commonWeightOptions(sbv2Root),
+        method: "usual",
+        modelAFile: "checkpoints/G_100.safetensors",
+      }),
+    ).rejects.toThrow("top-level .safetensors filename");
+  });
+
   it("reports incompatible tensor and style vector shapes before running", async () => {
     const sbv2Root = createSbv2Root();
     writeModelAssets(sbv2Root, "model-a", [1], [1, 2]);
@@ -223,5 +239,45 @@ describe("SBV2 model merge", () => {
     });
     expect(result.candidate.promotable).toBe(true);
     expect(readFileSync(path.join(result.job.outputDir, "summary.json"), "utf8")).toContain('"outputModelName": "merged"');
+  });
+
+  it("keeps generated merge assets when refresh verification fails", async () => {
+    const sbv2Root = createSbv2Root();
+    const jobsRoot = tempRoot("sbv2-model-merge-jobs-");
+    writeModelAssets(sbv2Root, "model-a");
+    writeModelAssets(sbv2Root, "model-b");
+    const outputDir = path.join(sbv2Root, "model_assets", "merged");
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = async () =>
+      new Response(JSON.stringify({ models: [{ model_name: "different-model" }] }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      });
+
+    try {
+      await expect(
+        runModelMerge({
+          ...commonWeightOptions(sbv2Root),
+          method: "usual",
+          confirmOutputModelName: "merged",
+          jobsRoot,
+          baseUrl: "http://localhost:5000",
+          commandRunner: async (_executable, _args, options) => {
+            mkdirSync(outputDir, { recursive: true });
+            writeFileSync(path.join(outputDir, "config.json"), JSON.stringify(makeConfig("merged")));
+            writeFileSync(path.join(outputDir, "style_vectors.npy"), makeNpy([1, 2]));
+            writeFileSync(path.join(outputDir, "merged.safetensors"), makeSafetensors());
+            writeFileSync(path.join(outputDir, "recipe.json"), JSON.stringify({ method: "usual" }));
+            return { stdout: `merged in ${options.cwd}` };
+          },
+          now: () => new Date("2026-06-02T00:00:00.000Z"),
+          randomId: () => "abcdef12",
+        }),
+      ).rejects.toThrow('was not found in /models/info after refresh');
+      expect(existsSync(outputDir)).toBe(true);
+      expect(existsSync(path.join(outputDir, "merged.safetensors"))).toBe(true);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
   });
 });

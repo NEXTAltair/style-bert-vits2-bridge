@@ -59,11 +59,11 @@ Options:
   --confirm-output-model-name <name>
                             Required exact output model name confirmation for models merge-run.
   --model-a <name>         Model A for model merge.
-  --model-a-file <path>    Model A safetensors filename/path inside its model directory.
+  --model-a-file <name>    Model A top-level safetensors filename inside its model directory.
   --model-b <name>         Model B for model merge.
-  --model-b-file <path>    Model B safetensors filename/path inside its model directory.
+  --model-b-file <name>    Model B top-level safetensors filename inside its model directory.
   --model-c <name>         Model C for add-diff and weighted-sum.
-  --model-c-file <path>    Model C safetensors filename/path inside its model directory.
+  --model-c-file <name>    Model C top-level safetensors filename inside its model directory.
   --voice-weight <n>       Voice quality weight for usual/add-diff/add-null.
   --voice-pitch-weight <n> Voice pitch weight for usual/add-diff/add-null.
   --speech-style-weight <n>

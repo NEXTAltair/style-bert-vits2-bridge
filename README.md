@@ -239,6 +239,8 @@ sbv2-bridge models merge-plan \
 
 対応する method は `usual`、`add-diff`、`weighted-sum`、`add-null` です。`usual` / `add-diff` / `add-null` は声質、声の高さ、話し方、テンポの4 weight を指定します。`weighted-sum` は `--model-a-coeff`、`--model-b-coeff`、`--model-c-coeff` を指定します。
 
+各モデルディレクトリに `.safetensors` が1つだけある場合は自動選択します。複数ある場合は `--model-a-file model_a.safetensors` のように、モデルディレクトリ直下のファイル名を明示します。
+
 実行時は出力名の明示確認が必要です。
 
 ```bash
