@@ -185,6 +185,30 @@ describe("Style-Bert-VITS2 speech provider", () => {
     expect(result.metadata).toMatchObject({ textPreparation: "tool_status_rewrite" });
   });
 
+  it("uses the resolved synthesis language for rewritten tool status text", async () => {
+    const mockFetch = vi
+      .fn()
+      .mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.resolve(valentinaModelsInfo),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        arrayBuffer: () => Promise.resolve(wavBytes.buffer),
+      });
+    vi.stubGlobal("fetch", mockFetch);
+
+    const provider = buildSbv2SpeechProvider();
+    await provider.synthesize({
+      text: observedToolFailureText,
+      providerConfig: { baseUrl: "http://localhost:5000", defaultLanguage: "EN" },
+    });
+
+    const voiceUrl = new URL(mockFetch.mock.calls[1][0]);
+    expect(voiceUrl.searchParams.get("text")).toBe("The command failed. I will try another way.");
+    expect(voiceUrl.searchParams.get("language")).toBe("EN");
+  });
+
   it("passes ordinary Japanese text through without tool status rewriting", async () => {
     const mockFetch = vi
       .fn()
@@ -209,6 +233,32 @@ describe("Style-Bert-VITS2 speech provider", () => {
     expect(result.metadata).not.toHaveProperty("textPreparation");
   });
 
+  it("does not rewrite natural narration about a failed command", async () => {
+    const mockFetch = vi
+      .fn()
+      .mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.resolve(valentinaModelsInfo),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        arrayBuffer: () => Promise.resolve(wavBytes.buffer),
+      });
+    vi.stubGlobal("fetch", mockFetch);
+
+    const provider = buildSbv2SpeechProvider();
+    const result = await provider.synthesize({
+      text: "The git command failed for NEXTAltair/openclaw, so I will check the repository state.",
+      providerConfig: { baseUrl: "http://localhost:5000", defaultLanguage: "EN" },
+    });
+
+    const voiceUrl = new URL(mockFetch.mock.calls[1][0]);
+    expect(voiceUrl.searchParams.get("text")).toBe(
+      "The git command failed for NEXTAltair/openclaw, so I will check the repository state.",
+    );
+    expect(result.metadata).not.toHaveProperty("textPreparation");
+  });
+
   it("allows explicit tts text to speak command-like text intentionally", async () => {
     const mockFetch = vi
       .fn()
@@ -225,7 +275,10 @@ describe("Style-Bert-VITS2 speech provider", () => {
     const provider = buildSbv2SpeechProvider();
     const result = await provider.synthesize({
       text: "[[tts:text]]gh issue close 2 --repo NEXTAltair/openclaw failed[[/tts:text]]",
-      providerConfig: { baseUrl: "http://localhost:5000" },
+      providerConfig: {
+        baseUrl: "http://localhost:5000",
+        pronunciationReplacements: { gh: "ジーエイチ" },
+      },
     });
 
     const voiceUrl = new URL(mockFetch.mock.calls[1][0]);

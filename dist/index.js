@@ -2,7 +2,11 @@ import { definePluginEntry } from "openclaw/plugin-sdk/plugin-entry";
 import { applyPronunciationReplacements, resolvePronunciationReplacements, } from "./pronunciation.js";
 import { Sbv2Client } from "./sbv2-client.js";
 import { listVoiceProfiles, parseVoiceDirectiveToken, resolveVoiceProfile, } from "./voice-resolver.js";
-const TOOL_STATUS_REWRITE_TEXT = "コマンドが失敗しました。別の方法で進めます。";
+const TOOL_STATUS_REWRITE_TEXT = {
+    JP: "コマンドが失敗しました。別の方法で進めます。",
+    EN: "The command failed. I will try another way.",
+    ZH: "命令执行失败。我会尝试其他方法。",
+};
 function trimToUndefined(value) {
     return typeof value === "string" && value.trim() ? value.trim() : undefined;
 }
@@ -36,24 +40,22 @@ function looksLikeToolStatusText(value) {
     const text = value.trim();
     if (!text)
         return false;
-    const signals = [
-        /(?:^|\s)[⚠🛠][\s️]/u,
-        /\b(?:gh|git|pnpm|npm|yarn|uv|python|node|bash|sh)\s+[a-z0-9:_./-]+/i,
-        /\s--[a-z][a-z0-9-]*(?:[=\s]|$)/i,
-        /\(\s*in\s+(?:~\/|\/|[A-Za-z]:\\)[^)]+\)/i,
-        /(?:^|\s)(?:failed|error|exit code \d+|command failed)(?:\.|$|\s)/i,
-        /\b[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+(?:\/[A-Za-z0-9_.-]+)*\b/,
-    ];
-    const signalCount = signals.filter((signal) => signal.test(text)).length;
-    return signalCount >= 2;
+    const hasOperatorPrefix = /(?:^|\s)[⚠🛠][\s️]/u.test(text);
+    const hasCommandLine = /(?:^|\n)\s*(?:[⚠🛠️\s]+)?(?:gh|git|pnpm|npm|yarn|uv|python|node|bash|sh)\s+(?!command\b)[a-z0-9:_./-]+/i.test(text);
+    const hasCliFlag = /\s--[a-z][a-z0-9-]*(?:[=\s]|$)/i.test(text);
+    const hasCwdSuffix = /\(\s*in\s+(?:~\/|\/|[A-Za-z]:\\)[^)]+\)/i.test(text);
+    const hasFailureStatus = /(?:^|\s)(?:failed|error|exit code \d+|command failed)(?:\.|$|\s)/i.test(text);
+    return (hasOperatorPrefix ||
+        (hasCommandLine && (hasCliFlag || hasCwdSuffix || hasFailureStatus)) ||
+        (hasCliFlag && (hasCwdSuffix || hasFailureStatus)));
 }
-function prepareSpeechText(value) {
+function prepareSpeechText(value, language) {
     const explicitText = extractExplicitTtsText(value);
     if (explicitText) {
         return { text: explicitText, textPreparation: "explicit" };
     }
     if (looksLikeToolStatusText(value)) {
-        return { text: TOOL_STATUS_REWRITE_TEXT, textPreparation: "tool_status_rewrite" };
+        return { text: TOOL_STATUS_REWRITE_TEXT[language ?? "JP"], textPreparation: "tool_status_rewrite" };
     }
     return { text: value };
 }
@@ -271,11 +273,14 @@ export function buildSbv2SpeechProvider(options = {}) {
                 }));
             }
             let audioBuffer;
-            const preparedText = prepareSpeechText(req.text);
+            const preparedText = prepareSpeechText(req.text, resolvedVoice.language);
             try {
                 const pronunciationReplacements = resolvePronunciationReplacements(config);
+                const synthesisText = preparedText.textPreparation === "explicit"
+                    ? preparedText.text
+                    : applyPronunciationReplacements(preparedText.text, pronunciationReplacements);
                 audioBuffer = await client.synthesize({
-                    text: applyPronunciationReplacements(preparedText.text, pronunciationReplacements),
+                    text: synthesisText,
                     modelName: resolvedVoice.modelName,
                     modelId: resolvedVoice.modelId,
                     speakerId: resolvedVoice.speakerId,
