@@ -259,6 +259,54 @@ describe("Style-Bert-VITS2 speech provider", () => {
     expect(result.metadata).not.toHaveProperty("textPreparation");
   });
 
+  it("does not turn emoji-prefixed non-failure warnings into command failures", async () => {
+    const mockFetch = vi
+      .fn()
+      .mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.resolve(valentinaModelsInfo),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        arrayBuffer: () => Promise.resolve(wavBytes.buffer),
+      });
+    vi.stubGlobal("fetch", mockFetch);
+
+    const provider = buildSbv2SpeechProvider();
+    const result = await provider.synthesize({
+      text: "⚠️ High CPU usage detected.",
+      providerConfig: { baseUrl: "http://localhost:5000", defaultLanguage: "EN" },
+    });
+
+    const voiceUrl = new URL(mockFetch.mock.calls[1][0]);
+    expect(voiceUrl.searchParams.get("text")).toBe("⚠️ High CPU usage detected.");
+    expect(result.metadata).not.toHaveProperty("textPreparation");
+  });
+
+  it("does not turn emoji-prefixed running tool status into command failures", async () => {
+    const mockFetch = vi
+      .fn()
+      .mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.resolve(valentinaModelsInfo),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        arrayBuffer: () => Promise.resolve(wavBytes.buffer),
+      });
+    vi.stubGlobal("fetch", mockFetch);
+
+    const provider = buildSbv2SpeechProvider();
+    const result = await provider.synthesize({
+      text: "🛠️ git status is still running.",
+      providerConfig: { baseUrl: "http://localhost:5000", defaultLanguage: "EN" },
+    });
+
+    const voiceUrl = new URL(mockFetch.mock.calls[1][0]);
+    expect(voiceUrl.searchParams.get("text")).toBe("🛠️ git status is still running.");
+    expect(result.metadata).not.toHaveProperty("textPreparation");
+  });
+
   it("allows explicit tts text to speak command-like text intentionally", async () => {
     const mockFetch = vi
       .fn()

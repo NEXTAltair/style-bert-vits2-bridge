@@ -95,9 +95,8 @@ function looksLikeToolStatusText(value: string): boolean {
   const hasFailureStatus = /(?:^|\s)(?:failed|error|exit code \d+|command failed)(?:\.|$|\s)/i.test(text);
 
   return (
-    hasOperatorPrefix ||
-    (hasCommandLine && (hasCliFlag || hasCwdSuffix || hasFailureStatus)) ||
-    (hasCliFlag && (hasCwdSuffix || hasFailureStatus))
+    hasFailureStatus &&
+    (hasOperatorPrefix || hasCommandLine || hasCliFlag || hasCwdSuffix)
   );
 }
 

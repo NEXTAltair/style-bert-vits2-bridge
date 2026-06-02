@@ -45,9 +45,8 @@ function looksLikeToolStatusText(value) {
     const hasCliFlag = /\s--[a-z][a-z0-9-]*(?:[=\s]|$)/i.test(text);
     const hasCwdSuffix = /\(\s*in\s+(?:~\/|\/|[A-Za-z]:\\)[^)]+\)/i.test(text);
     const hasFailureStatus = /(?:^|\s)(?:failed|error|exit code \d+|command failed)(?:\.|$|\s)/i.test(text);
-    return (hasOperatorPrefix ||
-        (hasCommandLine && (hasCliFlag || hasCwdSuffix || hasFailureStatus)) ||
-        (hasCliFlag && (hasCwdSuffix || hasFailureStatus)));
+    return (hasFailureStatus &&
+        (hasOperatorPrefix || hasCommandLine || hasCliFlag || hasCwdSuffix));
 }
 function prepareSpeechText(value, language) {
     const explicitText = extractExplicitTtsText(value);
