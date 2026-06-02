@@ -1,6 +1,6 @@
 ---
 name: model-production
-description: Style-Bert-VITS2 の音声素材 ingest から dataset prepare、training、evaluation、model promotion までの制作手順
+description: Style-Bert-VITS2 の音声素材 ingest から dataset prepare、training、model promotion、evaluation までの制作手順
 ---
 
 # Model Production — SBV2 学習モデル作成ガイド
@@ -15,15 +15,16 @@ description: Style-Bert-VITS2 の音声素材 ingest から dataset prepare、tr
 2. `datasets prepare`: SBV2 の slice / transcription を実行し、`Data/<modelName>/raw` と `esd.list` を作る
 3. `training plan`: 学習 stage と出力先を確認する
 4. `training run`: `resample`、`preprocess_text`、`bert_gen`、`style_gen`、`train_ms` を job として実行する
-5. `evaluation run`: 候補モデルの試聴用 sample と評価 manifest を作る
-6. `evaluation note`: 人間の試聴結果を evaluation manifest に記録する
-7. `models promote`: 評価済み candidate を `model_assets/<modelName>` に昇格する
+5. `models candidates`: 昇格できる候補ディレクトリを確認する
+6. `models promote`: candidate を `model_assets/<modelName>` に昇格し、SBV2 からロード可能にする
+7. `evaluation run`: 昇格後モデルの試聴用 sample と評価 manifest を作る
+8. `evaluation note`: 人間の試聴結果を evaluation manifest に記録する
 
 `modelName` は pipeline 全体のキーです。SBV2 の単一話者 workflow に合わせ、別の speaker name や project name は通常入力として持ちません。
 
 ## 実行前確認
 
-`datasets prepare`、`training run`、`evaluation run`、`models promote` は artifact 作成や長時間/GPU処理を伴います。開始前にユーザーへ次を提示して確認してください。
+`datasets ingest`、`datasets prepare`、`training run`、`evaluation run`、`models promote` は artifact 作成、音声素材の永続化、長時間/GPU処理を伴います。開始前にユーザーへ次を提示して確認してください。
 
 ```text
 SBV2 の制作処理を開始します。
@@ -42,6 +43,17 @@ SBV2 の制作処理を開始します。
 ```bash
 sbv2-bridge datasets ingest \
   --model-name my_voice \
+  --source /path/to/audio-or-directory \
+  --language ja \
+  --no-use-jp-extra \
+  --json
+```
+
+JP-Extra は英語・中国語発話をできなくするため、英語、中国語、多言語発話を残したいモデルでは `--no-use-jp-extra` を明示してください。日本語専用モデルで日本語品質を優先する場合だけ `--use-jp-extra` を使います。
+
+```bash
+sbv2-bridge datasets ingest \
+  --model-name my_japanese_voice \
   --source /path/to/audio-or-directory \
   --language ja \
   --use-jp-extra \
@@ -95,9 +107,32 @@ sbv2-bridge jobs log <jobId> --tail 80
 
 次に `summary.json`、dataset manifest、SBV2 `Data/<modelName>` / `model_assets/<modelName>`、既存出力との衝突、SBV2 script や pretrained directory、GPU/依存関係を確認します。
 
+## Promotion
+
+候補一覧を確認します。
+
+```bash
+sbv2-bridge models candidates \
+  --model-name my_voice \
+  --json
+```
+
+学習済み candidate を `model_assets/<modelName>` に昇格します。実行時は model name の明示確認が必要です。
+
+```bash
+sbv2-bridge models promote \
+  --model-name my_voice \
+  --source /path/to/candidate-directory \
+  --confirm-model-name my_voice \
+  --base-url http://127.0.0.1:5000 \
+  --json
+```
+
+`evaluation run` は SBV2 からロード可能な `model_assets/<modelName>` を合成対象にします。学習直後の candidate directory を直接評価せず、先に `models promote` で `model_assets/<modelName>` へ昇格してください。
+
 ## Evaluation
 
-学習済み candidate は、固定テスト文セットで sample WAV と評価 manifest を作ります。
+昇格後モデルは、固定テスト文セットで sample WAV と評価 manifest を作ります。
 
 ```bash
 sbv2-bridge evaluation run \
@@ -116,28 +151,4 @@ sbv2-bridge evaluation note \
   --message "語尾が少し不安定"
 ```
 
-`reject` または reject recommendation がある model は promotion しません。
-
-## Promotion
-
-候補一覧を確認します。
-
-```bash
-sbv2-bridge models candidates \
-  --model-name my_voice \
-  --json
-```
-
-評価済み candidate を `model_assets/<modelName>` に昇格します。実行時は model name の明示確認が必要です。
-
-```bash
-sbv2-bridge models promote \
-  --model-name my_voice \
-  --source /path/to/candidate-directory \
-  --confirm-model-name my_voice \
-  --evaluation /path/to/evaluation.json \
-  --base-url http://127.0.0.1:5000 \
-  --json
-```
-
-promotion 後は SBV2 `/models/refresh` と `/models/info` の結果を確認し、必要に応じて OpenClaw provider config の `defaultModelName` / `defaultSpeakerName` / `defaultStyle` を更新します。
+`reject` または reject recommendation がある model は OpenClaw の既定 voice に採用しません。問題がない場合だけ、OpenClaw provider config の `defaultModelName` / `defaultSpeakerName` / `defaultStyle` を更新します。
