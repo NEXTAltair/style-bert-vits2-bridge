@@ -4,7 +4,7 @@ import {
   applyPronunciationReplacements,
   resolvePronunciationReplacements,
 } from "./pronunciation.js";
-import { Sbv2Client } from "./sbv2-client.js";
+import { SBV2_DEFAULT_VOICE_TEXT_MAX_CHARS, Sbv2Client } from "./sbv2-client.js";
 import {
   listVoiceProfiles,
   parseVoiceDirectiveToken,
@@ -198,12 +198,44 @@ function withTelemetryContext(error: unknown, metadata: Sbv2TelemetryMetadata): 
   return new Error(`${message}. SBV2 telemetry context: ${formatTelemetryContext(metadata)}`);
 }
 
+function assertSbv2TextWithinHardLimit(text: string, maxInputChars: number): void {
+  if (text.length <= maxInputChars) return;
+
+  throw new Error(
+    `SBV2 /voice text is too long: ${text.length} chars exceeds provider hard limit ${maxInputChars}. ` +
+      "Prepare shorter spoken text before synthesis.",
+  );
+}
+
 export function buildSbv2SpeechProvider(options: Sbv2SpeechProviderOptions = {}): SpeechProviderPlugin {
   return {
     id: "style-bert-vits2",
     label: "Style-Bert-VITS2",
+    capabilities: {
+      text: {
+        maxInputChars: SBV2_DEFAULT_VOICE_TEXT_MAX_CHARS,
+      },
+    },
 
     isConfigured: ({ providerConfig }) => Boolean(trimToUndefined(providerConfig.baseUrl)),
+
+    resolveCapabilities: async (req) => {
+      const config = req.providerConfig ?? {};
+      const baseUrl = trimToUndefined(config.baseUrl) ?? trimToUndefined(req.baseUrl);
+      if (!baseUrl) {
+        return {
+          text: {
+            maxInputChars: SBV2_DEFAULT_VOICE_TEXT_MAX_CHARS,
+          },
+        };
+      }
+
+      const timeoutMs = asNumber(config.timeoutMs) ?? 30_000;
+      const client = new Sbv2Client({ baseUrl, timeoutMs });
+      return {
+        text: await client.getTextCapabilities(),
+      };
+    },
 
     parseDirectiveToken: (ctx) => {
       const parsed = parseVoiceDirectiveToken(ctx);
@@ -286,6 +318,8 @@ export function buildSbv2SpeechProvider(options: Sbv2SpeechProviderOptions = {})
       const client = new Sbv2Client({ baseUrl, timeoutMs });
       const providerOverrides = normalizeOverrides(req.providerOverrides);
       let resolvedVoice: Sbv2ResolvedVoiceProfile;
+
+      assertSbv2TextWithinHardLimit(req.text, SBV2_DEFAULT_VOICE_TEXT_MAX_CHARS);
 
       try {
         resolvedVoice = await resolveVoiceProfile({

@@ -77,9 +77,14 @@ Valentina 系の推奨開始点は次の通りです。
 
 1. OpenClaw が `/tts audio` コマンド等で音声生成をリクエスト
 2. プラグインが SBV2 の `GET /models/info` で model / speaker / style を検証
-3. プラグインが解決済みパラメーターで SBV2 の `POST /voice` にテキストを送信
-4. SBV2 が WAV 音声 (PCM 16bit mono 44100Hz) を返却
-5. チャネル（Discord 等）が必要に応じてフォーマット変換して配信
+3. プラグインが SBV2 `/voice` の text hard limit を超えていないことを確認
+4. プラグインが解決済みパラメーターで SBV2 の `POST /voice` にテキストを送信
+5. SBV2 が WAV 音声 (PCM 16bit mono 44100Hz) を返却
+6. チャネル（Discord 等）が必要に応じてフォーマット変換して配信
+
+bridge は provider capability として SBV2 `/voice` の読み上げ本文上限を公開します。`/openapi.json` から `text.schema.maxLength` を取得できる場合はその値を使い、取得できない場合は SBV2 の既知上限 `400` 文字を使います。合成時も 400 文字を超える本文は SBV2 に送信せず、OpenClaw 本体側で短い spoken text を準備するための明確なエラーにします。
+
+見えるチャット本文を自然な読み上げ文に変換する処理、`messages.tts.maxTextLength` や user preference と provider hard limit の統合は OpenClaw 本体側の責務です。この bridge は SBV2 固有の hard limit を公開し、送信直前の安全ガードを担当します。
 
 ## 設定項目
 

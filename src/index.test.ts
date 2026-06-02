@@ -36,7 +36,80 @@ describe("Style-Bert-VITS2 speech provider", () => {
     expect(provider).toMatchObject({
       id: "style-bert-vits2",
       label: "Style-Bert-VITS2",
+      capabilities: {
+        text: {
+          maxInputChars: 400,
+        },
+      },
     });
+  });
+
+  it("reports dynamic SBV2 text capabilities from OpenAPI when configured", async () => {
+    const mockFetch = vi.fn().mockResolvedValue({
+      ok: true,
+      json: () =>
+        Promise.resolve({
+          paths: {
+            "/voice": {
+              post: {
+                parameters: [{ name: "text", schema: { maxLength: 320 } }],
+              },
+            },
+          },
+        }),
+    });
+    vi.stubGlobal("fetch", mockFetch);
+
+    const provider = buildSbv2SpeechProvider();
+    await expect(
+      provider.resolveCapabilities?.({ providerConfig: { baseUrl: "http://localhost:5000" } }),
+    ).resolves.toEqual({
+      text: {
+        maxInputChars: 320,
+      },
+    });
+
+    const url = new URL(mockFetch.mock.calls[0][0]);
+    expect(url.pathname).toBe("/openapi.json");
+  });
+
+  it("rejects text over the SBV2 hard limit before sending /voice", async () => {
+    const mockFetch = vi.fn();
+    vi.stubGlobal("fetch", mockFetch);
+
+    const provider = buildSbv2SpeechProvider();
+    await expect(
+      provider.synthesize({
+        text: "あ".repeat(401),
+        providerConfig: { baseUrl: "http://localhost:5000" },
+      }),
+    ).rejects.toThrow(/SBV2 \/voice text is too long: 401 chars exceeds provider hard limit 400/);
+
+    expect(mockFetch).not.toHaveBeenCalled();
+  });
+
+  it("allows text at the SBV2 hard limit", async () => {
+    const mockFetch = vi
+      .fn()
+      .mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.resolve(valentinaModelsInfo),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        arrayBuffer: () => Promise.resolve(wavBytes.buffer),
+      });
+    vi.stubGlobal("fetch", mockFetch);
+
+    const provider = buildSbv2SpeechProvider();
+    await provider.synthesize({
+      text: "あ".repeat(400),
+      providerConfig: { baseUrl: "http://localhost:5000" },
+    });
+
+    const voiceUrl = new URL(mockFetch.mock.calls[1][0]);
+    expect(voiceUrl.pathname).toBe("/voice");
+    expect(voiceUrl.searchParams.get("text")).toBe("あ".repeat(400));
   });
 
   it("lists voices from SBV2 models info", async () => {
