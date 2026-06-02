@@ -60,6 +60,8 @@ openclaw plugins inspect style-bert-vits2-bridge --runtime --json
 
 SBV2 側の暗黙既定に任せると `model_id=0` に落ちます。観測環境では `model_id=0` が `amitaro` だったため、Valentina 系を使いたい場合は上のように `defaultModelName`、`defaultSpeakerName`、`defaultStyle` を明示してください。
 
+`defaultModelName` と `defaultSpeakerName` は声の同一性を決めます。`defaultStyle` はそのモデル内の初期表情です。別の声にしたい場合は model / speaker を変え、同じ声の表情だけを変えたい場合は `/models/info` の `style2id` に存在する style を directive や Talk params から切り替えます。
+
 Valentina 系の推奨開始点は次の通りです。
 
 | キー | 推奨値 | 備考 |
@@ -165,6 +167,7 @@ openclaw plugins inspect style-bert-vits2-bridge --runtime --json
 /tts audio こんにちは。これは Style-Bert-VITS2 の確認です。
 /tts voice=sbv2:valentina01_bright:valentina01_bright:00_Neutral audio こんにちは。Valentina 指定の確認です。
 /tts model_name=valentina01_bright speaker_name=valentina01_bright style=00_Neutral audio こんにちは。
+/tts model_name=valentina01_bright speaker_name=valentina01_bright style=01_Bright audio こんにちは。同じモデルとスピーカーで style だけを変えた確認です。
 ```
 
 Talk mode では provider config の既定値に加えて、Talk params から `voice_id`、`model_name`、`speaker_name`、`style`、`rate`、`style_weight`、`assist_text` などを渡せます。`rate` は WPM として扱われ、SBV2 の `length` に変換されます。指定した model / speaker / style が `/models/info` に無い場合は、operator 向けに整形された validation error が返ります。
@@ -339,7 +342,7 @@ debug log と telemetry には、読み上げ本文、`assistText`、音声バ�
 | `GET /status` が失敗する | SBV2 server 未起動、`baseUrl` 誤り、port違い | SBV2 FastAPI server を起動し、`baseUrl` を `http://127.0.0.1:5000` など実際のURLに合わせる |
 | `GET /models/info` が失敗する | モデル未ロード、SBV2 API 側のエラー | SBV2 側でモデル配置とロード状態を確認する |
 | `style-bert-vits2` が使われない | OpenClaw provider config、selected provider、fallback | `pnpm run check:sbv2` と `/tts status` の `Fallback` / `Attempts` を確認する |
-| Valentina のつもりが別声になる | SBV2 の `model_id=0` fallback、default profile 未指定 | `defaultModelName` / `defaultSpeakerName` / `defaultStyle` を明示する |
+| Valentina のつもりが別声になる | SBV2 の `model_id=0` fallback、default profile 未指定 | `defaultModelName` / `defaultSpeakerName` を明示する。style 変更では声の同一性は変わらない |
 | model / speaker / style validation error | `/models/info` と config / directive の不一致 | 実在する model / speaker / style 名に合わせる。style は agent が選ぶため bridge 側で重み付けしない |
 | 音声が不自然、感情が強すぎる | `style_weight`、`length`、`assist_text`、入力文 | まず `00_Neutral` と控えめな `style_weight` で確認し、その後に style や補助テキストを調整する |
 | `/tts audio` は成功するが Control UI で見えない | OpenClaw surface 側の audio artifact 表示 | bridge ではなく OpenClaw 本体または surface 側 issue として扱う |

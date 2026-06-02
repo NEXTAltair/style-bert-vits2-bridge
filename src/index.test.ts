@@ -291,7 +291,7 @@ describe("Style-Bert-VITS2 speech provider", () => {
     expect(url.searchParams.get("style")).toBe("00_Neutral");
   });
 
-  it("lets explicit overrides refine a selected SBV2 voice id", async () => {
+  it("lets style overrides change expression without changing selected model and speaker", async () => {
     const mockFetch = vi
       .fn()
       .mockResolvedValueOnce({
@@ -321,6 +321,8 @@ describe("Style-Bert-VITS2 speech provider", () => {
     });
 
     const url = new URL(mockFetch.mock.calls[1][0]);
+    expect(url.searchParams.get("model_name")).toBe("valentina01_bright");
+    expect(url.searchParams.get("speaker_name")).toBe("valentina01_bright");
     expect(url.searchParams.get("style")).toBe("Happy");
   });
 
