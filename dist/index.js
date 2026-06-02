@@ -40,13 +40,13 @@ function looksLikeToolStatusText(value) {
     const text = value.trim();
     if (!text)
         return false;
-    const hasOperatorPrefix = /(?:^|\s)[⚠🛠][\s️]/u.test(text);
-    const hasCommandLine = /(?:^|\n)\s*(?:[⚠🛠️\s]+)?(?:gh|git|pnpm|npm|yarn|uv|python|node|bash|sh)\s+(?!command\b|failed\b|fails\b|error\b|errored\b)(?:-{1,2}[a-z][a-z0-9-]*|[a-z0-9:_./-]+)/i.test(text);
-    const hasCliFlag = /\s-{1,2}[a-z][a-z0-9-]*(?:[=\s]|$)/i.test(text);
-    const hasCwdSuffix = /\(\s*in\s+(?:~\/|\/|[A-Za-z]:\\)[^)]+\)/i.test(text);
     const hasFailureStatus = /(?:^|\s)(?:failed|error|exit code \d+|command failed)(?:[:.]|$|\s)/i.test(text);
-    return (hasFailureStatus &&
-        (hasOperatorPrefix || hasCommandLine || hasCliFlag || hasCwdSuffix));
+    if (!hasFailureStatus)
+        return false;
+    const commandInvocation = /(?:^|\n)\s*(?:[⚠🛠️\s]+)?(?:gh|git|pnpm|npm|yarn|uv|python|node|bash|sh)\s+(?:(?:-{1,2}[a-z][a-z0-9-]*)|(?:[a-z0-9:_./-]+\s+-{1,2}[a-z][a-z0-9-]*)|(?:(?:issue|pr|repo|api|status|checkout|switch|merge|pull|push|fetch|commit|add|run|test|install|build|exec)\b))/i;
+    const hasCwdSuffix = /\(\s*in\s+(?:~\/|\/|[A-Za-z]:\\)[^)]+\)/i.test(text);
+    const hasMultilineError = /\n\s*(?:error|failed|exit code \d+|command failed)(?:[:.]|$|\s)/i.test(text);
+    return commandInvocation.test(text) && (hasCwdSuffix || hasMultilineError || /\s-{1,2}[a-z][a-z0-9-]*(?:[=\s]|$)/i.test(text));
 }
 function prepareSpeechText(value, language) {
     const explicitText = extractExplicitTtsText(value);

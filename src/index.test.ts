@@ -499,6 +499,33 @@ describe("Style-Bert-VITS2 speech provider", () => {
     expect(result.metadata).not.toHaveProperty("textPreparation");
   });
 
+  it("does not treat tool-name prose as command output", async () => {
+    const mockFetch = vi
+      .fn()
+      .mockResolvedValueOnce(openApiTextLimit(400))
+      .mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.resolve(valentinaModelsInfo),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        arrayBuffer: () => Promise.resolve(wavBytes.buffer),
+      });
+    vi.stubGlobal("fetch", mockFetch);
+
+    const provider = buildSbv2SpeechProvider();
+    const result = await provider.synthesize({
+      text: "Python script failed to parse the file, and Node process failed to start.",
+      providerConfig: { baseUrl: "http://localhost:5000", defaultLanguage: "EN" },
+    });
+
+    const voiceUrl = new URL(mockFetch.mock.calls[2][0]);
+    expect(voiceUrl.searchParams.get("text")).toBe(
+      "Python script failed to parse the file, and Node process failed to start.",
+    );
+    expect(result.metadata).not.toHaveProperty("textPreparation");
+  });
+
   it("rewrites colon-delimited CLI errors", async () => {
     const mockFetch = vi
       .fn()
@@ -571,6 +598,56 @@ describe("Style-Bert-VITS2 speech provider", () => {
 
     const voiceUrl = new URL(mockFetch.mock.calls[2][0]);
     expect(voiceUrl.searchParams.get("text")).toBe("⚠️ High CPU usage detected.");
+    expect(result.metadata).not.toHaveProperty("textPreparation");
+  });
+
+  it("does not turn emoji-prefixed natural failures into command failures", async () => {
+    const mockFetch = vi
+      .fn()
+      .mockResolvedValueOnce(openApiTextLimit(400))
+      .mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.resolve(valentinaModelsInfo),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        arrayBuffer: () => Promise.resolve(wavBytes.buffer),
+      });
+    vi.stubGlobal("fetch", mockFetch);
+
+    const provider = buildSbv2SpeechProvider();
+    const result = await provider.synthesize({
+      text: "⚠️ Database connection failed.",
+      providerConfig: { baseUrl: "http://localhost:5000", defaultLanguage: "EN" },
+    });
+
+    const voiceUrl = new URL(mockFetch.mock.calls[2][0]);
+    expect(voiceUrl.searchParams.get("text")).toBe("⚠️ Database connection failed.");
+    expect(result.metadata).not.toHaveProperty("textPreparation");
+  });
+
+  it("does not treat cwd suffixes without command context as tool status", async () => {
+    const mockFetch = vi
+      .fn()
+      .mockResolvedValueOnce(openApiTextLimit(400))
+      .mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.resolve(valentinaModelsInfo),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        arrayBuffer: () => Promise.resolve(wavBytes.buffer),
+      });
+    vi.stubGlobal("fetch", mockFetch);
+
+    const provider = buildSbv2SpeechProvider();
+    const result = await provider.synthesize({
+      text: "Loading config (in /etc/app) failed.",
+      providerConfig: { baseUrl: "http://localhost:5000", defaultLanguage: "EN" },
+    });
+
+    const voiceUrl = new URL(mockFetch.mock.calls[2][0]);
+    expect(voiceUrl.searchParams.get("text")).toBe("Loading config (in /etc/app) failed.");
     expect(result.metadata).not.toHaveProperty("textPreparation");
   });
 
