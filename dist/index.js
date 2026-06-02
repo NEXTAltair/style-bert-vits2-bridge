@@ -40,14 +40,16 @@ function looksLikeToolStatusText(value) {
     const text = value.trim();
     if (!text)
         return false;
-    const hasFailureStatus = /(?:^|\s)(?:failed|error|exit code \d+|command failed)(?:[:.]|$|\s)/i.test(text);
+    const hasFailureStatus = /(?:^|\s)(?:failed|exit code \d+|command failed)(?:[:.]|$|\s)/i.test(text) ||
+        /(?:^|\n)\s*(?:error|fatal):/i.test(text);
     if (!hasFailureStatus)
         return false;
     const commandInvocation = /(?:^|\n)\s*(?:[⚠🛠️\s]+)?(?:gh|git|pnpm|npm|yarn|uv|python|node|bash|sh)\s+(?:(?:-{1,2}[a-z][a-z0-9-]*)|(?:[a-z0-9:_./-]+\s+-{1,2}[a-z][a-z0-9-]*)|(?:(?:issue|pr|repo|api|status|checkout|switch|merge|pull|push|fetch|commit|add|run|test|install|build|exec)\b))/i;
     const hasOperatorPrefix = /(?:^|\s)[⚠🛠][\s️]/u.test(text);
     const hasCwdSuffix = /\(\s*in\s+(?:~\/|\/|[A-Za-z]:\\)[^)]+\)/i.test(text);
-    const hasMultilineError = /\n\s*(?:error|failed|exit code \d+|command failed)(?:[:.]|$|\s)/i.test(text);
-    return commandInvocation.test(text) && (hasOperatorPrefix || hasCwdSuffix || hasMultilineError || /\s-{1,2}[a-z][a-z0-9-]*(?:[=\s]|$)/i.test(text));
+    const hasMultilineError = /\n\s*(?:error|fatal|failed|exit code \d+|command failed)(?:[:.]|$|\s)/i.test(text);
+    const hasUndecoratedCommandFailure = /(?:^|\n)\s*(?:gh|git|pnpm|npm|yarn|uv|python|node|bash|sh)\s+(?:issue|pr|repo|api|status|checkout|switch|merge|pull|push|fetch|commit|add|run|test|install|build|exec)\b[^\n]*\b(?:failed|exit code \d+|command failed)\b/i.test(text);
+    return commandInvocation.test(text) && (hasOperatorPrefix || hasCwdSuffix || hasMultilineError || hasUndecoratedCommandFailure || /\s-{1,2}[a-z][a-z0-9-]*(?:[=\s]|$)/i.test(text));
 }
 function prepareSpeechText(value, language) {
     const explicitText = extractExplicitTtsText(value);
