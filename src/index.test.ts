@@ -576,6 +576,31 @@ describe("Style-Bert-VITS2 speech provider", () => {
     expect(result.metadata).toMatchObject({ textPreparation: "tool_status_rewrite" });
   });
 
+  it("rewrites operator-prefixed command failure status lines", async () => {
+    const mockFetch = vi
+      .fn()
+      .mockResolvedValueOnce(openApiTextLimit(400))
+      .mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.resolve(valentinaModelsInfo),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        arrayBuffer: () => Promise.resolve(wavBytes.buffer),
+      });
+    vi.stubGlobal("fetch", mockFetch);
+
+    const provider = buildSbv2SpeechProvider();
+    const result = await provider.synthesize({
+      text: "🛠️ git status failed",
+      providerConfig: { baseUrl: "http://localhost:5000", defaultLanguage: "EN" },
+    });
+
+    const voiceUrl = new URL(mockFetch.mock.calls[2][0]);
+    expect(voiceUrl.searchParams.get("text")).toBe("The command failed. I will try another way.");
+    expect(result.metadata).toMatchObject({ textPreparation: "tool_status_rewrite" });
+  });
+
   it("does not turn emoji-prefixed non-failure warnings into command failures", async () => {
     const mockFetch = vi
       .fn()
