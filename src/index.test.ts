@@ -164,6 +164,44 @@ describe("Style-Bert-VITS2 speech provider", () => {
     expect(url.pathname).toBe("/openapi.json");
   });
 
+  it("counts Unicode code points for the SBV2 text limit", async () => {
+    const mockFetch = vi
+      .fn()
+      .mockResolvedValueOnce(openApiTextLimit(100))
+      .mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.resolve(valentinaModelsInfo),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        arrayBuffer: () => Promise.resolve(wavBytes.buffer),
+      });
+    vi.stubGlobal("fetch", mockFetch);
+
+    const provider = buildSbv2SpeechProvider();
+    await provider.synthesize({
+      text: "😀".repeat(51),
+      providerConfig: { baseUrl: "http://localhost:5000" },
+    });
+
+    const voiceUrl = new URL(mockFetch.mock.calls[2][0]);
+    expect(voiceUrl.pathname).toBe("/voice");
+    expect(voiceUrl.searchParams.get("text")).toBe("😀".repeat(51));
+  });
+
+  it("reports over-limit Unicode text by code point count", async () => {
+    const mockFetch = vi.fn().mockResolvedValue(openApiTextLimit(100));
+    vi.stubGlobal("fetch", mockFetch);
+
+    const provider = buildSbv2SpeechProvider();
+    await expect(
+      provider.synthesize({
+        text: "😀".repeat(101),
+        providerConfig: { baseUrl: "http://localhost:5000" },
+      }),
+    ).rejects.toThrow(/SBV2 \/voice text is too long: 101 chars exceeds provider hard limit 100/);
+  });
+
   it("validates the pronunciation-adjusted text sent to SBV2", async () => {
     const mockFetch = vi.fn().mockResolvedValue(openApiTextLimit(100));
     vi.stubGlobal("fetch", mockFetch);

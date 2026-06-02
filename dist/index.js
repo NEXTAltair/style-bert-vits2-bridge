@@ -139,9 +139,10 @@ function withTelemetryContext(error, metadata) {
 function assertSbv2TextWithinHardLimit(text, maxInputChars) {
     if (maxInputChars === undefined)
         return;
-    if (text.length <= maxInputChars)
+    const textChars = Array.from(text).length;
+    if (textChars <= maxInputChars)
         return;
-    throw new Error(`SBV2 /voice text is too long: ${text.length} chars exceeds provider hard limit ${maxInputChars}. ` +
+    throw new Error(`SBV2 /voice text is too long: ${textChars} chars exceeds provider hard limit ${maxInputChars}. ` +
         "Prepare shorter spoken text before synthesis.");
 }
 export function buildSbv2SpeechProvider(options = {}) {
