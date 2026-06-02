@@ -143,7 +143,6 @@ function formatRequestError(endpoint: string, baseUrl: string, timeoutMs: number
       `SBV2 FastAPI server is unavailable or unreachable: ${endpoint} request timed out after ${timeoutMs}ms for baseUrl ${safeBaseUrl}. ` +
         `Start or restart the SBV2 FastAPI server, then verify ${safeStatusUrl} or /models/info; increase timeoutMs only if the server responds slowly. ` +
         `Original error: ${detail}`,
-      { cause: error },
     );
   }
 
@@ -151,7 +150,6 @@ function formatRequestError(endpoint: string, baseUrl: string, timeoutMs: number
     `SBV2 FastAPI server is unavailable or unreachable: ${endpoint} request failed for baseUrl ${safeBaseUrl}. ` +
       `Start or restart the SBV2 FastAPI server, then verify ${safeStatusUrl} or /models/info. ` +
       `Original error: ${detail}`,
-    { cause: error },
   );
 }
 

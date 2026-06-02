@@ -431,6 +431,7 @@ describe("Sbv2Client", () => {
       expect(message).not.toContain("user:secret");
       expect(message).not.toContain("token=hidden");
       expect(message).not.toContain("#fragment");
+      expect((error as Error).cause).toBeUndefined();
     }
   });
 
@@ -466,6 +467,7 @@ describe("Sbv2Client", () => {
       expect(message).not.toContain("user:secret");
       expect(message).not.toContain("token=hidden");
       expect(message).not.toContain("#fragment");
+      expect((error as Error).cause).toBeUndefined();
     }
   });
 

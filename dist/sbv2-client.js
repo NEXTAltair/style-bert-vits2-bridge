@@ -70,11 +70,11 @@ function formatRequestError(endpoint, baseUrl, timeoutMs, error) {
     if (looksLikeTimeout(error)) {
         return new Sbv2UnavailableError(`SBV2 FastAPI server is unavailable or unreachable: ${endpoint} request timed out after ${timeoutMs}ms for baseUrl ${safeBaseUrl}. ` +
             `Start or restart the SBV2 FastAPI server, then verify ${safeStatusUrl} or /models/info; increase timeoutMs only if the server responds slowly. ` +
-            `Original error: ${detail}`, { cause: error });
+            `Original error: ${detail}`);
     }
     return new Sbv2UnavailableError(`SBV2 FastAPI server is unavailable or unreachable: ${endpoint} request failed for baseUrl ${safeBaseUrl}. ` +
         `Start or restart the SBV2 FastAPI server, then verify ${safeStatusUrl} or /models/info. ` +
-        `Original error: ${detail}`, { cause: error });
+        `Original error: ${detail}`);
 }
 function truncateErrorBody(value) {
     return value.length > MAX_ERROR_BODY_CHARS
