@@ -1,6 +1,6 @@
 import { definePluginEntry } from "openclaw/plugin-sdk/plugin-entry";
 import { applyPronunciationReplacements, resolvePronunciationReplacements, } from "./pronunciation.js";
-import { SBV2_DEFAULT_VOICE_TEXT_MAX_CHARS, Sbv2Client } from "./sbv2-client.js";
+import { SBV2_FALLBACK_VOICE_TEXT_MAX_CHARS, Sbv2Client } from "./sbv2-client.js";
 import { listVoiceProfiles, parseVoiceDirectiveToken, resolveVoiceProfile, } from "./voice-resolver.js";
 function trimToUndefined(value) {
     return typeof value === "string" && value.trim() ? value.trim() : undefined;
@@ -137,6 +137,8 @@ function withTelemetryContext(error, metadata) {
     return new Error(`${message}. SBV2 telemetry context: ${formatTelemetryContext(metadata)}`);
 }
 function assertSbv2TextWithinHardLimit(text, maxInputChars) {
+    if (maxInputChars === undefined)
+        return;
     if (text.length <= maxInputChars)
         return;
     throw new Error(`SBV2 /voice text is too long: ${text.length} chars exceeds provider hard limit ${maxInputChars}. ` +
@@ -148,7 +150,7 @@ export function buildSbv2SpeechProvider(options = {}) {
         label: "Style-Bert-VITS2",
         capabilities: {
             text: {
-                maxInputChars: SBV2_DEFAULT_VOICE_TEXT_MAX_CHARS,
+                maxInputChars: SBV2_FALLBACK_VOICE_TEXT_MAX_CHARS,
             },
         },
         isConfigured: ({ providerConfig }) => Boolean(trimToUndefined(providerConfig.baseUrl)),
@@ -158,7 +160,7 @@ export function buildSbv2SpeechProvider(options = {}) {
             if (!baseUrl) {
                 return {
                     text: {
-                        maxInputChars: SBV2_DEFAULT_VOICE_TEXT_MAX_CHARS,
+                        maxInputChars: SBV2_FALLBACK_VOICE_TEXT_MAX_CHARS,
                     },
                 };
             }
@@ -251,7 +253,10 @@ export function buildSbv2SpeechProvider(options = {}) {
             const client = new Sbv2Client({ baseUrl, timeoutMs });
             const providerOverrides = normalizeOverrides(req.providerOverrides);
             let resolvedVoice;
-            assertSbv2TextWithinHardLimit(req.text, SBV2_DEFAULT_VOICE_TEXT_MAX_CHARS);
+            const pronunciationReplacements = resolvePronunciationReplacements(config);
+            const synthesisText = applyPronunciationReplacements(req.text, pronunciationReplacements);
+            const textCapabilities = await client.getTextCapabilities();
+            assertSbv2TextWithinHardLimit(synthesisText, textCapabilities.maxInputChars);
             try {
                 resolvedVoice = await resolveVoiceProfile({
                     client,
@@ -267,9 +272,8 @@ export function buildSbv2SpeechProvider(options = {}) {
             }
             let audioBuffer;
             try {
-                const pronunciationReplacements = resolvePronunciationReplacements(config);
                 audioBuffer = await client.synthesize({
-                    text: applyPronunciationReplacements(req.text, pronunciationReplacements),
+                    text: synthesisText,
                     modelName: resolvedVoice.modelName,
                     modelId: resolvedVoice.modelId,
                     speakerId: resolvedVoice.speakerId,

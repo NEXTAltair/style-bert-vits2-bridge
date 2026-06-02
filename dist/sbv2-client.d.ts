@@ -22,7 +22,7 @@ export interface Sbv2ClientOptions {
     timeoutMs?: number;
 }
 export interface Sbv2TextCapabilities {
-    maxInputChars: number;
+    maxInputChars?: number;
 }
 export interface Sbv2NamedItem {
     id?: number;
@@ -54,7 +54,7 @@ export interface Sbv2ModelInfo {
     raw: unknown;
     [key: string]: unknown;
 }
-export declare const SBV2_DEFAULT_VOICE_TEXT_MAX_CHARS = 400;
+export declare const SBV2_FALLBACK_VOICE_TEXT_MAX_CHARS = 100;
 export declare class Sbv2UnavailableError extends Error {
     constructor(message: string, options?: ErrorOptions);
 }

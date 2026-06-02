@@ -12,7 +12,7 @@ const PARAM_KEY_MAP = {
     styleWeight: "style_weight",
 };
 const MAX_ERROR_BODY_CHARS = 500;
-export const SBV2_DEFAULT_VOICE_TEXT_MAX_CHARS = 400;
+export const SBV2_FALLBACK_VOICE_TEXT_MAX_CHARS = 100;
 export class Sbv2UnavailableError extends Error {
     constructor(message, options) {
         super(message, options);
@@ -320,13 +320,13 @@ export class Sbv2Client {
                 signal: AbortSignal.timeout(this.timeoutMs),
             });
             if (!response.ok) {
-                return { maxInputChars: SBV2_DEFAULT_VOICE_TEXT_MAX_CHARS };
+                return { maxInputChars: SBV2_FALLBACK_VOICE_TEXT_MAX_CHARS };
             }
             const maxInputChars = extractVoiceTextMaxLengthFromOpenApi(await response.json());
-            return { maxInputChars: maxInputChars ?? SBV2_DEFAULT_VOICE_TEXT_MAX_CHARS };
+            return maxInputChars === undefined ? {} : { maxInputChars };
         }
         catch {
-            return { maxInputChars: SBV2_DEFAULT_VOICE_TEXT_MAX_CHARS };
+            return { maxInputChars: SBV2_FALLBACK_VOICE_TEXT_MAX_CHARS };
         }
     }
     async synthesize(params) {

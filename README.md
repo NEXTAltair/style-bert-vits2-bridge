@@ -82,7 +82,7 @@ Valentina 系の推奨開始点は次の通りです。
 5. SBV2 が WAV 音声 (PCM 16bit mono 44100Hz) を返却
 6. チャネル（Discord 等）が必要に応じてフォーマット変換して配信
 
-bridge は provider capability として SBV2 `/voice` の読み上げ本文上限を公開します。`/openapi.json` から `text.schema.maxLength` を取得できる場合はその値を使い、取得できない場合は SBV2 の既知上限 `400` 文字を使います。合成時も 400 文字を超える本文は SBV2 に送信せず、OpenClaw 本体側で短い spoken text を準備するための明確なエラーにします。
+bridge は provider capability として SBV2 `/voice` の読み上げ本文上限を公開します。`/openapi.json` から `text.schema.maxLength` を取得できる場合はその値を使い、取得できない場合は stock SBV2 の既定値である `100` 文字を安全側の fallback として使います。到達可能な `/openapi.json` に `maxLength` が無い場合は、SBV2 側で text limit が無効な設定として扱い、bridge 側では上限を広告・強制しません。合成時も、発音置換後に SBV2 へ実際に送る本文が実効上限を超える場合は `/voice` に送信せず、OpenClaw 本体側で短い spoken text を準備するための明確なエラーにします。
 
 見えるチャット本文を自然な読み上げ文に変換する処理、`messages.tts.maxTextLength` や user preference と provider hard limit の統合は OpenClaw 本体側の責務です。この bridge は SBV2 固有の hard limit を公開し、送信直前の安全ガードを担当します。
 

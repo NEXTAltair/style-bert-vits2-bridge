@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import {
-  SBV2_DEFAULT_VOICE_TEXT_MAX_CHARS,
+  SBV2_FALLBACK_VOICE_TEXT_MAX_CHARS,
   Sbv2Client,
   Sbv2UnavailableError,
   extractVoiceTextMaxLengthFromOpenApi,
@@ -357,11 +357,11 @@ describe("Sbv2Client", () => {
 
     const client = new Sbv2Client({ baseUrl: "http://localhost:5000" });
     await expect(client.getTextCapabilities()).resolves.toEqual({
-      maxInputChars: SBV2_DEFAULT_VOICE_TEXT_MAX_CHARS,
+      maxInputChars: SBV2_FALLBACK_VOICE_TEXT_MAX_CHARS,
     });
   });
 
-  it("falls back to the known SBV2 text limit when OpenAPI has no text maxLength", async () => {
+  it("preserves unlimited SBV2 text capabilities when OpenAPI has no text maxLength", async () => {
     vi.stubGlobal(
       "fetch",
       vi.fn().mockResolvedValue({
@@ -371,9 +371,7 @@ describe("Sbv2Client", () => {
     );
 
     const client = new Sbv2Client({ baseUrl: "http://localhost:5000" });
-    await expect(client.getTextCapabilities()).resolves.toEqual({
-      maxInputChars: SBV2_DEFAULT_VOICE_TEXT_MAX_CHARS,
-    });
+    await expect(client.getTextCapabilities()).resolves.toEqual({});
   });
 
   it("normalizes array-shaped /models/info payloads", () => {
