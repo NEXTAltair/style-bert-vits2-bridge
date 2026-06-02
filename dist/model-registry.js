@@ -49,7 +49,7 @@ export async function promoteModel(options) {
             throw new Error(`Model candidate is not promotable: ${candidate.errors.join("; ")}`);
         }
         const evaluation = options.evaluationPath
-            ? await readPromotionEvaluationGate(options.evaluationPath, context.modelName)
+            ? await readPromotionEvaluationGate(options.evaluationPath, candidate)
             : undefined;
         if (evaluation && !evaluation.accepted) {
             throw new Error(`Model evaluation does not allow promotion: decision=${evaluation.decision ?? "none"}, recommendation=${evaluation.recommendation}`);
@@ -367,14 +367,25 @@ async function refreshAfterFailedMutation(baseUrl, logLines) {
         logLines.push(`warning: failed to refresh SBV2 models after promotion recovery from ${baseUrl}: ${message}`);
     }
 }
-async function readPromotionEvaluationGate(evaluationPath, modelName) {
+async function readPromotionEvaluationGate(evaluationPath, candidate) {
     const resolved = resolveUserPath(evaluationPath);
     const parsed = JSON.parse(await readFile(resolved, "utf8"));
     if (!isRecord(parsed) || parsed.schemaVersion !== 1) {
         throw new Error(`Invalid SBV2 evaluation manifest: ${resolved}`);
     }
-    if (parsed.modelName !== modelName) {
-        throw new Error(`Evaluation model "${String(parsed.modelName)}" does not match "${modelName}"`);
+    if (parsed.modelName !== candidate.modelName) {
+        throw new Error(`Evaluation model "${String(parsed.modelName)}" does not match "${candidate.modelName}"`);
+    }
+    const evaluatedSourceDir = typeof parsed.sourceDir === "string"
+        ? parsed.sourceDir
+        : isRecord(parsed.candidate) && typeof parsed.candidate.sourceDir === "string"
+            ? parsed.candidate.sourceDir
+            : undefined;
+    if (!evaluatedSourceDir) {
+        throw new Error(`Evaluation manifest is missing sourceDir: ${resolved}`);
+    }
+    if (path.resolve(evaluatedSourceDir) !== path.resolve(candidate.sourceDir)) {
+        throw new Error(`Evaluation source "${evaluatedSourceDir}" does not match candidate source "${candidate.sourceDir}"`);
     }
     const decision = typeof parsed.decision === "string" ? parsed.decision : null;
     const recommendation = typeof parsed.recommendation === "string" ? parsed.recommendation : "hold";

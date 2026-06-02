@@ -10,7 +10,7 @@ export const DEFAULT_EVALUATION_TEST_CASES = [
     { id: "ja-long", text: "この文章は少し長めです。息継ぎや語尾の安定感、途中で音が途切れないかを確認します。", language: "JP" },
     { id: "ja-punctuation", text: "ええと、準備はいいですか？ それでは、始めましょう。", language: "JP" },
     { id: "ja-alnum", text: "OpenClaw 2026 と Style-Bert-VITS2 の接続テストです。", language: "JP" },
-    { id: "ja-neutral", text: "落ち着いた声で、自然な速さの読み上げをお願いします。", language: "JP", style: "Neutral" },
+    { id: "ja-neutral", text: "落ち着いた声で、自然な速さの読み上げをお願いします。", language: "JP" },
 ];
 export async function evaluateModelCandidate(options) {
     const now = options.now ?? (() => new Date());
@@ -27,6 +27,9 @@ export async function evaluateModelCandidate(options) {
     }
     if (!candidate.promotable) {
         throw new Error(`Model candidate is not evaluable: ${candidate.errors.join("; ")}`);
+    }
+    if (!sameResolvedPath(candidate.sourceDir, candidate.targetDir)) {
+        throw new Error("Evaluation can only sample the model currently loadable from SBV2 model_assets. Promote or copy the candidate into model_assets before evaluating it.");
     }
     const testCases = options.testSetPath
         ? await readEvaluationTestSet(resolveUserPath(options.testSetPath))
@@ -51,8 +54,8 @@ export async function evaluateModelCandidate(options) {
     await mkdir(samplesDir, { recursive: true });
     const samples = [];
     const logLines = [`model evaluation started for ${candidate.modelName}`];
-    for (const testCase of testCases) {
-        const wavPath = path.join(samplesDir, `${safeFileName(testCase.id)}.wav`);
+    for (const [index, testCase] of testCases.entries()) {
+        const wavPath = path.join(samplesDir, `${String(index + 1).padStart(3, "0")}-${safeFileName(testCase.id)}.wav`);
         try {
             const audio = await client.synthesize(buildSynthesizeParams(candidate.modelName, modelDefaults, testCase));
             await writeFile(wavPath, audio);
@@ -175,16 +178,16 @@ export function buildEvaluationSummary(candidate, samples, notes) {
         recommendation = "adopt_candidate";
         rationale.push("All generated samples passed mechanical WAV checks.");
     }
-    if (explicitAdopt && recommendation !== "reject" && failureCount === 0) {
+    if (explicitAdopt && !explicitHold && recommendation !== "reject" && failureCount === 0 && warningCount === 0) {
         recommendation = "adopt_candidate";
         rationale.push("A human listening note marked at least one sample as adopt.");
     }
     const decision = explicitReject
         ? "reject"
-        : explicitAdopt
-            ? "adopt"
-            : explicitHold
-                ? "hold"
+        : explicitHold
+            ? "hold"
+            : explicitAdopt
+                ? "adopt"
                 : null;
     return {
         schemaVersion: 1,
@@ -352,6 +355,9 @@ function sanitizeBaseUrl(value) {
     catch {
         return "<invalid baseUrl>";
     }
+}
+function sameResolvedPath(left, right) {
+    return path.resolve(left) === path.resolve(right);
 }
 function resolveUserPath(value) {
     if (value === "~")

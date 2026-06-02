@@ -705,6 +705,8 @@ if (args.includes("resample.py")) {
       JSON.stringify({
         schemaVersion: 1,
         modelName: "rejected-model",
+        sourceDir: modelDir,
+        candidate: { sourceDir: modelDir },
         decision: "reject",
         recommendation: "reject",
       }),

@@ -12,17 +12,17 @@ function tempRoot(prefix: string): string {
   return mkdtempSync(path.join(tmpdir(), prefix));
 }
 
-function createSbv2Root(modelName = "eval-voice"): string {
+function createSbv2Root(modelName = "eval-voice", styleName = "Neutral"): string {
   const sbv2Root = tempRoot("sbv2-eval-root-");
   const modelDir = path.join(sbv2Root, "model_assets", modelName);
   mkdirSync(path.join(sbv2Root, "configs"), { recursive: true });
   mkdirSync(modelDir, { recursive: true });
   writeFileSync(path.join(sbv2Root, "configs", "paths.yml"), "assets_root: model_assets\n");
-  writeModelAssets(modelDir, modelName);
+  writeModelAssets(modelDir, modelName, styleName);
   return sbv2Root;
 }
 
-function writeModelAssets(dir: string, modelName: string): void {
+function writeModelAssets(dir: string, modelName: string, styleName = "Neutral"): void {
   writeFileSync(
     path.join(dir, "config.json"),
     JSON.stringify({
@@ -33,7 +33,7 @@ function writeModelAssets(dir: string, modelName: string): void {
         n_speakers: 1,
         num_styles: 1,
         spk2id: { [modelName]: 0 },
-        style2id: { Neutral: 0 },
+        style2id: { [styleName]: 0 },
       },
     }),
   );
@@ -159,6 +159,70 @@ describe("SBV2 model evaluation", () => {
     });
   });
 
+  it("uses the detected neutral style for every built-in case", async () => {
+    const sbv2Root = createSbv2Root("eval-voice", "00_Neutral");
+    const calls: Array<{ style?: string }> = [];
+
+    await evaluateModelCandidate({
+      jobsRoot: tempRoot("sbv2-eval-jobs-"),
+      sbv2Root,
+      modelName: "eval-voice",
+      baseUrl: "http://localhost:5000",
+      client: {
+        synthesize: async (params) => {
+          calls.push(params);
+          return makeWav();
+        },
+      },
+    });
+
+    expect(calls).toHaveLength(5);
+    expect(calls.every((call) => call.style === "00_Neutral")).toBe(true);
+  });
+
+  it("uses stable unique sample filenames for colliding test case ids", async () => {
+    const sbv2Root = createSbv2Root();
+    const testSetPath = path.join(tempRoot("sbv2-eval-test-set-"), "test-set.json");
+    writeFileSync(
+      testSetPath,
+      JSON.stringify([
+        { id: "a/b", text: "ひとつめ" },
+        { id: "a_b", text: "ふたつめ" },
+      ]),
+    );
+
+    const result = await evaluateModelCandidate({
+      jobsRoot: tempRoot("sbv2-eval-jobs-"),
+      sbv2Root,
+      modelName: "eval-voice",
+      baseUrl: "http://localhost:5000",
+      testSetPath,
+      client: { synthesize: async () => makeWav() },
+    });
+
+    expect(result.evaluation.samples.map((sample) => path.basename(sample.wavPath ?? ""))).toEqual([
+      "001-a_b.wav",
+      "002-a_b.wav",
+    ]);
+  });
+
+  it("rejects evaluation of external candidate sources that SBV2 cannot sample directly", async () => {
+    const sbv2Root = createSbv2Root();
+    const source = tempRoot("sbv2-eval-external-");
+    writeModelAssets(source, "eval-voice");
+
+    await expect(
+      evaluateModelCandidate({
+        jobsRoot: tempRoot("sbv2-eval-jobs-"),
+        sbv2Root,
+        modelName: "eval-voice",
+        sourcePath: source,
+        baseUrl: "http://localhost:5000",
+        client: { synthesize: async () => makeWav() },
+      }),
+    ).rejects.toThrow("Evaluation can only sample the model currently loadable");
+  });
+
   it("updates listening notes and turns explicit rejection into a reject recommendation", async () => {
     const sbv2Root = createSbv2Root();
     const result = await evaluateModelCandidate({
@@ -190,6 +254,36 @@ describe("SBV2 model evaluation", () => {
         createdAt: "2026-06-02T01:00:00.000Z",
       },
     ]);
+  });
+
+  it("keeps hold recommendation when adopt and hold notes are mixed", async () => {
+    const sbv2Root = createSbv2Root();
+    const result = await evaluateModelCandidate({
+      jobsRoot: tempRoot("sbv2-eval-jobs-"),
+      sbv2Root,
+      modelName: "eval-voice",
+      baseUrl: "http://localhost:5000",
+      client: { synthesize: async () => makeWav() },
+    });
+    const evaluationPath = path.join(result.job.outputDir, "evaluation.json");
+
+    await updateEvaluationNote({
+      evaluationPath,
+      caseId: "ja-short",
+      decision: "hold",
+      note: "needs another listen",
+    });
+    const updated = await updateEvaluationNote({
+      evaluationPath,
+      caseId: "ja-long",
+      decision: "adopt",
+      note: "sounds good",
+    });
+
+    expect(updated).toMatchObject({
+      decision: "hold",
+      recommendation: "hold",
+    });
   });
 
   it("flags non-WAV and silent-looking WAV buffers", () => {
