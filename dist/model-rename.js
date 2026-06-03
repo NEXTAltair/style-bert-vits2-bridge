@@ -54,6 +54,15 @@ export async function createModelRenamePlan(options) {
                 from: options.fromModelName,
                 to: options.toModelName,
             });
+            if (Object.prototype.hasOwnProperty.call(config, "modelName")) {
+                changes.push({
+                    kind: "json-field",
+                    path: configJsonPath,
+                    jsonPath: "modelName",
+                    from: options.fromModelName,
+                    to: options.toModelName,
+                });
+            }
         }
         changes.push(...configSpeakerChanges(config, configJsonPath, options.fromModelName, options.toModelName));
         errors.push(...configSpeakerCollisionErrors(config, options.fromModelName, options.toModelName));
@@ -308,6 +317,9 @@ function updateConfigJson(value, fromModelName, toModelName) {
         throw new Error("config.json root must be an object");
     }
     const next = { ...value, model_name: toModelName };
+    if (Object.prototype.hasOwnProperty.call(next, "modelName")) {
+        next.modelName = toModelName;
+    }
     if (isRecord(next.data)) {
         next.data = updateConfigData(next.data, fromModelName, toModelName);
     }

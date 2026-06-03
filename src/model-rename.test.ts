@@ -102,6 +102,42 @@ describe("SBV2 model rename", () => {
     expect(readFileSync(path.join(result.job.outputDir, "summary.json"), "utf8")).toContain('"toModelName": "new-voice"');
   });
 
+  it("updates camel-case modelName when the config uses it", async () => {
+    const sbv2Root = createSbv2Root();
+    const jobsRoot = tempRoot("sbv2-model-rename-jobs-");
+    const modelDir = writeModelAssets(sbv2Root, "old-voice");
+    const config = makeConfig("old-voice");
+    delete config.model_name;
+    config.modelName = "old-voice";
+    writeFileSync(path.join(modelDir, "config.json"), JSON.stringify(config));
+
+    const plan = await createModelRenamePlan({
+      sbv2Root,
+      fromModelName: "old-voice",
+      toModelName: "new-voice",
+    });
+
+    expect(plan.compatibility.compatible).toBe(true);
+    expect(plan.changes).toEqual(expect.arrayContaining([expect.objectContaining({ kind: "json-field", jsonPath: "modelName" })]));
+
+    await runModelRename({
+      sbv2Root,
+      jobsRoot,
+      fromModelName: "old-voice",
+      toModelName: "new-voice",
+      confirmToModelName: "new-voice",
+      now: () => new Date("2026-06-03T00:00:00.000Z"),
+      randomId: () => "abcdef12",
+    });
+
+    const renamedConfig = JSON.parse(readFileSync(path.join(sbv2Root, "model_assets", "new-voice", "config.json"), "utf8")) as {
+      model_name: string;
+      modelName: string;
+    };
+    expect(renamedConfig.model_name).toBe("new-voice");
+    expect(renamedConfig.modelName).toBe("new-voice");
+  });
+
   it("moves Data and optionally rewrites exact esd.list speaker fields", async () => {
     const sbv2Root = createSbv2Root();
     writeModelAssets(sbv2Root, "old-voice");
