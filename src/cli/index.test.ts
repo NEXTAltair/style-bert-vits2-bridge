@@ -152,6 +152,23 @@ describe("sbv2-bridge CLI", () => {
     expect(stdout.output()).toContain("--base-url <url>");
   });
 
+  it("prints rename help with data and confirmation options", async () => {
+    const stdout = createWriter();
+    const stderr = createWriter();
+
+    await expect(runCli(["models", "rename-run", "--help"], { stdout: stdout.stream, stderr: stderr.stream })).resolves.toBe(
+      0,
+    );
+
+    expect(stderr.output()).toBe("");
+    expect(stdout.output()).toContain("Usage: sbv2-bridge models rename-run [options]");
+    expect(stdout.output()).toContain("--from-model-name <name>");
+    expect(stdout.output()).toContain("--to-model-name <name>");
+    expect(stdout.output()).toContain("--confirm-to-model-name <name>");
+    expect(stdout.output()).toContain("--include-data");
+    expect(stdout.output()).toContain(".safetensors filenames are not renamed");
+  });
+
   it("reports unknown commands even when command help is requested", async () => {
     const stdout = createWriter();
     const stderr = createWriter();
@@ -486,6 +503,73 @@ fs.writeFileSync(path.join(outputDir, "recipe.json"), JSON.stringify({ method: p
     } finally {
       process.env.PATH = previousPath;
     }
+  });
+
+  it("prints model rename plan and run path roles as JSON", async () => {
+    const jobsRoot = tempJobsRoot();
+    const sbv2Root = mkdtempSync(path.join(tmpdir(), "sbv2-cli-rename-root-"));
+    mkdirSync(path.join(sbv2Root, "configs"), { recursive: true });
+    writeFileSync(path.join(sbv2Root, "configs", "paths.yml"), "dataset_root: Data\nassets_root: model_assets\n");
+    const modelDir = path.join(sbv2Root, "model_assets", "old-voice");
+    mkdirSync(modelDir, { recursive: true });
+    writeFileSync(path.join(modelDir, "config.json"), JSON.stringify(makeModelConfig("old-voice")));
+    writeFileSync(path.join(modelDir, "style_vectors.npy"), makeNpy([1, 2]));
+    writeFileSync(path.join(modelDir, "old-voice.safetensors"), makeSafetensors());
+
+    const planOut = createWriter();
+    await expect(
+      runCli(
+        [
+          "models",
+          "rename-plan",
+          "--sbv2-root",
+          sbv2Root,
+          "--from-model-name",
+          "old-voice",
+          "--to-model-name",
+          "new-voice",
+          "--json",
+        ],
+        { stdout: planOut.stream, stderr: createWriter().stream },
+      ),
+    ).resolves.toBe(0);
+    const planned = JSON.parse(planOut.output()) as { plan: { targetAssetsDir: string }; pathRoles: { sbv2LoadableModel?: string } };
+    expect(planned.pathRoles.sbv2LoadableModel).toBe(path.join(sbv2Root, "model_assets", "new-voice"));
+    expect(planned.plan.targetAssetsDir).toBe(planned.pathRoles.sbv2LoadableModel);
+
+    const runOut = createWriter();
+    await expect(
+      runCli(
+        [
+          "models",
+          "rename-run",
+          "--jobs-dir",
+          jobsRoot,
+          "--sbv2-root",
+          sbv2Root,
+          "--from-model-name",
+          "old-voice",
+          "--to-model-name",
+          "new-voice",
+          "--confirm-to-model-name",
+          "new-voice",
+          "--json",
+        ],
+        { stdout: runOut.stream, stderr: createWriter().stream },
+      ),
+    ).resolves.toBe(0);
+    const parsed = JSON.parse(runOut.output()) as {
+      summary: { targetAssetsDir: string };
+      job: { outputDir: string; logPath: string };
+      pathRoles: { bridgeState?: string; sbv2LoadableModel?: string; summary?: string; jobLog?: string };
+    };
+    expect(parsed.summary.targetAssetsDir).toBe(path.join(sbv2Root, "model_assets", "new-voice"));
+    expect(parsed.pathRoles).toEqual({
+      bridgeState: parsed.job.outputDir,
+      sbv2LoadableModel: path.join(sbv2Root, "model_assets", "new-voice"),
+      summary: path.join(parsed.job.outputDir, "summary.json"),
+      jobLog: parsed.job.logPath,
+    });
   });
 
   it("rejects mismatched model merge parameters at the CLI layer", async () => {

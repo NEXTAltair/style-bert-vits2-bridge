@@ -12,6 +12,7 @@ export type Sbv2JobOperation =
   | "dataset-prepare"
   | "training-run"
   | "model-merge"
+  | "model-rename"
   | "model-promote"
   | "model-evaluate";
 

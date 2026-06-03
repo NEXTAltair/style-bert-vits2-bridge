@@ -308,7 +308,31 @@ sbv2-bridge models merge-run \
 
 `--base-url` を渡すと SBV2 `/models/refresh` 後に `/models/info` で出力モデルが見えるか確認します。merge artifact の生成後に refresh 確認だけが失敗した場合、job は failed になりますが、生成済みの `model_assets/<outputName>` は削除せず、manifest / summary に `outputAssetsRetained: true` と refresh 結果を記録します。既存の出力モデル名や入力モデル名と同じ出力名は拒否し、上書きはしません。
 
-この bridge は現時点では OpenClaw runtime へ制作 job event を直接 push しません。OC 側へ伝える境界は `models merge-run --json` の `pathRoles`、job manifest、`summary.json`、`job.log` です。OC 側で UI 通知、job timeline、voice list cache refresh が必要な場合は、これらの構造化結果を読む production tool / wrapper 側で扱います。
+生成・検証用の運用名で作られたモデルは、SBV2 のモデル選択に使われる `model_assets/<modelName>` ディレクトリ名を安全にリネームできます。まず plan を確認します。
+
+```bash
+sbv2-bridge models rename-plan \
+  --from-model-name voice_mp3_pathcheck_20260603_1828 \
+  --to-model-name valentina_custom \
+  --json
+```
+
+実行時は変更先モデル名の確認を必須にします。
+
+```bash
+sbv2-bridge models rename-run \
+  --from-model-name voice_mp3_pathcheck_20260603_1828 \
+  --to-model-name valentina_custom \
+  --confirm-to-model-name valentina_custom \
+  --base-url http://127.0.0.1:5000 \
+  --json
+```
+
+`models rename-run` は `model_assets/<old>` を `model_assets/<new>` に移動し、`config.json` の `model_name` と、旧モデル名に完全一致する speaker map だけを更新します。SBV2 はモデルを `model_assets` 配下のディレクトリ名で選択するため、`.safetensors` ファイル名は変更しません。学習 dataset も追従させる場合だけ `--include-data` を指定し、`Data/<model>/esd.list` の speaker field も完全一致で更新したい場合は `--rename-esd-speaker` を併用します。
+
+既存の `model_assets/<new>` は上書きしません。`--base-url` を渡すと `/models/refresh` 後に新モデルが見え、旧モデルが見えないことを確認します。refresh 確認だけが失敗した場合、リネーム済み assets は保持し、job manifest / summary に `outputAssetsRetained: true` と refresh 結果を記録します。
+
+この bridge は現時点では OpenClaw runtime へ制作 job event を直接 push しません。OC 側へ伝える境界は production command の `--json` に含まれる `pathRoles`、job manifest、`summary.json`、`job.log` です。OC 側で UI 通知、job timeline、voice list cache refresh が必要な場合は、これらの構造化結果を読む production tool / wrapper 側で扱います。
 
 複数 style の Style ベクトルマージはモデル本体マージとは別操作です。この bridge の初期モデル本体マージは SBV2 upstream と同じく `Neutral` 1件の style を生成し、複数 style の対応表作成や `style_vectors.npy` 更新は #47 の対象です。
 
