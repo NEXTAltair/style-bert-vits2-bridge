@@ -97,6 +97,16 @@ describe("sbv2-bridge CLI", () => {
     expect(isCliEntrypoint(pathToFileURL(target).href, link)).toBe(true);
   });
 
+  it("documents datasets prepare slice flags in help", async () => {
+    const stdout = createWriter();
+    await expect(runCli(["--help"], { stdout: stdout.stream, stderr: createWriter().stream })).resolves.toBe(0);
+
+    expect(stdout.output()).toContain("--slice-min-sec <n>");
+    expect(stdout.output()).toContain("--slice-max-sec <n>");
+    expect(stdout.output()).toContain("--slice-min-silence-dur-ms <n>");
+    expect(stdout.output()).toContain("--slice-num-processes <n>");
+  });
+
   it("starts a dummy job and reads its status as JSON", async () => {
     const jobsRoot = tempJobsRoot();
     const stdout = createWriter();
@@ -452,6 +462,14 @@ if (args.includes("transcribe.py")) {
             jobsRoot,
             "--manifest",
             ingested.dataset.manifestPath,
+            "--slice-min-sec",
+            "0.7",
+            "--slice-max-sec",
+            "8.5",
+            "--slice-min-silence-dur-ms",
+            "300",
+            "--slice-num-processes",
+            "2",
             "--json",
           ],
           { stdout: prepareOut.stream, stderr: prepareErr.stream },
@@ -459,15 +477,31 @@ if (args.includes("transcribe.py")) {
       ).resolves.toBe(0);
       expect(prepareErr.output()).toBe("");
       const prepared = JSON.parse(prepareOut.output()) as {
-        summary: { rawWavCount: number; esdLineCount: number };
-        job: { operation: string };
+        summary: {
+          rawWavCount: number;
+          esdLineCount: number;
+          sliceOptions: { minSec: number; maxSec: number; minSilenceDurMs: number; numProcesses: number };
+        };
+        job: {
+          operation: string;
+          inputSummary: {
+            sliceOptions: { minSec: number; maxSec: number; minSilenceDurMs: number; numProcesses: number };
+          };
+        };
         pathRoles: { bridgeState: string; sbv2Dataset: string; sbv2LoadableModel: string; jobLog: string };
       };
       expect(prepared.summary).toMatchObject({
         rawWavCount: 1,
         esdLineCount: 1,
+        sliceOptions: {
+          minSec: 0.7,
+          maxSec: 8.5,
+          minSilenceDurMs: 300,
+          numProcesses: 2,
+        },
       });
       expect(prepared.job.operation).toBe("dataset-prepare");
+      expect(prepared.job.inputSummary.sliceOptions).toEqual(prepared.summary.sliceOptions);
       expect(prepared.pathRoles).toMatchObject({
         sbv2Dataset: path.join(sbv2Root, "Data", "cli-prepare"),
         sbv2LoadableModel: path.join(sbv2Root, "model_assets", "cli-prepare"),
@@ -475,6 +509,31 @@ if (args.includes("transcribe.py")) {
       expect(prepared.pathRoles.bridgeState).toContain(jobsRoot);
     } finally {
       process.env.PATH = previousPath;
+    }
+  });
+
+  it("rejects invalid datasets prepare slice flags at the CLI layer", async () => {
+    const cases: Array<{ argv: string[]; message: string }> = [
+      {
+        argv: ["datasets", "prepare", "--slice-min-sec", "0"],
+        message: "--slice-min-sec must be a positive finite number",
+      },
+      {
+        argv: ["datasets", "prepare", "--slice-min-sec", "9", "--slice-max-sec", "8"],
+        message: "--slice-min-sec must be less than or equal to --slice-max-sec",
+      },
+      {
+        argv: ["datasets", "prepare", "--slice-num-processes", "1.5"],
+        message: "--slice-num-processes must be a positive integer",
+      },
+    ];
+
+    for (const testCase of cases) {
+      const stderr = createWriter();
+      await expect(
+        runCli(testCase.argv, { stdout: createWriter().stream, stderr: stderr.stream }),
+      ).resolves.toBe(1);
+      expect(stderr.output()).toContain(testCase.message);
     }
   });
 

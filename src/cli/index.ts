@@ -2,7 +2,12 @@
 
 import { realpathSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { ingestDataset, prepareDataset, type Sbv2DatasetLanguage } from "../datasets.js";
+import {
+  ingestDataset,
+  prepareDataset,
+  type Sbv2DatasetLanguage,
+  type Sbv2DatasetSliceOptions,
+} from "../datasets.js";
 import {
   createTrainingPlan,
   parseTrainingStage,
@@ -77,6 +82,7 @@ interface CliOptions {
   modelCCoeff?: number;
   slerp?: boolean;
   stages?: Sbv2TrainingStage[];
+  sliceOptions: Partial<Sbv2DatasetSliceOptions>;
   trainingSettings: Partial<Sbv2TrainingSettings>;
 }
 
@@ -144,6 +150,12 @@ Options:
   --source <path>          Source audio file or directory for dataset ingest.
                             For models promote, source model artifact directory.
   --manifest <path>        Dataset manifest path for datasets prepare/training.
+  --slice-min-sec <n>      Minimum seconds of a slice for datasets prepare. Default 2.
+  --slice-max-sec <n>      Maximum seconds of a slice for datasets prepare. Default 12.
+  --slice-min-silence-dur-ms <n>
+                            Silence duration in ms considered a split point. Default 700.
+  --slice-num-processes <n>
+                            SBV2 slice.py process count. Default 3.
   --confirm-model-name <name>
                             Required exact model name confirmation for models promote.
   --confirm-output-model-name <name>
@@ -218,6 +230,14 @@ function parseFiniteNumber(value: string | undefined, name: string): number {
   return parsed;
 }
 
+function parsePositiveFiniteNumber(value: string | undefined, name: string): number {
+  const parsed = parseFiniteNumber(value, name);
+  if (parsed <= 0) {
+    throw new Error(`${name} must be a positive finite number`);
+  }
+  return parsed;
+}
+
 function parseLanguage(value: string | undefined): Sbv2DatasetLanguage {
   if (value === "ja" || value === "en" || value === "zh") {
     return value;
@@ -240,7 +260,7 @@ function parseEvaluationDecision(value: string | undefined): Sbv2EvaluationDecis
 }
 
 function parseArgs(argv: string[]): ParsedCommand {
-  const options: CliOptions = { json: false, fail: false, trainingSettings: {} };
+  const options: CliOptions = { json: false, fail: false, sliceOptions: {}, trainingSettings: {} };
   const positional: string[] = [];
 
   for (let index = 0; index < argv.length; index += 1) {
@@ -331,6 +351,18 @@ function parseArgs(argv: string[]): ParsedCommand {
     } else if (arg === "--manifest" && next) {
       options.manifestPath = next;
       index += 1;
+    } else if (arg === "--slice-min-sec" && next) {
+      options.sliceOptions.minSec = parsePositiveFiniteNumber(next, "--slice-min-sec");
+      index += 1;
+    } else if (arg === "--slice-max-sec" && next) {
+      options.sliceOptions.maxSec = parsePositiveFiniteNumber(next, "--slice-max-sec");
+      index += 1;
+    } else if (arg === "--slice-min-silence-dur-ms" && next) {
+      options.sliceOptions.minSilenceDurMs = parsePositiveInteger(next, "--slice-min-silence-dur-ms");
+      index += 1;
+    } else if (arg === "--slice-num-processes" && next) {
+      options.sliceOptions.numProcesses = parsePositiveInteger(next, "--slice-num-processes");
+      index += 1;
     } else if (arg === "--test-set" && next) {
       options.testSetPath = next;
       index += 1;
@@ -395,6 +427,14 @@ function parseArgs(argv: string[]): ParsedCommand {
     } else {
       positional.push(arg);
     }
+  }
+
+  if (
+    options.sliceOptions.minSec !== undefined &&
+    options.sliceOptions.maxSec !== undefined &&
+    options.sliceOptions.minSec > options.sliceOptions.maxSec
+  ) {
+    throw new Error("--slice-min-sec must be less than or equal to --slice-max-sec");
   }
 
   if (positional[0] === "help") {
@@ -534,6 +574,7 @@ export async function runCli(argv: string[], io: CliIO = {}): Promise<number> {
         const result = await prepareDataset({
           jobsRoot: options.jobsRoot,
           manifestPath: requireString(options.manifestPath, "--manifest"),
+          sliceOptions: options.sliceOptions,
         });
         const pathRoles = preparePathRoles(result.job);
         if (options.json) {
