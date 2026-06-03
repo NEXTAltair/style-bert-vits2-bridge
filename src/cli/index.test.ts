@@ -523,6 +523,14 @@ if (args.includes("transcribe.py")) {
         message: "--slice-min-sec must be less than or equal to --slice-max-sec",
       },
       {
+        argv: ["datasets", "prepare", "--slice-min-sec", "20"],
+        message: "--slice-min-sec must be less than or equal to --slice-max-sec",
+      },
+      {
+        argv: ["datasets", "prepare", "--slice-max-sec", "1"],
+        message: "--slice-min-sec must be less than or equal to --slice-max-sec",
+      },
+      {
         argv: ["datasets", "prepare", "--slice-num-processes", "1.5"],
         message: "--slice-num-processes must be a positive integer",
       },

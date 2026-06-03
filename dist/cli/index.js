@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import { realpathSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { ingestDataset, prepareDataset, } from "../datasets.js";
+import { DEFAULT_SLICE_MAX_SEC, DEFAULT_SLICE_MIN_SEC, ingestDataset, prepareDataset, } from "../datasets.js";
 import { createTrainingPlan, parseTrainingStage, runTraining, } from "../training.js";
 import { evaluateModelCandidate, readEvaluationManifest, updateEvaluationNote, } from "../evaluation.js";
 import { listModelCandidates, promoteModel } from "../model-registry.js";
@@ -378,9 +378,9 @@ function parseArgs(argv) {
             positional.push(arg);
         }
     }
-    if (options.sliceOptions.minSec !== undefined &&
-        options.sliceOptions.maxSec !== undefined &&
-        options.sliceOptions.minSec > options.sliceOptions.maxSec) {
+    const effectiveSliceMinSec = options.sliceOptions.minSec ?? DEFAULT_SLICE_MIN_SEC;
+    const effectiveSliceMaxSec = options.sliceOptions.maxSec ?? DEFAULT_SLICE_MAX_SEC;
+    if (effectiveSliceMinSec > effectiveSliceMaxSec) {
         throw new Error("--slice-min-sec must be less than or equal to --slice-max-sec");
     }
     if (positional[0] === "help") {

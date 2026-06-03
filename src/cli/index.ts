@@ -3,6 +3,8 @@
 import { realpathSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import {
+  DEFAULT_SLICE_MAX_SEC,
+  DEFAULT_SLICE_MIN_SEC,
   ingestDataset,
   prepareDataset,
   type Sbv2DatasetLanguage,
@@ -429,11 +431,9 @@ function parseArgs(argv: string[]): ParsedCommand {
     }
   }
 
-  if (
-    options.sliceOptions.minSec !== undefined &&
-    options.sliceOptions.maxSec !== undefined &&
-    options.sliceOptions.minSec > options.sliceOptions.maxSec
-  ) {
+  const effectiveSliceMinSec = options.sliceOptions.minSec ?? DEFAULT_SLICE_MIN_SEC;
+  const effectiveSliceMaxSec = options.sliceOptions.maxSec ?? DEFAULT_SLICE_MAX_SEC;
+  if (effectiveSliceMinSec > effectiveSliceMaxSec) {
     throw new Error("--slice-min-sec must be less than or equal to --slice-max-sec");
   }
 
