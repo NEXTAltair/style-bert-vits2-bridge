@@ -118,7 +118,8 @@ const COMMAND_STATUS_COMMAND = `${COMMAND_STATUS_TOOLS}\\s+(?:(?:${COMMAND_STATU
 const GITHUB_ISSUE_OR_PR_URL =
   "https?:\\/\\/github\\.com\\/[^\\/\\s)>`]+\\/[^\\/\\s)>`]+\\/(issues|pull|pulls)\\/\\d+\\b(?:\\/[^?#\\s)>`]*)?(?:\\?[^#\\s)>`]*)?(?:#[^\\s)>`]+)?";
 const MARKDOWN_LINK_TITLE = `(?:"[^"\\n]*"|'[^'\\n]*'|\\([^\\)\\n]*\\))`;
-const GITHUB_ISSUE_OR_PR_MARKDOWN_LINK = `\\[([^\\]\\n]*)\\]\\(\\s*${GITHUB_ISSUE_OR_PR_URL}(?:\\s+${MARKDOWN_LINK_TITLE})?\\s*\\)`;
+const GITHUB_ISSUE_OR_PR_MARKDOWN_DESTINATION = `(?:${GITHUB_ISSUE_OR_PR_URL}|<\\s*${GITHUB_ISSUE_OR_PR_URL}\\s*>)`;
+const GITHUB_ISSUE_OR_PR_MARKDOWN_LINK = `\\[([^\\]\\n]*)\\]\\(\\s*${GITHUB_ISSUE_OR_PR_MARKDOWN_DESTINATION}(?:\\s+${MARKDOWN_LINK_TITLE})?\\s*\\)`;
 
 interface PreparedSpeechText {
   text: string;
@@ -228,6 +229,8 @@ function cleanupSpeechLineAfterUrlRemoval(value: string): string {
     .replace(/^\[\s*\]$/, "")
     .replace(/<\s*>/g, "")
     .replace(/`+\s*`+/g, "")
+    .replace(/([*_]{1,3})([^*_\n]+?)\1/g, "$2")
+    .replace(/(^|[ \t])(?:[*_]\s*){2,}(?=$|[ \t])/g, "$1")
     .replace(/\s+([。、，,.!?！？:;])/g, "$1")
     .replace(/[ \t]{2,}/g, " ")
     .replace(/^#{1,6}\s+/, "")
@@ -251,7 +254,7 @@ function looksLikeMarkdownReferenceDefinitionRemainder(value: string): boolean {
 
 function collectGithubMarkdownReferenceIds(value: string): Set<string> {
   const definitionPattern = new RegExp(
-    `^\\s*\\[([^\\]\\n]+)\\]:\\s*${GITHUB_ISSUE_OR_PR_URL}(?:\\s+${MARKDOWN_LINK_TITLE})?\\s*$`,
+    `^\\s*\\[([^\\]\\n]+)\\]:\\s*${GITHUB_ISSUE_OR_PR_MARKDOWN_DESTINATION}(?:\\s+${MARKDOWN_LINK_TITLE})?\\s*$`,
     "gim",
   );
   return new Set(Array.from(value.matchAll(definitionPattern), (match) => match[1].toLowerCase()));
@@ -265,6 +268,9 @@ function replaceGithubMarkdownReferenceUsages(value: string, githubReferenceIds:
     )
     .replace(/\[([^\]\n]+)\]\[([^\]\n]+)\]/g, (match, label: string, id: string) =>
       githubReferenceIds.has(id.toLowerCase()) ? label.trim() : match,
+    )
+    .replace(/\[([^\]\n]+)\](?!\s*[:\[(])/g, (match, label: string) =>
+      githubReferenceIds.has(label.toLowerCase()) ? label.trim() : match,
     );
 }
 
@@ -274,6 +280,10 @@ function sanitizeGithubUrlsFromSpeechText(
 ): PreparedSpeechText | undefined {
   const githubUrlPattern = new RegExp(GITHUB_ISSUE_OR_PR_URL, "gi");
   const markdownLinkPattern = new RegExp(GITHUB_ISSUE_OR_PR_MARKDOWN_LINK, "gi");
+  const wrappedGithubUrlPattern = new RegExp(
+    `(?:\\(\\s*${GITHUB_ISSUE_OR_PR_URL}\\s*\\)|\\[\\s*${GITHUB_ISSUE_OR_PR_URL}\\s*\\])`,
+    "gi",
+  );
   if (!githubUrlPattern.test(value)) return undefined;
 
   let kind: MetadataStatusKind | undefined;
@@ -300,12 +310,15 @@ function sanitizeGithubUrlsFromSpeechText(
 
     githubUrlPattern.lastIndex = 0;
     markdownLinkPattern.lastIndex = 0;
+    wrappedGithubUrlPattern.lastIndex = 0;
     const lineWithoutLinks = cleanupSpeechLineAfterUrlRemoval(
-      line.replace(markdownLinkPattern, "").replace(githubUrlPattern, ""),
+      line.replace(markdownLinkPattern, "").replace(wrappedGithubUrlPattern, "").replace(githubUrlPattern, ""),
     );
+    wrappedGithubUrlPattern.lastIndex = 0;
     const lineWithLabels = cleanupSpeechLineAfterUrlRemoval(
       replaceGithubMarkdownReferenceUsages(line, githubReferenceIds)
         .replace(markdownLinkPattern, (_match, label: string) => label.trim())
+        .replace(wrappedGithubUrlPattern, "")
         .replace(githubUrlPattern, ""),
     );
     const sanitizedLine = [lineWithLabels, lineWithoutLinks].find((candidate) =>
