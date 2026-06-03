@@ -238,6 +238,32 @@ describe("SBV2 model merge", () => {
       state: "succeeded",
     });
     expect(result.candidate.promotable).toBe(true);
+    expect(result.summary.recipePath).toBe(path.join(sbv2Root, "model_assets", "merged", "recipe.json"));
+    expect(result.summary.refresh).toBeUndefined();
+    expect(result.job.inputSummary).toMatchObject({
+      method: "usual",
+      outputModelName: "merged",
+      outputDir: path.join(sbv2Root, "model_assets", "merged"),
+      outputSafetensorsPath: path.join(sbv2Root, "model_assets", "merged", "merged.safetensors"),
+      recipePath: path.join(sbv2Root, "model_assets", "merged", "recipe.json"),
+      weights: {
+        voiceWeight: 0.1,
+        voicePitchWeight: 0.2,
+        speechStyleWeight: 0.3,
+        tempoWeight: 0.4,
+      },
+      inputModels: {
+        a: {
+          modelName: "model-a",
+          safetensorsPath: path.join(sbv2Root, "model_assets", "model-a", "model-a.safetensors"),
+        },
+        b: {
+          modelName: "model-b",
+          safetensorsPath: path.join(sbv2Root, "model_assets", "model-b", "model-b.safetensors"),
+        },
+      },
+      outputAssetsRetained: true,
+    });
     expect(readFileSync(path.join(result.job.outputDir, "summary.json"), "utf8")).toContain('"outputModelName": "merged"');
   });
 
@@ -276,6 +302,33 @@ describe("SBV2 model merge", () => {
       ).rejects.toThrow('was not found in /models/info after refresh');
       expect(existsSync(outputDir)).toBe(true);
       expect(existsSync(path.join(outputDir, "merged.safetensors"))).toBe(true);
+      const manifest = JSON.parse(readFileSync(path.join(jobsRoot, "sbv2-job-20260602000000-abcdef12", "manifest.json"), "utf8")) as {
+        state: string;
+        inputSummary: {
+          outputAssetsRetained?: boolean;
+          refresh?: { foundInModelsInfo?: boolean; outputAssetsRetained?: boolean };
+        };
+        artifactPaths: string[];
+      };
+      expect(manifest.state).toBe("failed");
+      expect(manifest.inputSummary.outputAssetsRetained).toBe(true);
+      expect(manifest.inputSummary.refresh).toMatchObject({
+        foundInModelsInfo: false,
+        outputAssetsRetained: true,
+      });
+      expect(manifest.artifactPaths).toContain(path.join(outputDir, "recipe.json"));
+      expect(manifest.artifactPaths).toContain(path.join(jobsRoot, "sbv2-job-20260602000000-abcdef12", "summary.json"));
+
+      const summary = JSON.parse(readFileSync(path.join(jobsRoot, "sbv2-job-20260602000000-abcdef12", "summary.json"), "utf8")) as {
+        state: string;
+        outputAssetsRetained?: boolean;
+        refresh?: { foundInModelsInfo?: boolean };
+        nextSteps: string[];
+      };
+      expect(summary.state).toBe("failed");
+      expect(summary.outputAssetsRetained).toBe(true);
+      expect(summary.refresh?.foundInModelsInfo).toBe(false);
+      expect(summary.nextSteps.join("\n")).toContain(outputDir);
     } finally {
       globalThis.fetch = originalFetch;
     }

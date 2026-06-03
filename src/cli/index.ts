@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 
 import { realpathSync } from "node:fs";
+import path from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   DEFAULT_SLICE_MAX_SEC,
@@ -99,6 +100,8 @@ interface Sbv2PathRoles {
   bridgeState?: string;
   sbv2Dataset?: string;
   sbv2LoadableModel?: string;
+  recipe?: string;
+  summary?: string;
   jobLog?: string;
 }
 
@@ -556,6 +559,20 @@ function trainingPathRoles(plan: { datasetPath: string; assetsPath: string }, jo
   };
 }
 
+function modelMergePathRoles(result: {
+  plan: { outputDir: string };
+  job: Sbv2JobManifest;
+  summary: { recipePath: string };
+}): Sbv2PathRoles {
+  return {
+    bridgeState: result.job.outputDir,
+    sbv2LoadableModel: result.plan.outputDir,
+    recipe: result.summary.recipePath,
+    summary: path.join(result.job.outputDir, "summary.json"),
+    jobLog: result.job.logPath,
+  };
+}
+
 export async function runCli(argv: string[], io: CliIO = {}): Promise<number> {
   const stdout = io.stdout ?? process.stdout;
   const stderr = io.stderr ?? process.stderr;
@@ -718,8 +735,16 @@ export async function runCli(argv: string[], io: CliIO = {}): Promise<number> {
           confirmOutputModelName: requireString(options.confirmOutputModelName, "--confirm-output-model-name"),
           baseUrl: options.baseUrl,
         });
+        const pathRoles = modelMergePathRoles(result);
         if (options.json) {
-          printJson(stdout, { ok: true, plan: result.plan, candidate: result.candidate, summary: result.summary, job: result.job });
+          printJson(stdout, {
+            ok: true,
+            plan: result.plan,
+            candidate: result.candidate,
+            summary: result.summary,
+            job: result.job,
+            pathRoles,
+          });
         } else {
           writeLine(stdout, `merged ${result.summary.outputModelName}`);
           writeLine(stdout, `method: ${result.summary.method}`);

@@ -87,21 +87,24 @@ export async function runModelMerge(options) {
     const logLines = [`model merge started for ${plan.outputModelName}`];
     const outputExistedBeforeRun = await pathExists(plan.outputDir);
     let cleanupOutputOnFailure = !outputExistedBeforeRun;
+    let candidateForFailedJob;
+    let refreshForFailedJob;
     const fail = async (error) => {
         const message = error instanceof Error ? error.message : String(error);
         if (cleanupOutputOnFailure && (await pathExists(plan.outputDir))) {
             await cleanupOutputDir(plan.outputDir, logLines);
         }
-        await createJobManifest({
+        const outputAssetsRetained = await pathExists(plan.outputDir);
+        const artifactPaths = outputAssetsRetained && candidateForFailedJob ? collectMergeArtifacts(plan, candidateForFailedJob) : [];
+        const job = await createJobManifest({
             jobsRoot: options.jobsRoot,
             operation: "model-merge",
             state: "failed",
-            inputSummary: {
-                method: plan.method,
-                outputModelName: plan.outputModelName,
-                outputDir: plan.outputDir,
-            },
-            artifactPaths: [],
+            inputSummary: buildModelMergeInputSummary(plan, {
+                refresh: refreshForFailedJob,
+                outputAssetsRetained,
+            }),
+            artifactPaths,
             firstError: message,
             retryable: false,
             progressSummary: `Model merge failed for ${plan.outputModelName}.`,
@@ -109,6 +112,31 @@ export async function runModelMerge(options) {
             now,
             randomId,
         });
+        const summaryPath = path.join(job.outputDir, "summary.json");
+        await writeFile(summaryPath, `${JSON.stringify({
+            schemaVersion: 1,
+            state: "failed",
+            method: plan.method,
+            outputModelName: plan.outputModelName,
+            outputDir: plan.outputDir,
+            recipePath: mergeRecipePath(plan),
+            plan,
+            ...(candidateForFailedJob ? { candidate: candidateForFailedJob } : {}),
+            ...(refreshForFailedJob ? { refresh: refreshForFailedJob } : {}),
+            outputAssetsRetained,
+            firstError: message,
+            nextSteps: outputAssetsRetained
+                ? [
+                    `Inspect ${plan.outputDir} and ${mergeRecipePath(plan)}.`,
+                    "Refresh SBV2 models again or check SBV2 server model loading state.",
+                ]
+                : ["Review the job log and rerun models merge-plan before retrying."],
+        }, null, 2)}\n`, "utf8");
+        const updatedJob = {
+            ...job,
+            artifactPaths: [...job.artifactPaths, summaryPath],
+        };
+        await writeFile(path.join(job.outputDir, "manifest.json"), `${JSON.stringify(updatedJob, null, 2)}\n`, "utf8");
         throw error;
     };
     try {
@@ -128,6 +156,7 @@ export async function runModelMerge(options) {
             method: plan.method,
             outputModelName: plan.outputModelName,
             outputDir: plan.outputDir,
+            recipePath: mergeRecipePath(plan),
             plan,
             candidate,
             nextSteps: [
@@ -144,8 +173,14 @@ export async function runModelMerge(options) {
                 refreshed: true,
                 foundInModelsInfo: found,
                 modelsInfoCount: modelsInfo.length,
+                outputAssetsRetained: true,
             };
             logLines.push(`refreshed SBV2 models from ${options.baseUrl}`);
+            if (!found) {
+                candidateForFailedJob = candidate;
+                refreshForFailedJob = summary.refresh;
+                logLines.push(`merged model assets were retained at ${plan.outputDir}, but ${plan.outputModelName} was not found in /models/info`);
+            }
             if (!found) {
                 throw new Error(`Merged model "${plan.outputModelName}" was not found in /models/info after refresh`);
             }
@@ -153,11 +188,7 @@ export async function runModelMerge(options) {
         const job = await createJobManifest({
             jobsRoot: options.jobsRoot,
             operation: "model-merge",
-            inputSummary: {
-                method: plan.method,
-                outputModelName: plan.outputModelName,
-                outputDir: plan.outputDir,
-            },
+            inputSummary: buildModelMergeInputSummary(plan, { refresh: summary.refresh, outputAssetsRetained: true }),
             artifactPaths: collectMergeArtifacts(plan, candidate),
             progressSummary: `Model merge completed for ${plan.outputModelName}.`,
             logLines: [...logLines, `model merge succeeded for ${plan.outputModelName}`],
@@ -176,6 +207,41 @@ export async function runModelMerge(options) {
     catch (error) {
         return fail(error);
     }
+}
+function buildModelMergeInputSummary(plan, options = {}) {
+    return {
+        method: plan.method,
+        outputModelName: plan.outputModelName,
+        outputDir: plan.outputDir,
+        outputSafetensorsPath: plan.outputSafetensorsPath,
+        recipePath: mergeRecipePath(plan),
+        inputModels: {
+            a: summarizeMergeInput(plan.inputModels.a),
+            b: summarizeMergeInput(plan.inputModels.b),
+            ...(plan.inputModels.c ? { c: summarizeMergeInput(plan.inputModels.c) } : {}),
+        },
+        ...(plan.weights ? { weights: plan.weights } : {}),
+        ...(plan.coefficients ? { coefficients: plan.coefficients } : {}),
+        slerp: plan.slerp,
+        compatibility: plan.compatibility,
+        expectedArtifacts: plan.expectedArtifacts,
+        ...(options.refresh ? { refresh: options.refresh } : {}),
+        ...(options.outputAssetsRetained !== undefined ? { outputAssetsRetained: options.outputAssetsRetained } : {}),
+    };
+}
+function summarizeMergeInput(input) {
+    return {
+        modelName: input.modelName,
+        modelDir: input.modelDir,
+        safetensorsPath: input.safetensorsPath,
+        configJsonPath: input.configJsonPath,
+        styleVectorsPath: input.styleVectorsPath,
+        speakerCount: input.speakerCount,
+        styleVectorShape: input.styleVectorShape,
+    };
+}
+function mergeRecipePath(plan) {
+    return path.join(plan.outputDir, "recipe.json");
 }
 async function inspectMergeInput(options) {
     validateModelName(options.modelName, `--${options.label.replace(" ", "-")}`);
