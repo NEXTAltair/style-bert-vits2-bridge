@@ -151,6 +151,9 @@ export async function createModelRenamePlan(options: ModelRenameOptions): Promis
   }
 
   const safetensorsKept = await listTopLevelFiles(sourceAssetsDir, ".safetensors");
+  if (safetensorsKept.length === 0) {
+    errors.push(`no non-empty .safetensors files were found in ${sourceAssetsDir}`);
+  }
   for (const filePath of safetensorsKept) {
     if (path.basename(filePath).includes(options.fromModelName)) {
       warnings.push(`safetensors filename contains the old model name but will not be changed: ${filePath}`);
@@ -161,7 +164,10 @@ export async function createModelRenamePlan(options: ModelRenameOptions): Promis
     if (await pathExists(targetDataDir)) {
       errors.push(`target dataset directory already exists: ${targetDataDir}`);
     }
-    if (await pathExists(sourceDataDir)) {
+    const sourceDataDirStatus = await directoryStat(sourceDataDir);
+    if (sourceDataDirStatus.exists && !sourceDataDirStatus.isDirectory) {
+      errors.push(`source dataset path is not a directory: ${sourceDataDir}`);
+    } else if (sourceDataDirStatus.exists) {
       changes.push({ kind: "path-move", from: sourceDataDir, to: targetDataDir });
       if (options.renameEsdSpeaker) {
         const esdPath = path.join(sourceDataDir, "esd.list");
@@ -400,7 +406,7 @@ function collectRenameArtifacts(plan: Sbv2ModelRenamePlan): string[] {
   ];
   if (planIncludesDataMove(plan)) {
     artifacts.push(plan.targetDataDir);
-    if (plan.renameEsdSpeaker) artifacts.push(path.join(plan.targetDataDir, "esd.list"));
+    if (planIncludesEsdSpeakerChange(plan)) artifacts.push(path.join(plan.targetDataDir, "esd.list"));
   }
   return artifacts;
 }
@@ -409,6 +415,10 @@ function planIncludesDataMove(plan: Sbv2ModelRenamePlan): boolean {
   return plan.changes.some(
     (change) => change.kind === "path-move" && change.from === plan.sourceDataDir && change.to === plan.targetDataDir,
   );
+}
+
+function planIncludesEsdSpeakerChange(plan: Sbv2ModelRenamePlan): boolean {
+  return plan.changes.some((change) => change.kind === "esd-speaker" && change.path === path.join(plan.sourceDataDir, "esd.list"));
 }
 
 function updateConfigJson(value: unknown, fromModelName: string, toModelName: string): unknown {
@@ -629,7 +639,7 @@ async function listTopLevelFiles(dir: string, suffix: string): Promise<string[]>
   for (const entry of entries.sort((left, right) => left.localeCompare(right))) {
     if (entry.startsWith(".") || !entry.endsWith(suffix)) continue;
     const filePath = path.join(dir, entry);
-    if (await isFile(filePath)) files.push(filePath);
+    if (await isNonEmptyFile(filePath)) files.push(filePath);
   }
   return files;
 }
@@ -676,21 +686,16 @@ async function pathExists(filePath: string): Promise<boolean> {
 }
 
 async function isDirectory(filePath: string): Promise<boolean> {
-  try {
-    const result = await stat(filePath);
-    return result.isDirectory();
-  } catch (error) {
-    if (isNodeError(error) && error.code === "ENOENT") return false;
-    throw error;
-  }
+  const result = await directoryStat(filePath);
+  return result.exists && result.isDirectory;
 }
 
-async function isFile(filePath: string): Promise<boolean> {
+async function directoryStat(filePath: string): Promise<{ exists: boolean; isDirectory: boolean }> {
   try {
     const result = await stat(filePath);
-    return result.isFile();
+    return { exists: true, isDirectory: result.isDirectory() };
   } catch (error) {
-    if (isNodeError(error) && error.code === "ENOENT") return false;
+    if (isNodeError(error) && error.code === "ENOENT") return { exists: false, isDirectory: false };
     throw error;
   }
 }

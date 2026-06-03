@@ -146,6 +146,21 @@ describe("SBV2 model rename", () => {
     expect(plan.compatibility.errors.join("\n")).toContain('config.json model_name "different" does not match "old-voice"');
   });
 
+  it("requires at least one top-level non-empty safetensors file", async () => {
+    const sbv2Root = createSbv2Root();
+    const modelDir = writeModelAssets(sbv2Root, "old-voice");
+    writeFileSync(path.join(modelDir, "old-voice_e1_s100.safetensors"), "");
+
+    const plan = await createModelRenamePlan({
+      sbv2Root,
+      fromModelName: "old-voice",
+      toModelName: "new-voice",
+    });
+
+    expect(plan.compatibility.compatible).toBe(false);
+    expect(plan.compatibility.errors).toContain(`no non-empty .safetensors files were found in ${modelDir}`);
+  });
+
   it("rejects target speaker name collisions before rewriting config maps", async () => {
     const sbv2Root = createSbv2Root();
     const modelDir = writeModelAssets(sbv2Root, "old-voice");
@@ -189,6 +204,42 @@ describe("SBV2 model rename", () => {
 
     expect(result.plan.compatibility.warnings.join("\n")).toContain("dataset directory was not found");
     expect(result.job.artifactPaths).not.toContain(path.join(sbv2Root, "Data", "new-voice"));
+  });
+
+  it("rejects includeData when Data source is not a directory", async () => {
+    const sbv2Root = createSbv2Root();
+    writeModelAssets(sbv2Root, "old-voice");
+    mkdirSync(path.join(sbv2Root, "Data"), { recursive: true });
+    writeFileSync(path.join(sbv2Root, "Data", "old-voice"), "not a directory");
+
+    const plan = await createModelRenamePlan({
+      sbv2Root,
+      fromModelName: "old-voice",
+      toModelName: "new-voice",
+      includeData: true,
+    });
+
+    expect(plan.compatibility.compatible).toBe(false);
+    expect(plan.compatibility.errors).toContain(`source dataset path is not a directory: ${path.join(sbv2Root, "Data", "old-voice")}`);
+  });
+
+  it("does not publish esd.list when renameEsdSpeaker is requested but esd.list is absent", async () => {
+    const sbv2Root = createSbv2Root();
+    writeModelAssets(sbv2Root, "old-voice");
+    mkdirSync(path.join(sbv2Root, "Data", "old-voice"), { recursive: true });
+
+    const result = await runModelRename({
+      sbv2Root,
+      jobsRoot: tempRoot("sbv2-model-rename-jobs-"),
+      fromModelName: "old-voice",
+      toModelName: "new-voice",
+      confirmToModelName: "new-voice",
+      includeData: true,
+      renameEsdSpeaker: true,
+    });
+
+    expect(result.job.artifactPaths).toContain(path.join(sbv2Root, "Data", "new-voice"));
+    expect(result.job.artifactPaths).not.toContain(path.join(sbv2Root, "Data", "new-voice", "esd.list"));
   });
 
   it("keeps renamed assets when refresh verification fails", async () => {

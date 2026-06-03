@@ -59,6 +59,9 @@ export async function createModelRenamePlan(options) {
         errors.push(...configSpeakerCollisionErrors(config, options.fromModelName, options.toModelName));
     }
     const safetensorsKept = await listTopLevelFiles(sourceAssetsDir, ".safetensors");
+    if (safetensorsKept.length === 0) {
+        errors.push(`no non-empty .safetensors files were found in ${sourceAssetsDir}`);
+    }
     for (const filePath of safetensorsKept) {
         if (path.basename(filePath).includes(options.fromModelName)) {
             warnings.push(`safetensors filename contains the old model name but will not be changed: ${filePath}`);
@@ -68,7 +71,11 @@ export async function createModelRenamePlan(options) {
         if (await pathExists(targetDataDir)) {
             errors.push(`target dataset directory already exists: ${targetDataDir}`);
         }
-        if (await pathExists(sourceDataDir)) {
+        const sourceDataDirStatus = await directoryStat(sourceDataDir);
+        if (sourceDataDirStatus.exists && !sourceDataDirStatus.isDirectory) {
+            errors.push(`source dataset path is not a directory: ${sourceDataDir}`);
+        }
+        else if (sourceDataDirStatus.exists) {
             changes.push({ kind: "path-move", from: sourceDataDir, to: targetDataDir });
             if (options.renameEsdSpeaker) {
                 const esdPath = path.join(sourceDataDir, "esd.list");
@@ -284,13 +291,16 @@ function collectRenameArtifacts(plan) {
     ];
     if (planIncludesDataMove(plan)) {
         artifacts.push(plan.targetDataDir);
-        if (plan.renameEsdSpeaker)
+        if (planIncludesEsdSpeakerChange(plan))
             artifacts.push(path.join(plan.targetDataDir, "esd.list"));
     }
     return artifacts;
 }
 function planIncludesDataMove(plan) {
     return plan.changes.some((change) => change.kind === "path-move" && change.from === plan.sourceDataDir && change.to === plan.targetDataDir);
+}
+function planIncludesEsdSpeakerChange(plan) {
+    return plan.changes.some((change) => change.kind === "esd-speaker" && change.path === path.join(plan.sourceDataDir, "esd.list"));
 }
 function updateConfigJson(value, fromModelName, toModelName) {
     if (!isRecord(value)) {
@@ -496,7 +506,7 @@ async function listTopLevelFiles(dir, suffix) {
         if (entry.startsWith(".") || !entry.endsWith(suffix))
             continue;
         const filePath = path.join(dir, entry);
-        if (await isFile(filePath))
+        if (await isNonEmptyFile(filePath))
             files.push(filePath);
     }
     return files;
@@ -542,24 +552,17 @@ async function pathExists(filePath) {
     }
 }
 async function isDirectory(filePath) {
-    try {
-        const result = await stat(filePath);
-        return result.isDirectory();
-    }
-    catch (error) {
-        if (isNodeError(error) && error.code === "ENOENT")
-            return false;
-        throw error;
-    }
+    const result = await directoryStat(filePath);
+    return result.exists && result.isDirectory;
 }
-async function isFile(filePath) {
+async function directoryStat(filePath) {
     try {
         const result = await stat(filePath);
-        return result.isFile();
+        return { exists: true, isDirectory: result.isDirectory() };
     }
     catch (error) {
         if (isNodeError(error) && error.code === "ENOENT")
-            return false;
+            return { exists: false, isDirectory: false };
         throw error;
     }
 }
