@@ -116,7 +116,7 @@ const COMMAND_STATUS_SCRIPT_PATH = "(?:[a-z0-9:_-]+/[a-z0-9:_./-]+|[a-z0-9:_/-]*
 const COMMAND_STATUS_ARGUMENT = `(?:(?:-{1,2}[a-z][a-z0-9-]*)|(?:[a-z0-9:_./-]+\\s+-{1,2}[a-z][a-z0-9-]*)|(?:${COMMAND_STATUS_SCRIPT_PATH})|(?:(?:${COMMAND_STATUS_SUBCOMMANDS})\\b))`;
 const COMMAND_STATUS_COMMAND = `${COMMAND_STATUS_TOOLS}\\s+(?:(?:${COMMAND_STATUS_SUBCOMMANDS})\\b|(?:${COMMAND_STATUS_SCRIPT_PATH}))`;
 const GITHUB_ISSUE_OR_PR_URL =
-  "https?:\\/\\/github\\.com\\/[^\\/\\s)>`]+\\/[^\\/\\s)>`]+\\/(issues|pull|pulls)\\/\\d+\\b(?:\\/[^?#\\s)>`]*)?(?:\\?[^#\\s)>`]*)?(?:#[^\\s)>`]+)?";
+  "https?:\\/\\/github\\.com\\/[^\\/\\s)>`]+\\/[^\\/\\s)>`]+\\/(issues|pull|pulls)\\/\\d+\\b(?:\\.(?:diff|patch))?(?:\\/[^?#\\s)>`]*)?(?:\\?[^#\\s)>`]*)?(?:#[^\\s)>`]+)?";
 const MARKDOWN_LINK_TITLE = `(?:"[^"\\n]*"|'[^'\\n]*'|\\([^\\)\\n]*\\))`;
 const GITHUB_ISSUE_OR_PR_MARKDOWN_DESTINATION = `(?:${GITHUB_ISSUE_OR_PR_URL}|<\\s*${GITHUB_ISSUE_OR_PR_URL}\\s*>)`;
 const GITHUB_ISSUE_OR_PR_MARKDOWN_LINK = `\\[([^\\]\\n]*)\\]\\(\\s*${GITHUB_ISSUE_OR_PR_MARKDOWN_DESTINATION}(?:\\s+${MARKDOWN_LINK_TITLE})?\\s*\\)`;
@@ -294,9 +294,7 @@ function sanitizeGithubUrlsFromSpeechText(
     githubUrlPattern.lastIndex = 0;
     const matches = Array.from(line.matchAll(githubUrlPattern));
     if (!matches.length) {
-      const lineWithReferenceLabels = cleanupSpeechLineAfterUrlRemoval(
-        replaceGithubMarkdownReferenceUsages(line, githubReferenceIds),
-      );
+      const lineWithReferenceLabels = replaceGithubMarkdownReferenceUsages(line, githubReferenceIds).trim();
       if (lineWithReferenceLabels) lines.push(lineWithReferenceLabels);
       continue;
     }
