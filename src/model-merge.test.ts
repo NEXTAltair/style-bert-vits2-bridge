@@ -333,4 +333,62 @@ describe("SBV2 model merge", () => {
       globalThis.fetch = originalFetch;
     }
   });
+
+  it("records retained merge artifacts when refresh request fails", async () => {
+    const sbv2Root = createSbv2Root();
+    const jobsRoot = tempRoot("sbv2-model-merge-jobs-");
+    writeModelAssets(sbv2Root, "model-a");
+    writeModelAssets(sbv2Root, "model-b");
+    const outputDir = path.join(sbv2Root, "model_assets", "merged");
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = async () => {
+      throw new Error("server unavailable");
+    };
+
+    try {
+      await expect(
+        runModelMerge({
+          ...commonWeightOptions(sbv2Root),
+          method: "usual",
+          confirmOutputModelName: "merged",
+          jobsRoot,
+          baseUrl: "http://localhost:5000",
+          commandRunner: async (_executable, _args, options) => {
+            mkdirSync(outputDir, { recursive: true });
+            writeFileSync(path.join(outputDir, "config.json"), JSON.stringify(makeConfig("merged")));
+            writeFileSync(path.join(outputDir, "style_vectors.npy"), makeNpy([1, 2]));
+            writeFileSync(path.join(outputDir, "merged.safetensors"), makeSafetensors());
+            writeFileSync(path.join(outputDir, "recipe.json"), JSON.stringify({ method: "usual" }));
+            return { stdout: `merged in ${options.cwd}` };
+          },
+          now: () => new Date("2026-06-02T00:00:00.000Z"),
+          randomId: () => "refreshfail",
+        }),
+      ).rejects.toThrow("server unavailable");
+
+      const jobDir = path.join(jobsRoot, "sbv2-job-20260602000000-refreshf");
+      const manifest = JSON.parse(readFileSync(path.join(jobDir, "manifest.json"), "utf8")) as {
+        state: string;
+        inputSummary: { outputAssetsRetained?: boolean };
+        artifactPaths: string[];
+      };
+      expect(manifest.state).toBe("failed");
+      expect(manifest.inputSummary.outputAssetsRetained).toBe(true);
+      expect(manifest.artifactPaths).toContain(path.join(outputDir, "recipe.json"));
+      expect(manifest.artifactPaths).toContain(path.join(outputDir, "merged.safetensors"));
+
+      const summary = JSON.parse(readFileSync(path.join(jobDir, "summary.json"), "utf8")) as {
+        state: string;
+        candidate?: { modelName?: string };
+        outputAssetsRetained?: boolean;
+        firstError?: string;
+      };
+      expect(summary.state).toBe("failed");
+      expect(summary.candidate?.modelName).toBe("merged");
+      expect(summary.outputAssetsRetained).toBe(true);
+      expect(summary.firstError).toContain("server unavailable");
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
 });

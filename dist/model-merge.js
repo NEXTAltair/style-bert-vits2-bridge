@@ -166,6 +166,7 @@ export async function runModelMerge(options) {
             ],
         };
         if (options.baseUrl) {
+            candidateForFailedJob = candidate;
             const modelsInfo = await new Sbv2Client({ baseUrl: options.baseUrl }).refreshModels();
             const found = modelInfoContains(modelsInfo, plan.outputModelName);
             summary.refresh = {
@@ -177,7 +178,6 @@ export async function runModelMerge(options) {
             };
             logLines.push(`refreshed SBV2 models from ${options.baseUrl}`);
             if (!found) {
-                candidateForFailedJob = candidate;
                 refreshForFailedJob = summary.refresh;
                 logLines.push(`merged model assets were retained at ${plan.outputDir}, but ${plan.outputModelName} was not found in /models/info`);
             }
