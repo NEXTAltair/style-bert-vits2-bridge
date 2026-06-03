@@ -420,6 +420,298 @@ describe("Style-Bert-VITS2 speech provider", () => {
     expect(voiceUrl.searchParams.get("language")).toBe("EN");
   });
 
+  it("rewrites GitHub issue metadata status text before calling /voice", async () => {
+    const mockFetch = vi
+      .fn()
+      .mockResolvedValueOnce(openApiTextLimit(400))
+      .mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.resolve(valentinaModelsInfo),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        arrayBuffer: () => Promise.resolve(wavBytes.buffer),
+      });
+    vi.stubGlobal("fetch", mockFetch);
+
+    const provider = buildSbv2SpeechProvider();
+    const result = await provider.synthesize({
+      text: "Issue: https://github.com/NEXTAltair/style-bert-vits2-bridge/issues/64",
+      providerConfig: { baseUrl: "http://localhost:5000" },
+    });
+
+    const voiceUrl = new URL(mockFetch.mock.calls[2][0]);
+    const spokenText = voiceUrl.searchParams.get("text");
+    expect(spokenText).toBe("GitHub の課題を更新しました。");
+    expect(spokenText).not.toContain("Issue");
+    expect(spokenText).not.toContain("issues/64");
+    expect(spokenText).not.toContain("https://github.com");
+    expect(result.metadata).toMatchObject({ textPreparation: "metadata_status_rewrite" });
+  });
+
+  it("rewrites GitHub PR status lines without leaking labels or URLs", async () => {
+    const mockFetch = vi
+      .fn()
+      .mockResolvedValueOnce(openApiTextLimit(400))
+      .mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.resolve(valentinaModelsInfo),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        arrayBuffer: () => Promise.resolve(wavBytes.buffer),
+      });
+    vi.stubGlobal("fetch", mockFetch);
+
+    const provider = buildSbv2SpeechProvider();
+    const result = await provider.synthesize({
+      text: "PR updated: https://github.com/NEXTAltair/style-bert-vits2-bridge/pull/65",
+      providerConfig: { baseUrl: "http://localhost:5000", defaultLanguage: "EN" },
+    });
+
+    const voiceUrl = new URL(mockFetch.mock.calls[2][0]);
+    const spokenText = voiceUrl.searchParams.get("text");
+    expect(spokenText).toBe("The GitHub pull request was updated.");
+    expect(spokenText).not.toContain("PR updated");
+    expect(spokenText).not.toContain("/pull/65");
+    expect(spokenText).not.toContain("https://github.com");
+    expect(result.metadata).toMatchObject({ textPreparation: "metadata_status_rewrite" });
+  });
+
+  it("rewrites verb-first GitHub issue metadata status lines", async () => {
+    const mockFetch = vi
+      .fn()
+      .mockResolvedValueOnce(openApiTextLimit(400))
+      .mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.resolve(valentinaModelsInfo),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        arrayBuffer: () => Promise.resolve(wavBytes.buffer),
+      });
+    vi.stubGlobal("fetch", mockFetch);
+
+    const provider = buildSbv2SpeechProvider();
+    const result = await provider.synthesize({
+      text: "Created issue: https://github.com/NEXTAltair/style-bert-vits2-bridge/issues/64",
+      providerConfig: { baseUrl: "http://localhost:5000", defaultLanguage: "EN" },
+    });
+
+    const voiceUrl = new URL(mockFetch.mock.calls[2][0]);
+    expect(voiceUrl.searchParams.get("text")).toBe("The GitHub issue was updated.");
+    expect(result.metadata).toMatchObject({ textPreparation: "metadata_status_rewrite" });
+  });
+
+  it("rewrites GitHub-prefixed pull request metadata status lines", async () => {
+    const inputs = [
+      "GitHub pull request: https://github.com/NEXTAltair/style-bert-vits2-bridge/pull/65",
+      "Updated GitHub pull request: https://github.com/NEXTAltair/style-bert-vits2-bridge/pull/65",
+    ];
+
+    for (const text of inputs) {
+      const mockFetch = vi
+        .fn()
+        .mockResolvedValueOnce(openApiTextLimit(400))
+        .mockResolvedValueOnce({
+          ok: true,
+          json: () => Promise.resolve(valentinaModelsInfo),
+        })
+        .mockResolvedValueOnce({
+          ok: true,
+          arrayBuffer: () => Promise.resolve(wavBytes.buffer),
+        });
+      vi.stubGlobal("fetch", mockFetch);
+
+      const provider = buildSbv2SpeechProvider();
+      const result = await provider.synthesize({
+        text,
+        providerConfig: { baseUrl: "http://localhost:5000", defaultLanguage: "EN" },
+      });
+
+      const voiceUrl = new URL(mockFetch.mock.calls[2][0]);
+      expect(voiceUrl.searchParams.get("text")).toBe("The GitHub pull request was updated.");
+      expect(result.metadata).toMatchObject({ textPreparation: "metadata_status_rewrite" });
+    }
+  });
+
+  it("rewrites GitHub comment and review URL metadata status lines", async () => {
+    const inputs = [
+      ["Commented issue: https://github.com/NEXTAltair/style-bert-vits2-bridge/issues/64#issuecomment-123", "The GitHub issue was updated."],
+      ["Issue: https://github.com/NEXTAltair/style-bert-vits2-bridge/issues/64?notification_referrer_id=abc123", "The GitHub issue was updated."],
+      ["Posted PR: https://github.com/NEXTAltair/style-bert-vits2-bridge/pull/65#discussion_r123", "The GitHub pull request was updated."],
+    ] as const;
+
+    for (const [text, expectedText] of inputs) {
+      const mockFetch = vi
+        .fn()
+        .mockResolvedValueOnce(openApiTextLimit(400))
+        .mockResolvedValueOnce({
+          ok: true,
+          json: () => Promise.resolve(valentinaModelsInfo),
+        })
+        .mockResolvedValueOnce({
+          ok: true,
+          arrayBuffer: () => Promise.resolve(wavBytes.buffer),
+        });
+      vi.stubGlobal("fetch", mockFetch);
+
+      const provider = buildSbv2SpeechProvider();
+      const result = await provider.synthesize({
+        text,
+        providerConfig: { baseUrl: "http://localhost:5000", defaultLanguage: "EN" },
+      });
+
+      const voiceUrl = new URL(mockFetch.mock.calls[2][0]);
+      expect(voiceUrl.searchParams.get("text")).toBe(expectedText);
+      expect(result.metadata).toMatchObject({ textPreparation: "metadata_status_rewrite" });
+    }
+  });
+
+  it("rewrites mixed issue and PR metadata-only blocks generically", async () => {
+    const mockFetch = vi
+      .fn()
+      .mockResolvedValueOnce(openApiTextLimit(400))
+      .mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.resolve(valentinaModelsInfo),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        arrayBuffer: () => Promise.resolve(wavBytes.buffer),
+      });
+    vi.stubGlobal("fetch", mockFetch);
+
+    const provider = buildSbv2SpeechProvider();
+    const result = await provider.synthesize({
+      text: [
+        "Issue: https://github.com/NEXTAltair/style-bert-vits2-bridge/issues/64",
+        "PR: https://github.com/NEXTAltair/style-bert-vits2-bridge/pull/65",
+      ].join("\n"),
+      providerConfig: { baseUrl: "http://localhost:5000", defaultLanguage: "EN" },
+    });
+
+    const voiceUrl = new URL(mockFetch.mock.calls[2][0]);
+    expect(voiceUrl.searchParams.get("text")).toBe("The GitHub items were updated.");
+    expect(result.metadata).toMatchObject({ textPreparation: "metadata_status_rewrite" });
+  });
+
+  it("rewrites longer metadata-only link blocks before SBV2 text-limit checks", async () => {
+    const mockFetch = vi
+      .fn()
+      .mockResolvedValueOnce(openApiTextLimit(40))
+      .mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.resolve(valentinaModelsInfo),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        arrayBuffer: () => Promise.resolve(wavBytes.buffer),
+      });
+    vi.stubGlobal("fetch", mockFetch);
+
+    const provider = buildSbv2SpeechProvider();
+    const result = await provider.synthesize({
+      text: [
+        "Issue: https://github.com/NEXTAltair/style-bert-vits2-bridge/issues/64",
+        "Issue: https://github.com/NEXTAltair/style-bert-vits2-bridge/issues/65",
+        "Issue: https://github.com/NEXTAltair/style-bert-vits2-bridge/issues/66",
+        "Issue: https://github.com/NEXTAltair/style-bert-vits2-bridge/issues/67",
+      ].join("\n"),
+      providerConfig: { baseUrl: "http://localhost:5000", defaultLanguage: "EN" },
+    });
+
+    const voiceUrl = new URL(mockFetch.mock.calls[2][0]);
+    expect(voiceUrl.searchParams.get("text")).toBe("The GitHub issue was updated.");
+    expect(result.metadata).toMatchObject({ textPreparation: "metadata_status_rewrite" });
+  });
+
+  it("rewrites numbered GitHub issue and PR metadata labels", async () => {
+    const inputs = [
+      ["Issue #64: https://github.com/NEXTAltair/style-bert-vits2-bridge/issues/64", "The GitHub issue was updated."],
+      ["PR #65: https://github.com/NEXTAltair/style-bert-vits2-bridge/pull/65", "The GitHub pull request was updated."],
+    ] as const;
+
+    for (const [text, expectedText] of inputs) {
+      const mockFetch = vi
+        .fn()
+        .mockResolvedValueOnce(openApiTextLimit(400))
+        .mockResolvedValueOnce({
+          ok: true,
+          json: () => Promise.resolve(valentinaModelsInfo),
+        })
+        .mockResolvedValueOnce({
+          ok: true,
+          arrayBuffer: () => Promise.resolve(wavBytes.buffer),
+        });
+      vi.stubGlobal("fetch", mockFetch);
+
+      const provider = buildSbv2SpeechProvider();
+      const result = await provider.synthesize({
+        text,
+        providerConfig: { baseUrl: "http://localhost:5000", defaultLanguage: "EN" },
+      });
+
+      const voiceUrl = new URL(mockFetch.mock.calls[2][0]);
+      expect(voiceUrl.searchParams.get("text")).toBe(expectedText);
+      expect(result.metadata).toMatchObject({ textPreparation: "metadata_status_rewrite" });
+    }
+  });
+
+  it("does not rewrite mixed GitHub issue metadata and user-facing prose", async () => {
+    const mockFetch = vi
+      .fn()
+      .mockResolvedValueOnce(openApiTextLimit(400))
+      .mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.resolve(valentinaModelsInfo),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        arrayBuffer: () => Promise.resolve(wavBytes.buffer),
+      });
+    vi.stubGlobal("fetch", mockFetch);
+
+    const text = [
+      "Issue: https://github.com/NEXTAltair/style-bert-vits2-bridge/issues/64",
+      "Please review the repro steps below.",
+    ].join("\n");
+    const provider = buildSbv2SpeechProvider();
+    const result = await provider.synthesize({
+      text,
+      providerConfig: { baseUrl: "http://localhost:5000", defaultLanguage: "EN" },
+    });
+
+    const voiceUrl = new URL(mockFetch.mock.calls[2][0]);
+    expect(voiceUrl.searchParams.get("text")).toBe(text);
+    expect(result.metadata).not.toHaveProperty("textPreparation");
+  });
+
+  it("defers SBV2 text limit checks for long metadata that will be rewritten", async () => {
+    const mockFetch = vi
+      .fn()
+      .mockResolvedValueOnce(openApiTextLimit(40))
+      .mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.resolve(valentinaModelsInfo),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        arrayBuffer: () => Promise.resolve(wavBytes.buffer),
+      });
+    vi.stubGlobal("fetch", mockFetch);
+
+    const provider = buildSbv2SpeechProvider();
+    const result = await provider.synthesize({
+      text: "Issue: https://github.com/NEXTAltair/style-bert-vits2-bridge/issues/64",
+      providerConfig: { baseUrl: "http://localhost:5000", defaultLanguage: "EN" },
+    });
+
+    const voiceUrl = new URL(mockFetch.mock.calls[2][0]);
+    expect(voiceUrl.searchParams.get("text")).toBe("The GitHub issue was updated.");
+    expect(result.metadata).toMatchObject({ textPreparation: "metadata_status_rewrite" });
+  });
+
   it("passes ordinary Japanese text through without tool status rewriting", async () => {
     const mockFetch = vi
       .fn()
@@ -1032,6 +1324,33 @@ describe("Style-Bert-VITS2 speech provider", () => {
 
     const voiceUrl = new URL(mockFetch.mock.calls[2][0]);
     expect(voiceUrl.searchParams.get("text")).toBe("gh issue close 2 --repo NEXTAltair/openclaw failed");
+    expect(result.metadata).toMatchObject({ textPreparation: "explicit" });
+  });
+
+  it("allows explicit tts text to speak GitHub issue metadata intentionally", async () => {
+    const mockFetch = vi
+      .fn()
+      .mockResolvedValueOnce(openApiTextLimit(400))
+      .mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.resolve(valentinaModelsInfo),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        arrayBuffer: () => Promise.resolve(wavBytes.buffer),
+      });
+    vi.stubGlobal("fetch", mockFetch);
+
+    const provider = buildSbv2SpeechProvider();
+    const result = await provider.synthesize({
+      text: "[[tts:text]]Issue: https://github.com/NEXTAltair/style-bert-vits2-bridge/issues/64[[/tts:text]]",
+      providerConfig: { baseUrl: "http://localhost:5000" },
+    });
+
+    const voiceUrl = new URL(mockFetch.mock.calls[2][0]);
+    expect(voiceUrl.searchParams.get("text")).toBe(
+      "Issue: https://github.com/NEXTAltair/style-bert-vits2-bridge/issues/64",
+    );
     expect(result.metadata).toMatchObject({ textPreparation: "explicit" });
   });
 
