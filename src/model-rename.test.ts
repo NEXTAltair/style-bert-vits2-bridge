@@ -242,6 +242,30 @@ describe("SBV2 model rename", () => {
     expect(result.job.artifactPaths).not.toContain(path.join(sbv2Root, "Data", "new-voice", "esd.list"));
   });
 
+  it("rejects esd.list speaker collisions before rewriting speaker fields", async () => {
+    const sbv2Root = createSbv2Root();
+    writeModelAssets(sbv2Root, "old-voice");
+    const dataDir = path.join(sbv2Root, "Data", "old-voice");
+    mkdirSync(dataDir, { recursive: true });
+    writeFileSync(
+      path.join(dataDir, "esd.list"),
+      ["wavs/a.wav|old-voice|JP|hello", "wavs/b.wav|new-voice|JP|hello"].join("\n") + "\n",
+    );
+
+    const plan = await createModelRenamePlan({
+      sbv2Root,
+      fromModelName: "old-voice",
+      toModelName: "new-voice",
+      includeData: true,
+      renameEsdSpeaker: true,
+    });
+
+    expect(plan.compatibility.compatible).toBe(false);
+    expect(plan.compatibility.errors).toContain(
+      `esd.list already contains target speaker "new-voice": ${path.join(dataDir, "esd.list")}`,
+    );
+  });
+
   it("keeps renamed assets when refresh verification fails", async () => {
     const sbv2Root = createSbv2Root();
     const jobsRoot = tempRoot("sbv2-model-rename-jobs-");

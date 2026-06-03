@@ -173,6 +173,7 @@ export async function createModelRenamePlan(options: ModelRenameOptions): Promis
         const esdPath = path.join(sourceDataDir, "esd.list");
         const esdChange = await planEsdSpeakerChange(esdPath, options.fromModelName, options.toModelName);
         if (esdChange) changes.push(esdChange);
+        errors.push(...(await esdSpeakerCollisionErrors(esdPath, options.fromModelName, options.toModelName)));
       }
     } else {
       warnings.push(`dataset directory was not found and will not be moved: ${sourceDataDir}`);
@@ -292,7 +293,7 @@ export async function runModelRename(options: ModelRenameRunOptions): Promise<Mo
     changesApplied.push({ kind: "path-move", from: plan.sourceAssetsDir, to: plan.targetAssetsDir });
     logLines.push(`moved model assets to ${plan.targetAssetsDir}`);
 
-    if (plan.includeData && (await pathExists(plan.sourceDataDir))) {
+    if (planIncludesDataMove(plan)) {
       await moveDirectoryWithoutOverwriting(plan.sourceDataDir, plan.targetDataDir);
       rollbackActions.push(async () => moveDirectoryWithoutOverwriting(plan.targetDataDir, plan.sourceDataDir));
       changesApplied.push({ kind: "path-move", from: plan.sourceDataDir, to: plan.targetDataDir });
@@ -552,6 +553,15 @@ async function planEsdSpeakerChange(
     : undefined;
 }
 
+async function esdSpeakerCollisionErrors(esdPath: string, fromModelName: string, toModelName: string): Promise<string[]> {
+  if (!(await pathExists(esdPath))) return [];
+  const text = await readFile(esdPath, "utf8");
+  const speakers = readEsdSpeakers(text);
+  return speakers.has(fromModelName) && speakers.has(toModelName)
+    ? [`esd.list already contains target speaker "${toModelName}": ${esdPath}`]
+    : [];
+}
+
 function rewriteEsdSpeaker(text: string, fromModelName: string, toModelName: string): { text: string; changedLineCount: number } {
   let changedLineCount = 0;
   const hadTrailingNewline = text.endsWith("\n");
@@ -570,6 +580,16 @@ function rewriteEsdSpeaker(text: string, fromModelName: string, toModelName: str
     text: `${updated.join("\n")}${hadTrailingNewline ? "\n" : ""}`,
     changedLineCount,
   };
+}
+
+function readEsdSpeakers(text: string): Set<string> {
+  const speakers = new Set<string>();
+  for (const line of text.split(/\r?\n/)) {
+    if (!line) continue;
+    const parts = line.split("|");
+    if (parts.length > 1) speakers.add(parts[1]);
+  }
+  return speakers;
 }
 
 async function rollback(actions: RollbackAction[], warnings: string[], logLines: string[]): Promise<void> {

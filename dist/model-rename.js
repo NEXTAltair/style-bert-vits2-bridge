@@ -82,6 +82,7 @@ export async function createModelRenamePlan(options) {
                 const esdChange = await planEsdSpeakerChange(esdPath, options.fromModelName, options.toModelName);
                 if (esdChange)
                     changes.push(esdChange);
+                errors.push(...(await esdSpeakerCollisionErrors(esdPath, options.fromModelName, options.toModelName)));
             }
         }
         else {
@@ -190,7 +191,7 @@ export async function runModelRename(options) {
         rollbackActions.push(async () => moveDirectoryWithoutOverwriting(plan.targetAssetsDir, plan.sourceAssetsDir));
         changesApplied.push({ kind: "path-move", from: plan.sourceAssetsDir, to: plan.targetAssetsDir });
         logLines.push(`moved model assets to ${plan.targetAssetsDir}`);
-        if (plan.includeData && (await pathExists(plan.sourceDataDir))) {
+        if (planIncludesDataMove(plan)) {
             await moveDirectoryWithoutOverwriting(plan.sourceDataDir, plan.targetDataDir);
             rollbackActions.push(async () => moveDirectoryWithoutOverwriting(plan.targetDataDir, plan.sourceDataDir));
             changesApplied.push({ kind: "path-move", from: plan.sourceDataDir, to: plan.targetDataDir });
@@ -419,6 +420,15 @@ async function planEsdSpeakerChange(esdPath, fromModelName, toModelName) {
         }
         : undefined;
 }
+async function esdSpeakerCollisionErrors(esdPath, fromModelName, toModelName) {
+    if (!(await pathExists(esdPath)))
+        return [];
+    const text = await readFile(esdPath, "utf8");
+    const speakers = readEsdSpeakers(text);
+    return speakers.has(fromModelName) && speakers.has(toModelName)
+        ? [`esd.list already contains target speaker "${toModelName}": ${esdPath}`]
+        : [];
+}
 function rewriteEsdSpeaker(text, fromModelName, toModelName) {
     let changedLineCount = 0;
     const hadTrailingNewline = text.endsWith("\n");
@@ -438,6 +448,17 @@ function rewriteEsdSpeaker(text, fromModelName, toModelName) {
         text: `${updated.join("\n")}${hadTrailingNewline ? "\n" : ""}`,
         changedLineCount,
     };
+}
+function readEsdSpeakers(text) {
+    const speakers = new Set();
+    for (const line of text.split(/\r?\n/)) {
+        if (!line)
+            continue;
+        const parts = line.split("|");
+        if (parts.length > 1)
+            speakers.add(parts[1]);
+    }
+    return speakers;
 }
 async function rollback(actions, warnings, logLines) {
     for (const action of [...actions].reverse()) {
