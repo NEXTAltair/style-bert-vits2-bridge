@@ -72,6 +72,11 @@ const COMMAND_STATUS_SUBCOMMANDS = [
 const COMMAND_STATUS_SCRIPT_PATH = "(?:[a-z0-9:_-]+/[a-z0-9:_./-]+|[a-z0-9:_/-]*[a-z_][a-z0-9_-]*\\.[a-z][a-z0-9]+)";
 const COMMAND_STATUS_ARGUMENT = `(?:(?:-{1,2}[a-z][a-z0-9-]*)|(?:[a-z0-9:_./-]+\\s+-{1,2}[a-z][a-z0-9-]*)|(?:${COMMAND_STATUS_SCRIPT_PATH})|(?:(?:${COMMAND_STATUS_SUBCOMMANDS})\\b))`;
 const COMMAND_STATUS_COMMAND = `${COMMAND_STATUS_TOOLS}\\s+(?:(?:${COMMAND_STATUS_SUBCOMMANDS})\\b|(?:${COMMAND_STATUS_SCRIPT_PATH}))`;
+const GITHUB_ISSUE_OR_PR_URL = "https?:\\/\\/github\\.com\\/[^\\/\\s)>`\\]]+\\/[^\\/\\s)>`\\]]+\\/(issues|pull|pulls)\\/\\d+\\b(?:\\.(?:diff|patch))?(?:\\/[^?#\\s)>`\\]]*)?(?:\\?[^#\\s)>`\\]]*)?(?:#[^\\s)>`\\]]+)?";
+const MARKDOWN_LINK_TITLE = `(?:"[^"\\n]*"|'[^'\\n]*'|\\([^\\)\\n]*\\))`;
+const GITHUB_ISSUE_OR_PR_MARKDOWN_DESTINATION = `(?:${GITHUB_ISSUE_OR_PR_URL}|<\\s*${GITHUB_ISSUE_OR_PR_URL}\\s*>)`;
+const GITHUB_ISSUE_OR_PR_MARKDOWN_LINK = `\\[([^\\]\\n]*)\\]\\(\\s*${GITHUB_ISSUE_OR_PR_MARKDOWN_DESTINATION}(?:\\s+${MARKDOWN_LINK_TITLE})?\\s*\\)`;
+const GITHUB_ISSUE_OR_PR_MARKDOWN_IMAGE = `!${GITHUB_ISSUE_OR_PR_MARKDOWN_LINK}`;
 function trimToUndefined(value) {
     return typeof value === "string" && value.trim() ? value.trim() : undefined;
 }
@@ -123,15 +128,16 @@ function classifyMetadataStatusText(value) {
     const text = value.trim();
     if (!text)
         return undefined;
-    const githubIssueOrPrUrl = "https?:\\/\\/github\\.com\\/[^\\s)]+\\/(issues|pull|pulls)\\/\\d+\\b(?:\\?[^#\\s)]*)?(?:#[^\\s)]+)?";
-    const githubIssueOrPrUrlPattern = new RegExp(githubIssueOrPrUrl, "i");
+    const githubIssueOrPrUrlPattern = new RegExp(GITHUB_ISSUE_OR_PR_URL, "i");
     if (!githubIssueOrPrUrlPattern.test(text))
         return undefined;
     const metadataVerbs = "(?:created|opened|updated|closed|reopened|merged|commented|added|posted)";
     const metadataSubjects = "(?:github\\s+)?(?:issue|pr|pull request)";
     const metadataNumber = "(?:\\s+#?\\d+)?";
-    const labelFirstMetadataLine = new RegExp(`^(?:[-*]\\s*)?${metadataSubjects}${metadataNumber}(?:\\s+${metadataVerbs})?\\s*[:#-]\\s*${githubIssueOrPrUrl}\\s*$`, "i");
-    const verbFirstMetadataLine = new RegExp(`^(?:[-*]\\s*)?${metadataVerbs}\\s+${metadataSubjects}${metadataNumber}\\s*[:#-]\\s*${githubIssueOrPrUrl}\\s*$`, "i");
+    const listPrefix = "(?:(?:[-*+]|\\d+[.)])\\s*)?";
+    const terminalPunctuation = "[.。]?";
+    const labelFirstMetadataLine = new RegExp(`^${listPrefix}${metadataSubjects}${metadataNumber}(?:\\s+${metadataVerbs})?\\s*[:#-]\\s*${GITHUB_ISSUE_OR_PR_URL}${terminalPunctuation}\\s*$`, "i");
+    const verbFirstMetadataLine = new RegExp(`^${listPrefix}${metadataVerbs}\\s+${metadataSubjects}${metadataNumber}\\s*[:#-]\\s*${GITHUB_ISSUE_OR_PR_URL}${terminalPunctuation}\\s*$`, "i");
     const lines = text.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
     if (!lines.length)
         return undefined;
@@ -148,6 +154,126 @@ function classifyMetadataStatusText(value) {
     }
     return kind;
 }
+function cleanupSpeechLineAfterUrlRemoval(value) {
+    return value
+        .replace(/^\(\s*\)$/, "")
+        .replace(/^\[\s*\]$/, "")
+        .replace(/<\s*>/g, "")
+        .replace(/`+\s*`+/g, "")
+        .replace(/(\*{1,3})([^*\n]+?)\1/g, "$2")
+        .replace(/(_{1,3})([^_\n]*\s[^_\n]*?)\1/g, "$2")
+        .replace(/(^|[ \t])(?:[*_]\s*){2,}(?=$|[ \t])/g, "$1")
+        .replace(/\s+([。、，,.!?！？:;])/g, "$1")
+        .replace(/[ \t]{2,}/g, " ")
+        .replace(/^#{1,6}\s+/, "")
+        .replace(/^#{1,6}\s*$/, "")
+        .replace(/^(?:[-*+]|\d+[.)])\s+/, "")
+        .replace(/^(?:[-*+]|\d+[.)])\s*$/, "")
+        .replace(/^([*_]{1,3})(.+)\1$/, "$2")
+        .replace(/^(?:[*_]\s*){2,}$/, "")
+        .replace(/^[<>`]+$/, "")
+        .replace(/^[、。，,.!?！？:;]+$/, "")
+        .trim();
+}
+function looksLikeGithubMetadataLabelRemainder(value) {
+    return /^(?:(?:[-*+]|\d+[.)])\s*)?(?:(?:created|opened|updated|closed|reopened|merged|commented|added|posted)\s+)?(?:github\s+)?(?:issue|pr|pull request)(?:(?:\s+#?\d+)|(?:\s*[:#-]\s*#?\d+))?(?:\s+(?:created|opened|updated|closed|reopened|merged|commented|added|posted))?\s*[:#-]?\s*[、。，,.!?！？:;]*\s*$/i.test(value);
+}
+function looksLikeMarkdownReferenceDefinitionRemainder(value) {
+    return new RegExp(`^\\[[^\\]\\n]+\\]:\\s*(?:${MARKDOWN_LINK_TITLE})?\\s*$`).test(value.trim());
+}
+function collectGithubMarkdownReferenceIds(value) {
+    const definitionPattern = new RegExp(`^\\s*\\[([^\\]\\n]+)\\]:\\s*${GITHUB_ISSUE_OR_PR_MARKDOWN_DESTINATION}(?:\\s+${MARKDOWN_LINK_TITLE})?\\s*$`, "gim");
+    return new Set(Array.from(value.matchAll(definitionPattern), (match) => normalizeMarkdownReferenceLabel(match[1])));
+}
+function collectGithubMarkdownReferenceTitleLineIndexes(value) {
+    const definitionWithoutTitlePattern = new RegExp(`^\\s*\\[[^\\]\\n]+\\]:\\s*${GITHUB_ISSUE_OR_PR_MARKDOWN_DESTINATION}\\s*$`, "i");
+    const titleLinePattern = new RegExp(`^\\s+${MARKDOWN_LINK_TITLE}\\s*$`);
+    const lines = value.split(/\r?\n/);
+    const indexes = new Set();
+    for (let index = 1; index < lines.length; index += 1) {
+        if (definitionWithoutTitlePattern.test(lines[index - 1]) && titleLinePattern.test(lines[index])) {
+            indexes.add(index);
+        }
+    }
+    return indexes;
+}
+function normalizeMarkdownReferenceLabel(value) {
+    return value.trim().replace(/\s+/g, " ").toLowerCase();
+}
+function replaceGithubMarkdownReferenceUsages(value, githubReferenceIds) {
+    if (!githubReferenceIds.size)
+        return value;
+    return value
+        .replace(/!\[([^\]\n]+)\]\[\]/g, (match, label) => githubReferenceIds.has(normalizeMarkdownReferenceLabel(label)) ? label.trim() : match)
+        .replace(/!\[([^\]\n]+)\]\[([^\]\n]+)\]/g, (match, label, id) => githubReferenceIds.has(normalizeMarkdownReferenceLabel(id)) ? label.trim() : match)
+        .replace(/!\[([^\]\n]+)\](?!\s*[:\[(])/g, (match, label) => githubReferenceIds.has(normalizeMarkdownReferenceLabel(label)) ? label.trim() : match)
+        .replace(/\[([^\]\n]+)\]\[\]/g, (match, label) => githubReferenceIds.has(normalizeMarkdownReferenceLabel(label)) ? label.trim() : match)
+        .replace(/\[([^\]\n]+)\]\[([^\]\n]+)\]/g, (match, label, id) => githubReferenceIds.has(normalizeMarkdownReferenceLabel(id)) ? label.trim() : match)
+        .replace(/\[([^\]\n]+)\](?!\s*[:\[(])/g, (match, label) => githubReferenceIds.has(normalizeMarkdownReferenceLabel(label)) ? label.trim() : match);
+}
+function sanitizeGithubUrlsFromSpeechText(value, language) {
+    const githubUrlPattern = new RegExp(GITHUB_ISSUE_OR_PR_URL, "gi");
+    const markdownImagePattern = new RegExp(GITHUB_ISSUE_OR_PR_MARKDOWN_IMAGE, "gi");
+    const markdownLinkPattern = new RegExp(GITHUB_ISSUE_OR_PR_MARKDOWN_LINK, "gi");
+    const wrappedGithubUrlPattern = new RegExp(`(?:\\(\\s*${GITHUB_ISSUE_OR_PR_URL}\\s*\\)|\\[\\s*${GITHUB_ISSUE_OR_PR_URL}\\s*\\])`, "gi");
+    if (!githubUrlPattern.test(value))
+        return undefined;
+    let kind;
+    const lines = [];
+    const githubReferenceIds = collectGithubMarkdownReferenceIds(value);
+    const githubReferenceTitleLineIndexes = collectGithubMarkdownReferenceTitleLineIndexes(value);
+    for (const [lineIndex, line] of value.split(/\r?\n/).entries()) {
+        githubUrlPattern.lastIndex = 0;
+        const matches = Array.from(line.matchAll(githubUrlPattern));
+        if (!matches.length) {
+            if (githubReferenceTitleLineIndexes.has(lineIndex))
+                continue;
+            const lineWithReferenceLabels = replaceGithubMarkdownReferenceUsages(line, githubReferenceIds).trim();
+            if (lineWithReferenceLabels)
+                lines.push(lineWithReferenceLabels);
+            continue;
+        }
+        for (const match of matches) {
+            const resource = match[1]?.toLowerCase();
+            const lineKind = resource === "issues" ? "issue" : "pull_request";
+            kind ??= lineKind;
+            if (kind !== lineKind)
+                kind = "github_item";
+        }
+        githubUrlPattern.lastIndex = 0;
+        markdownImagePattern.lastIndex = 0;
+        markdownLinkPattern.lastIndex = 0;
+        wrappedGithubUrlPattern.lastIndex = 0;
+        const lineWithoutLinks = cleanupSpeechLineAfterUrlRemoval(line
+            .replace(markdownImagePattern, "")
+            .replace(markdownLinkPattern, "")
+            .replace(wrappedGithubUrlPattern, "")
+            .replace(githubUrlPattern, ""));
+        wrappedGithubUrlPattern.lastIndex = 0;
+        markdownImagePattern.lastIndex = 0;
+        const lineWithLabels = cleanupSpeechLineAfterUrlRemoval(replaceGithubMarkdownReferenceUsages(line, githubReferenceIds)
+            .replace(markdownImagePattern, (_match, label) => label.trim())
+            .replace(markdownLinkPattern, (_match, label) => label.trim())
+            .replace(wrappedGithubUrlPattern, "")
+            .replace(githubUrlPattern, ""));
+        const sanitizedLine = [lineWithLabels, lineWithoutLinks].find((candidate) => candidate &&
+            !looksLikeGithubMetadataLabelRemainder(candidate) &&
+            !looksLikeMarkdownReferenceDefinitionRemainder(candidate));
+        if (sanitizedLine)
+            lines.push(sanitizedLine);
+    }
+    const sanitizedText = lines.join("\n").trim();
+    if (sanitizedText) {
+        return { text: sanitizedText, textPreparation: "url_sanitize" };
+    }
+    if (kind) {
+        return {
+            text: METADATA_STATUS_REWRITE_TEXT[language ?? "JP"][kind],
+            textPreparation: "metadata_status_rewrite",
+        };
+    }
+    return undefined;
+}
 function prepareSpeechText(value, language) {
     const explicitText = extractExplicitTtsText(value);
     if (explicitText) {
@@ -163,6 +289,9 @@ function prepareSpeechText(value, language) {
             textPreparation: "metadata_status_rewrite",
         };
     }
+    const sanitizedText = sanitizeGithubUrlsFromSpeechText(value, language);
+    if (sanitizedText)
+        return sanitizedText;
     return { text: value };
 }
 function parseSbv2VoiceId(value) {
@@ -398,11 +527,14 @@ export function buildSbv2SpeechProvider(options = {}) {
             const pronunciationReplacements = resolvePronunciationReplacements(config);
             const textCapabilities = await client.getTextCapabilities();
             const explicitText = extractExplicitTtsText(req.text);
-            const metadataStatusKind = explicitText ? undefined : classifyMetadataStatusText(req.text);
-            const shouldDeferTextLimitCheck = !explicitText && (looksLikeToolStatusText(req.text) || metadataStatusKind !== undefined);
-            if (!shouldDeferTextLimitCheck) {
-                const preflightText = explicitText ?? applyPronunciationReplacements(req.text, pronunciationReplacements);
-                assertSbv2TextWithinHardLimit(preflightText, textCapabilities.maxInputChars);
+            const earlyPreparedText = explicitText
+                ? { text: explicitText, textPreparation: "explicit" }
+                : prepareSpeechText(req.text, "JP");
+            if (earlyPreparedText.textPreparation === undefined || earlyPreparedText.textPreparation === "explicit") {
+                const earlyPreflightText = earlyPreparedText.textPreparation === "explicit"
+                    ? earlyPreparedText.text
+                    : applyPronunciationReplacements(earlyPreparedText.text, pronunciationReplacements);
+                assertSbv2TextWithinHardLimit(earlyPreflightText, textCapabilities.maxInputChars);
             }
             try {
                 resolvedVoice = await resolveVoiceProfile({
@@ -417,6 +549,13 @@ export function buildSbv2SpeechProvider(options = {}) {
                     resolvedVoice: readVoiceContext(config, providerOverrides),
                 }));
             }
+            const preflightPreparedText = explicitText
+                ? { text: explicitText, textPreparation: "explicit" }
+                : prepareSpeechText(req.text, resolvedVoice.language);
+            const preflightText = preflightPreparedText.textPreparation === "explicit"
+                ? preflightPreparedText.text
+                : applyPronunciationReplacements(preflightPreparedText.text, pronunciationReplacements);
+            assertSbv2TextWithinHardLimit(preflightText, textCapabilities.maxInputChars);
             let audioBuffer;
             const preparedText = prepareSpeechText(req.text, resolvedVoice.language);
             try {

@@ -658,7 +658,47 @@ describe("Style-Bert-VITS2 speech provider", () => {
     }
   });
 
-  it("does not rewrite mixed GitHub issue metadata and user-facing prose", async () => {
+  it("rewrites GitHub PR subpage URL metadata without leaking suffixes", async () => {
+    const inputs = [
+      "PR: https://github.com/NEXTAltair/style-bert-vits2-bridge/pull/65/files",
+      "PR: https://github.com/NEXTAltair/style-bert-vits2-bridge/pull/65/checks?check_run_id=123",
+      "PR: [#65](https://github.com/NEXTAltair/style-bert-vits2-bridge/pull/65/files)",
+      "1. PR: https://github.com/NEXTAltair/style-bert-vits2-bridge/pull/65",
+      "PR: https://github.com/NEXTAltair/style-bert-vits2-bridge/pull/65.",
+    ];
+
+    for (const text of inputs) {
+      const mockFetch = vi
+        .fn()
+        .mockResolvedValueOnce(openApiTextLimit(400))
+        .mockResolvedValueOnce({
+          ok: true,
+          json: () => Promise.resolve(valentinaModelsInfo),
+        })
+        .mockResolvedValueOnce({
+          ok: true,
+          arrayBuffer: () => Promise.resolve(wavBytes.buffer),
+        });
+      vi.stubGlobal("fetch", mockFetch);
+
+      const provider = buildSbv2SpeechProvider();
+      const result = await provider.synthesize({
+        text,
+        providerConfig: { baseUrl: "http://localhost:5000", defaultLanguage: "EN" },
+      });
+
+      const voiceUrl = new URL(mockFetch.mock.calls[2][0]);
+      const spokenText = voiceUrl.searchParams.get("text");
+      expect(spokenText).toBe("The GitHub pull request was updated.");
+      expect(spokenText).not.toContain("/files");
+      expect(spokenText).not.toContain("/checks");
+      expect(spokenText).not.toContain("#65");
+      expect(spokenText).not.toContain("1. PR");
+      expect(result.metadata).toMatchObject({ textPreparation: "metadata_status_rewrite" });
+    }
+  });
+
+  it("drops GitHub issue metadata URL lines from mixed user-facing prose", async () => {
     const mockFetch = vi
       .fn()
       .mockResolvedValueOnce(openApiTextLimit(400))
@@ -683,8 +723,1010 @@ describe("Style-Bert-VITS2 speech provider", () => {
     });
 
     const voiceUrl = new URL(mockFetch.mock.calls[2][0]);
+    expect(voiceUrl.searchParams.get("text")).toBe("Please review the repro steps below.");
+    expect(result.metadata).toMatchObject({ textPreparation: "url_sanitize" });
+  });
+
+  it("drops bare GitHub issue URL lines from final response speech text", async () => {
+    const mockFetch = vi
+      .fn()
+      .mockResolvedValueOnce(openApiTextLimit(400))
+      .mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.resolve(valentinaModelsInfo),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        arrayBuffer: () => Promise.resolve(wavBytes.buffer),
+      });
+    vi.stubGlobal("fetch", mockFetch);
+
+    const provider = buildSbv2SpeechProvider();
+    const result = await provider.synthesize({
+      text: [
+        "作った。",
+        "",
+        "https://github.com/NEXTAltair/style-bert-vits2-bridge/issues/71",
+        "",
+        "内容は確認します。",
+      ].join("\n"),
+      providerConfig: { baseUrl: "http://localhost:5000" },
+    });
+
+    const voiceUrl = new URL(mockFetch.mock.calls[2][0]);
+    const spokenText = voiceUrl.searchParams.get("text");
+    expect(spokenText).toBe("作った。\n内容は確認します。");
+    expect(spokenText).not.toContain("https://github.com");
+    expect(spokenText).not.toContain("issues/71");
+    expect(result.metadata).toMatchObject({ textPreparation: "url_sanitize" });
+  });
+
+  it("removes inline GitHub URLs from final response speech text", async () => {
+    const mockFetch = vi
+      .fn()
+      .mockResolvedValueOnce(openApiTextLimit(400))
+      .mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.resolve(valentinaModelsInfo),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        arrayBuffer: () => Promise.resolve(wavBytes.buffer),
+      });
+    vi.stubGlobal("fetch", mockFetch);
+
+    const provider = buildSbv2SpeechProvider();
+    const result = await provider.synthesize({
+      text: "作った。 https://github.com/NEXTAltair/style-bert-vits2-bridge/issues/71",
+      providerConfig: { baseUrl: "http://localhost:5000" },
+    });
+
+    const voiceUrl = new URL(mockFetch.mock.calls[2][0]);
+    expect(voiceUrl.searchParams.get("text")).toBe("作った。");
+    expect(result.metadata).toMatchObject({ textPreparation: "url_sanitize" });
+  });
+
+  it("ignores non-issue GitHub file paths that contain issue-like segments", async () => {
+    const mockFetch = vi
+      .fn()
+      .mockResolvedValueOnce(openApiTextLimit(400))
+      .mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.resolve(valentinaModelsInfo),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        arrayBuffer: () => Promise.resolve(wavBytes.buffer),
+      });
+    vi.stubGlobal("fetch", mockFetch);
+
+    const provider = buildSbv2SpeechProvider();
+    const text = "See https://github.com/org/repo/blob/main/docs/issues/71.md for details.";
+    const result = await provider.synthesize({
+      text,
+      providerConfig: { baseUrl: "http://localhost:5000" },
+    });
+
+    const voiceUrl = new URL(mockFetch.mock.calls[2][0]);
     expect(voiceUrl.searchParams.get("text")).toBe(text);
-    expect(result.metadata).not.toHaveProperty("textPreparation");
+    expect(result.metadata).not.toMatchObject({ textPreparation: "url_sanitize" });
+  });
+
+  it("removes Markdown-wrapped GitHub subpage URLs from inline prose", async () => {
+    const mockFetch = vi
+      .fn()
+      .mockResolvedValueOnce(openApiTextLimit(400))
+      .mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.resolve(valentinaModelsInfo),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        arrayBuffer: () => Promise.resolve(wavBytes.buffer),
+      });
+    vi.stubGlobal("fetch", mockFetch);
+
+    const provider = buildSbv2SpeechProvider();
+    const result = await provider.synthesize({
+      text: [
+        "See <https://github.com/NEXTAltair/style-bert-vits2-bridge/pull/65/files> now",
+        "Check `https://github.com/NEXTAltair/style-bert-vits2-bridge/pull/65/checks?check_run_id=123` next",
+      ].join("\n"),
+      providerConfig: { baseUrl: "http://localhost:5000" },
+    });
+
+    const voiceUrl = new URL(mockFetch.mock.calls[2][0]);
+    const spokenText = voiceUrl.searchParams.get("text");
+    expect(spokenText).toBe("See now\nCheck next");
+    expect(spokenText).not.toContain("<");
+    expect(spokenText).not.toContain(">");
+    expect(spokenText).not.toContain("`");
+    expect(spokenText).not.toContain("https://github.com");
+    expect(result.metadata).toMatchObject({ textPreparation: "url_sanitize" });
+  });
+
+  it("keeps Markdown GitHub link labels in inline prose", async () => {
+    const mockFetch = vi
+      .fn()
+      .mockResolvedValueOnce(openApiTextLimit(400))
+      .mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.resolve(valentinaModelsInfo),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        arrayBuffer: () => Promise.resolve(wavBytes.buffer),
+      });
+    vi.stubGlobal("fetch", mockFetch);
+
+    const provider = buildSbv2SpeechProvider();
+    const result = await provider.synthesize({
+      text: "Please see [the pull request](https://github.com/org/repo/pull/65) for details.",
+      providerConfig: { baseUrl: "http://localhost:5000" },
+    });
+
+    const voiceUrl = new URL(mockFetch.mock.calls[2][0]);
+    const spokenText = voiceUrl.searchParams.get("text");
+    expect(spokenText).toBe("Please see the pull request for details.");
+    expect(spokenText).not.toContain("https://github.com");
+    expect(result.metadata).toMatchObject({ textPreparation: "url_sanitize" });
+  });
+
+  it("keeps Markdown GitHub link labels when inline links include titles", async () => {
+    const mockFetch = vi
+      .fn()
+      .mockResolvedValueOnce(openApiTextLimit(400))
+      .mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.resolve(valentinaModelsInfo),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        arrayBuffer: () => Promise.resolve(wavBytes.buffer),
+      });
+    vi.stubGlobal("fetch", mockFetch);
+
+    const provider = buildSbv2SpeechProvider();
+    const result = await provider.synthesize({
+      text: 'Please see [the PR](https://github.com/org/repo/pull/65 "hidden title") now.',
+      providerConfig: { baseUrl: "http://localhost:5000" },
+    });
+
+    const voiceUrl = new URL(mockFetch.mock.calls[2][0]);
+    const spokenText = voiceUrl.searchParams.get("text");
+    expect(spokenText).toBe("Please see the PR now.");
+    expect(spokenText).not.toContain("hidden title");
+    expect(spokenText).not.toContain("https://github.com");
+    expect(result.metadata).toMatchObject({ textPreparation: "url_sanitize" });
+  });
+
+  it("keeps meaningful Markdown GitHub link labels on link-only list items", async () => {
+    const mockFetch = vi
+      .fn()
+      .mockResolvedValueOnce(openApiTextLimit(400))
+      .mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.resolve(valentinaModelsInfo),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        arrayBuffer: () => Promise.resolve(wavBytes.buffer),
+      });
+    vi.stubGlobal("fetch", mockFetch);
+
+    const provider = buildSbv2SpeechProvider();
+    const result = await provider.synthesize({
+      text: [
+        "- [Fixed crash](https://github.com/org/repo/issues/71)",
+        "- [issue](https://github.com/org/repo/issues/72)",
+        "確認します。",
+      ].join("\n"),
+      providerConfig: { baseUrl: "http://localhost:5000" },
+    });
+
+    const voiceUrl = new URL(mockFetch.mock.calls[2][0]);
+    const spokenText = voiceUrl.searchParams.get("text");
+    expect(spokenText).toBe("Fixed crash\n確認します。");
+    expect(spokenText).not.toContain("https://github.com");
+    expect(spokenText).not.toContain("\nissue\n");
+    expect(result.metadata).toMatchObject({ textPreparation: "url_sanitize" });
+  });
+
+  it("drops Markdown reference-style GitHub link definitions", async () => {
+    const mockFetch = vi
+      .fn()
+      .mockResolvedValueOnce(openApiTextLimit(400))
+      .mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.resolve(valentinaModelsInfo),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        arrayBuffer: () => Promise.resolve(wavBytes.buffer),
+      });
+    vi.stubGlobal("fetch", mockFetch);
+
+    const provider = buildSbv2SpeechProvider();
+    const result = await provider.synthesize({
+      text: [
+        "対応しました。",
+        "[1]: https://github.com/org/repo/issues/71",
+        "[pr]: https://github.com/org/repo/pull/65",
+      ].join("\n"),
+      providerConfig: { baseUrl: "http://localhost:5000" },
+    });
+
+    const voiceUrl = new URL(mockFetch.mock.calls[2][0]);
+    const spokenText = voiceUrl.searchParams.get("text");
+    expect(spokenText).toBe("対応しました。");
+    expect(spokenText).not.toContain("[1]:");
+    expect(spokenText).not.toContain("[pr]:");
+    expect(result.metadata).toMatchObject({ textPreparation: "url_sanitize" });
+  });
+
+  it("drops Markdown reference-style GitHub link definitions with titles", async () => {
+    const mockFetch = vi
+      .fn()
+      .mockResolvedValueOnce(openApiTextLimit(400))
+      .mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.resolve(valentinaModelsInfo),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        arrayBuffer: () => Promise.resolve(wavBytes.buffer),
+      });
+    vi.stubGlobal("fetch", mockFetch);
+
+    const provider = buildSbv2SpeechProvider();
+    const result = await provider.synthesize({
+      text: [
+        "対応しました。",
+        '[1]: https://github.com/org/repo/issues/71 "fix"',
+        "[pr]: https://github.com/org/repo/pull/65 'details'",
+      ].join("\n"),
+      providerConfig: { baseUrl: "http://localhost:5000" },
+    });
+
+    const voiceUrl = new URL(mockFetch.mock.calls[2][0]);
+    const spokenText = voiceUrl.searchParams.get("text");
+    expect(spokenText).toBe("対応しました。");
+    expect(spokenText).not.toContain("[1]:");
+    expect(spokenText).not.toContain("fix");
+    expect(spokenText).not.toContain("details");
+    expect(result.metadata).toMatchObject({ textPreparation: "url_sanitize" });
+  });
+
+  it("keeps Markdown reference-style GitHub link labels in prose", async () => {
+    const mockFetch = vi
+      .fn()
+      .mockResolvedValueOnce(openApiTextLimit(400))
+      .mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.resolve(valentinaModelsInfo),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        arrayBuffer: () => Promise.resolve(wavBytes.buffer),
+      });
+    vi.stubGlobal("fetch", mockFetch);
+
+    const provider = buildSbv2SpeechProvider();
+    const result = await provider.synthesize({
+      text: [
+        "Please see [the pull request][pr].",
+        "[pr]: https://github.com/org/repo/pull/65",
+      ].join("\n"),
+      providerConfig: { baseUrl: "http://localhost:5000" },
+    });
+
+    const voiceUrl = new URL(mockFetch.mock.calls[2][0]);
+    const spokenText = voiceUrl.searchParams.get("text");
+    expect(spokenText).toBe("Please see the pull request.");
+    expect(spokenText).not.toContain("[pr]");
+    expect(spokenText).not.toContain("https://github.com");
+    expect(result.metadata).toMatchObject({ textPreparation: "url_sanitize" });
+  });
+
+  it("keeps collapsed Markdown reference-style GitHub link labels in prose", async () => {
+    const mockFetch = vi
+      .fn()
+      .mockResolvedValueOnce(openApiTextLimit(400))
+      .mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.resolve(valentinaModelsInfo),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        arrayBuffer: () => Promise.resolve(wavBytes.buffer),
+      });
+    vi.stubGlobal("fetch", mockFetch);
+
+    const provider = buildSbv2SpeechProvider();
+    const result = await provider.synthesize({
+      text: [
+        "Please see [the pull request][].",
+        "[the pull request]: https://github.com/org/repo/pull/65",
+      ].join("\n"),
+      providerConfig: { baseUrl: "http://localhost:5000" },
+    });
+
+    const voiceUrl = new URL(mockFetch.mock.calls[2][0]);
+    const spokenText = voiceUrl.searchParams.get("text");
+    expect(spokenText).toBe("Please see the pull request.");
+    expect(spokenText).not.toContain("[]");
+    expect(spokenText).not.toContain("https://github.com");
+    expect(result.metadata).toMatchObject({ textPreparation: "url_sanitize" });
+  });
+
+  it("keeps shortcut Markdown reference-style GitHub link labels in prose", async () => {
+    const mockFetch = vi
+      .fn()
+      .mockResolvedValueOnce(openApiTextLimit(400))
+      .mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.resolve(valentinaModelsInfo),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        arrayBuffer: () => Promise.resolve(wavBytes.buffer),
+      });
+    vi.stubGlobal("fetch", mockFetch);
+
+    const provider = buildSbv2SpeechProvider();
+    const result = await provider.synthesize({
+      text: [
+        "Please see [the pull request].",
+        "[the pull request]: https://github.com/org/repo/pull/65",
+      ].join("\n"),
+      providerConfig: { baseUrl: "http://localhost:5000" },
+    });
+
+    const voiceUrl = new URL(mockFetch.mock.calls[2][0]);
+    const spokenText = voiceUrl.searchParams.get("text");
+    expect(spokenText).toBe("Please see the pull request.");
+    expect(spokenText).not.toContain("[the pull request]");
+    expect(spokenText).not.toContain("https://github.com");
+    expect(result.metadata).toMatchObject({ textPreparation: "url_sanitize" });
+  });
+
+  it("keeps Markdown reference-style labels when definitions use angle-bracket destinations", async () => {
+    const mockFetch = vi
+      .fn()
+      .mockResolvedValueOnce(openApiTextLimit(400))
+      .mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.resolve(valentinaModelsInfo),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        arrayBuffer: () => Promise.resolve(wavBytes.buffer),
+      });
+    vi.stubGlobal("fetch", mockFetch);
+
+    const provider = buildSbv2SpeechProvider();
+    const result = await provider.synthesize({
+      text: [
+        "Please see [the pull request][pr].",
+        "[pr]: <https://github.com/org/repo/pull/65>",
+      ].join("\n"),
+      providerConfig: { baseUrl: "http://localhost:5000" },
+    });
+
+    const voiceUrl = new URL(mockFetch.mock.calls[2][0]);
+    const spokenText = voiceUrl.searchParams.get("text");
+    expect(spokenText).toBe("Please see the pull request.");
+    expect(spokenText).not.toContain("[pr]");
+    expect(spokenText).not.toContain("https://github.com");
+    expect(result.metadata).toMatchObject({ textPreparation: "url_sanitize" });
+  });
+
+  it("normalizes whitespace when matching Markdown reference-style GitHub labels", async () => {
+    const mockFetch = vi
+      .fn()
+      .mockResolvedValueOnce(openApiTextLimit(400))
+      .mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.resolve(valentinaModelsInfo),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        arrayBuffer: () => Promise.resolve(wavBytes.buffer),
+      });
+    vi.stubGlobal("fetch", mockFetch);
+
+    const provider = buildSbv2SpeechProvider();
+    const result = await provider.synthesize({
+      text: [
+        "Please see [the PR][pull   request].",
+        "[pull request]: https://github.com/org/repo/pull/65",
+      ].join("\n"),
+      providerConfig: { baseUrl: "http://localhost:5000" },
+    });
+
+    const voiceUrl = new URL(mockFetch.mock.calls[2][0]);
+    const spokenText = voiceUrl.searchParams.get("text");
+    expect(spokenText).toBe("Please see the PR.");
+    expect(spokenText).not.toContain("[pull");
+    expect(spokenText).not.toContain("https://github.com");
+    expect(result.metadata).toMatchObject({ textPreparation: "url_sanitize" });
+  });
+
+  it("strips Markdown image markers from reference-style GitHub link labels", async () => {
+    const mockFetch = vi
+      .fn()
+      .mockResolvedValueOnce(openApiTextLimit(400))
+      .mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.resolve(valentinaModelsInfo),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        arrayBuffer: () => Promise.resolve(wavBytes.buffer),
+      });
+    vi.stubGlobal("fetch", mockFetch);
+
+    const provider = buildSbv2SpeechProvider();
+    const result = await provider.synthesize({
+      text: [
+        "![fixed crash][pr]",
+        "[pr]: https://github.com/org/repo/pull/65",
+      ].join("\n"),
+      providerConfig: { baseUrl: "http://localhost:5000" },
+    });
+
+    const voiceUrl = new URL(mockFetch.mock.calls[2][0]);
+    const spokenText = voiceUrl.searchParams.get("text");
+    expect(spokenText).toBe("fixed crash");
+    expect(spokenText).not.toContain("!");
+    expect(spokenText).not.toContain("[pr]");
+    expect(spokenText).not.toContain("https://github.com");
+    expect(result.metadata).toMatchObject({ textPreparation: "url_sanitize" });
+  });
+
+  it("does not rewrite non-GitHub inline link labels as shortcut references", async () => {
+    const mockFetch = vi
+      .fn()
+      .mockResolvedValueOnce(openApiTextLimit(400))
+      .mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.resolve(valentinaModelsInfo),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        arrayBuffer: () => Promise.resolve(wavBytes.buffer),
+      });
+    vi.stubGlobal("fetch", mockFetch);
+
+    const provider = buildSbv2SpeechProvider();
+    const result = await provider.synthesize({
+      text: [
+        "See [docs](https://example.com).",
+        "[docs]: https://github.com/org/repo/issues/71",
+      ].join("\n"),
+      providerConfig: { baseUrl: "http://localhost:5000" },
+    });
+
+    const voiceUrl = new URL(mockFetch.mock.calls[2][0]);
+    const spokenText = voiceUrl.searchParams.get("text");
+    expect(spokenText).toBe("See [docs](https://example.com).");
+    expect(spokenText).not.toContain("docs(https://example.com)");
+    expect(result.metadata).toMatchObject({ textPreparation: "url_sanitize" });
+  });
+
+  it("drops multiline Markdown reference definition titles", async () => {
+    const mockFetch = vi
+      .fn()
+      .mockResolvedValueOnce(openApiTextLimit(400))
+      .mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.resolve(valentinaModelsInfo),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        arrayBuffer: () => Promise.resolve(wavBytes.buffer),
+      });
+    vi.stubGlobal("fetch", mockFetch);
+
+    const provider = buildSbv2SpeechProvider();
+    const result = await provider.synthesize({
+      text: [
+        "対応しました。",
+        "[pr]: https://github.com/org/repo/pull/65",
+        '  "details"',
+      ].join("\n"),
+      providerConfig: { baseUrl: "http://localhost:5000" },
+    });
+
+    const voiceUrl = new URL(mockFetch.mock.calls[2][0]);
+    const spokenText = voiceUrl.searchParams.get("text");
+    expect(spokenText).toBe("対応しました。");
+    expect(spokenText).not.toContain("details");
+    expect(spokenText).not.toContain("https://github.com");
+    expect(result.metadata).toMatchObject({ textPreparation: "url_sanitize" });
+  });
+
+  it("drops Markdown heading markers left by URL-only GitHub headings", async () => {
+    const mockFetch = vi
+      .fn()
+      .mockResolvedValueOnce(openApiTextLimit(400))
+      .mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.resolve(valentinaModelsInfo),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        arrayBuffer: () => Promise.resolve(wavBytes.buffer),
+      });
+    vi.stubGlobal("fetch", mockFetch);
+
+    const provider = buildSbv2SpeechProvider();
+    const result = await provider.synthesize({
+      text: [
+        "### https://github.com/org/repo/issues/71",
+        "### [issue](https://github.com/org/repo/issues/72)",
+      ].join("\n"),
+      providerConfig: { baseUrl: "http://localhost:5000", defaultLanguage: "EN" },
+    });
+
+    const voiceUrl = new URL(mockFetch.mock.calls[2][0]);
+    const spokenText = voiceUrl.searchParams.get("text");
+    expect(spokenText).toBe("The GitHub issue was updated.");
+    expect(spokenText).not.toContain("###");
+    expect(spokenText).not.toContain("https://github.com");
+    expect(result.metadata).toMatchObject({ textPreparation: "metadata_status_rewrite" });
+  });
+
+  it("drops Markdown emphasis markers left by URL-only GitHub links", async () => {
+    const mockFetch = vi
+      .fn()
+      .mockResolvedValueOnce(openApiTextLimit(400))
+      .mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.resolve(valentinaModelsInfo),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        arrayBuffer: () => Promise.resolve(wavBytes.buffer),
+      });
+    vi.stubGlobal("fetch", mockFetch);
+
+    const provider = buildSbv2SpeechProvider();
+    const result = await provider.synthesize({
+      text: [
+        "**https://github.com/org/repo/issues/71**",
+        "**[issue](https://github.com/org/repo/issues/72)**",
+      ].join("\n"),
+      providerConfig: { baseUrl: "http://localhost:5000", defaultLanguage: "EN" },
+    });
+
+    const voiceUrl = new URL(mockFetch.mock.calls[2][0]);
+    const spokenText = voiceUrl.searchParams.get("text");
+    expect(spokenText).toBe("The GitHub issue was updated.");
+    expect(spokenText).not.toContain("**");
+    expect(spokenText).not.toContain("https://github.com");
+    expect(result.metadata).toMatchObject({ textPreparation: "metadata_status_rewrite" });
+  });
+
+  it("removes inline wrappers left by bare GitHub URL removal", async () => {
+    const mockFetch = vi
+      .fn()
+      .mockResolvedValueOnce(openApiTextLimit(400))
+      .mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.resolve(valentinaModelsInfo),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        arrayBuffer: () => Promise.resolve(wavBytes.buffer),
+      });
+    vi.stubGlobal("fetch", mockFetch);
+
+    const provider = buildSbv2SpeechProvider();
+    const result = await provider.synthesize({
+      text: [
+        "See (https://github.com/org/repo/issues/71) for details.",
+        "See [https://github.com/org/repo/pull/65] for details.",
+      ].join("\n"),
+      providerConfig: { baseUrl: "http://localhost:5000" },
+    });
+
+    const voiceUrl = new URL(mockFetch.mock.calls[2][0]);
+    const spokenText = voiceUrl.searchParams.get("text");
+    expect(spokenText).toBe("See for details.\nSee for details.");
+    expect(spokenText).not.toContain("()");
+    expect(spokenText).not.toContain("[]");
+    expect(spokenText).not.toContain("https://github.com");
+    expect(result.metadata).toMatchObject({ textPreparation: "url_sanitize" });
+  });
+
+  it("removes bracket wrappers around GitHub URLs with query or fragment suffixes", async () => {
+    const mockFetch = vi
+      .fn()
+      .mockResolvedValueOnce(openApiTextLimit(400))
+      .mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.resolve(valentinaModelsInfo),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        arrayBuffer: () => Promise.resolve(wavBytes.buffer),
+      });
+    vi.stubGlobal("fetch", mockFetch);
+
+    const provider = buildSbv2SpeechProvider();
+    const result = await provider.synthesize({
+      text: [
+        "See [https://github.com/org/repo/issues/71?x=1] now.",
+        "See [https://github.com/org/repo/issues/72#comment] next.",
+      ].join("\n"),
+      providerConfig: { baseUrl: "http://localhost:5000" },
+    });
+
+    const voiceUrl = new URL(mockFetch.mock.calls[2][0]);
+    const spokenText = voiceUrl.searchParams.get("text");
+    expect(spokenText).toBe("See now.\nSee next.");
+    expect(spokenText).not.toContain("[");
+    expect(spokenText).not.toContain("]");
+    expect(spokenText).not.toContain("https://github.com");
+    expect(result.metadata).toMatchObject({ textPreparation: "url_sanitize" });
+  });
+
+  it("removes inline emphasis markers left by GitHub link removal", async () => {
+    const mockFetch = vi
+      .fn()
+      .mockResolvedValueOnce(openApiTextLimit(400))
+      .mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.resolve(valentinaModelsInfo),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        arrayBuffer: () => Promise.resolve(wavBytes.buffer),
+      });
+    vi.stubGlobal("fetch", mockFetch);
+
+    const provider = buildSbv2SpeechProvider();
+    const result = await provider.synthesize({
+      text: [
+        "See **https://github.com/org/repo/issues/71** for details.",
+        "See **[the PR](https://github.com/org/repo/pull/65)** now.",
+      ].join("\n"),
+      providerConfig: { baseUrl: "http://localhost:5000" },
+    });
+
+    const voiceUrl = new URL(mockFetch.mock.calls[2][0]);
+    const spokenText = voiceUrl.searchParams.get("text");
+    expect(spokenText).toBe("See for details.\nSee the PR now.");
+    expect(spokenText).not.toContain("**");
+    expect(spokenText).not.toContain("https://github.com");
+    expect(result.metadata).toMatchObject({ textPreparation: "url_sanitize" });
+  });
+
+  it("keeps Markdown link labels when inline destinations use angle brackets", async () => {
+    const mockFetch = vi
+      .fn()
+      .mockResolvedValueOnce(openApiTextLimit(400))
+      .mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.resolve(valentinaModelsInfo),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        arrayBuffer: () => Promise.resolve(wavBytes.buffer),
+      });
+    vi.stubGlobal("fetch", mockFetch);
+
+    const provider = buildSbv2SpeechProvider();
+    const result = await provider.synthesize({
+      text: "Please see [the PR](<https://github.com/org/repo/pull/65>) now.",
+      providerConfig: { baseUrl: "http://localhost:5000" },
+    });
+
+    const voiceUrl = new URL(mockFetch.mock.calls[2][0]);
+    const spokenText = voiceUrl.searchParams.get("text");
+    expect(spokenText).toBe("Please see the PR now.");
+    expect(spokenText).not.toContain("[the PR]");
+    expect(spokenText).not.toContain("https://github.com");
+    expect(result.metadata).toMatchObject({ textPreparation: "url_sanitize" });
+  });
+
+  it("strips Markdown image markers from GitHub link labels", async () => {
+    const mockFetch = vi
+      .fn()
+      .mockResolvedValueOnce(openApiTextLimit(400))
+      .mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.resolve(valentinaModelsInfo),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        arrayBuffer: () => Promise.resolve(wavBytes.buffer),
+      });
+    vi.stubGlobal("fetch", mockFetch);
+
+    const provider = buildSbv2SpeechProvider();
+    const result = await provider.synthesize({
+      text: "![fixed crash](https://github.com/org/repo/issues/71)",
+      providerConfig: { baseUrl: "http://localhost:5000" },
+    });
+
+    const voiceUrl = new URL(mockFetch.mock.calls[2][0]);
+    const spokenText = voiceUrl.searchParams.get("text");
+    expect(spokenText).toBe("fixed crash");
+    expect(spokenText).not.toContain("!");
+    expect(spokenText).not.toContain("https://github.com");
+    expect(result.metadata).toMatchObject({ textPreparation: "url_sanitize" });
+  });
+
+  it("drops URL-only list markers from final response speech text", async () => {
+    const mockFetch = vi
+      .fn()
+      .mockResolvedValueOnce(openApiTextLimit(400))
+      .mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.resolve(valentinaModelsInfo),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        arrayBuffer: () => Promise.resolve(wavBytes.buffer),
+      });
+    vi.stubGlobal("fetch", mockFetch);
+
+    const provider = buildSbv2SpeechProvider();
+    const result = await provider.synthesize({
+      text: [
+        "- https://github.com/NEXTAltair/style-bert-vits2-bridge/issues/71",
+        "1. https://github.com/NEXTAltair/style-bert-vits2-bridge/pull/73/files",
+        "- [issue](https://github.com/NEXTAltair/style-bert-vits2-bridge/issues/72)",
+        "<https://github.com/NEXTAltair/style-bert-vits2-bridge/issues/73>",
+        "`https://github.com/NEXTAltair/style-bert-vits2-bridge/issues/74`",
+        "https://github.com/NEXTAltair/style-bert-vits2-bridge/issues/75.",
+        "内容は確認します。",
+      ].join("\n"),
+      providerConfig: { baseUrl: "http://localhost:5000" },
+    });
+
+    const voiceUrl = new URL(mockFetch.mock.calls[2][0]);
+    const spokenText = voiceUrl.searchParams.get("text");
+    expect(spokenText).toBe("内容は確認します。");
+    expect(spokenText).not.toContain("-");
+    expect(spokenText).not.toContain("1.");
+    expect(spokenText).not.toContain("issue");
+    expect(spokenText).not.toContain("https://github.com");
+    expect(spokenText).not.toContain("<>");
+    expect(spokenText).not.toContain("`");
+    expect(result.metadata).toMatchObject({ textPreparation: "url_sanitize" });
+  });
+
+  it("keeps empty call and list markers in prose while removing GitHub URLs", async () => {
+    const mockFetch = vi
+      .fn()
+      .mockResolvedValueOnce(openApiTextLimit(400))
+      .mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.resolve(valentinaModelsInfo),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        arrayBuffer: () => Promise.resolve(wavBytes.buffer),
+      });
+    vi.stubGlobal("fetch", mockFetch);
+
+    const provider = buildSbv2SpeechProvider();
+    const result = await provider.synthesize({
+      text: [
+        "Call foo() after https://github.com/org/repo/issues/71",
+        "Use [] as the default: https://github.com/org/repo/pull/65",
+      ].join("\n"),
+      providerConfig: { baseUrl: "http://localhost:5000" },
+    });
+
+    const voiceUrl = new URL(mockFetch.mock.calls[2][0]);
+    const spokenText = voiceUrl.searchParams.get("text");
+    expect(spokenText).toBe("Call foo() after\nUse [] as the default:");
+    expect(spokenText).toContain("foo()");
+    expect(spokenText).toContain("[]");
+    expect(spokenText).not.toContain("https://github.com");
+    expect(result.metadata).toMatchObject({ textPreparation: "url_sanitize" });
+  });
+
+  it("preserves code identifiers on lines that also remove GitHub URLs", async () => {
+    const mockFetch = vi
+      .fn()
+      .mockResolvedValueOnce(openApiTextLimit(400))
+      .mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.resolve(valentinaModelsInfo),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        arrayBuffer: () => Promise.resolve(wavBytes.buffer),
+      });
+    vi.stubGlobal("fetch", mockFetch);
+
+    const provider = buildSbv2SpeechProvider();
+    const result = await provider.synthesize({
+      text: "Call __init__ before https://github.com/org/repo/issues/71",
+      providerConfig: { baseUrl: "http://localhost:5000" },
+    });
+
+    const voiceUrl = new URL(mockFetch.mock.calls[2][0]);
+    const spokenText = voiceUrl.searchParams.get("text");
+    expect(spokenText).toBe("Call __init__ before");
+    expect(spokenText).toContain("__init__");
+    expect(spokenText).not.toContain("https://github.com");
+    expect(result.metadata).toMatchObject({ textPreparation: "url_sanitize" });
+  });
+
+  it("preserves Markdown-like tokens on URL-free lines during GitHub URL sanitization", async () => {
+    const mockFetch = vi
+      .fn()
+      .mockResolvedValueOnce(openApiTextLimit(400))
+      .mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.resolve(valentinaModelsInfo),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        arrayBuffer: () => Promise.resolve(wavBytes.buffer),
+      });
+    vi.stubGlobal("fetch", mockFetch);
+
+    const provider = buildSbv2SpeechProvider();
+    const result = await provider.synthesize({
+      text: [
+        "Call __init__ before proceeding.",
+        "https://github.com/org/repo/issues/71",
+      ].join("\n"),
+      providerConfig: { baseUrl: "http://localhost:5000" },
+    });
+
+    const voiceUrl = new URL(mockFetch.mock.calls[2][0]);
+    const spokenText = voiceUrl.searchParams.get("text");
+    expect(spokenText).toBe("Call __init__ before proceeding.");
+    expect(spokenText).toContain("__init__");
+    expect(spokenText).not.toContain("https://github.com");
+    expect(result.metadata).toMatchObject({ textPreparation: "url_sanitize" });
+  });
+
+  it("rewrites GitHub PR diff and patch URL metadata without leaking suffixes", async () => {
+    const mockFetch = vi
+      .fn()
+      .mockResolvedValueOnce(openApiTextLimit(400))
+      .mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.resolve(valentinaModelsInfo),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        arrayBuffer: () => Promise.resolve(wavBytes.buffer),
+      });
+    vi.stubGlobal("fetch", mockFetch);
+
+    const provider = buildSbv2SpeechProvider();
+    const result = await provider.synthesize({
+      text: [
+        "PR: https://github.com/org/repo/pull/65.diff",
+        "PR: https://github.com/org/repo/pull/66.patch",
+      ].join("\n"),
+      providerConfig: { baseUrl: "http://localhost:5000", defaultLanguage: "EN" },
+    });
+
+    const voiceUrl = new URL(mockFetch.mock.calls[2][0]);
+    const spokenText = voiceUrl.searchParams.get("text");
+    expect(spokenText).toBe("The GitHub pull request was updated.");
+    expect(spokenText).not.toContain(".diff");
+    expect(spokenText).not.toContain(".patch");
+    expect(spokenText).not.toContain("https://github.com");
+    expect(result.metadata).toMatchObject({ textPreparation: "metadata_status_rewrite" });
+  });
+
+  it("rewrites bare GitHub URL-only speech text to natural metadata text", async () => {
+    const mockFetch = vi
+      .fn()
+      .mockResolvedValueOnce(openApiTextLimit(400))
+      .mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.resolve(valentinaModelsInfo),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        arrayBuffer: () => Promise.resolve(wavBytes.buffer),
+      });
+    vi.stubGlobal("fetch", mockFetch);
+
+    const provider = buildSbv2SpeechProvider();
+    const result = await provider.synthesize({
+      text: "https://github.com/NEXTAltair/style-bert-vits2-bridge/issues/71",
+      providerConfig: { baseUrl: "http://localhost:5000", defaultLanguage: "EN" },
+    });
+
+    const voiceUrl = new URL(mockFetch.mock.calls[2][0]);
+    expect(voiceUrl.searchParams.get("text")).toBe("The GitHub issue was updated.");
+    expect(result.metadata).toMatchObject({ textPreparation: "metadata_status_rewrite" });
+  });
+
+  it("checks the SBV2 text limit after GitHub URL sanitization", async () => {
+    const mockFetch = vi
+      .fn()
+      .mockResolvedValueOnce(openApiTextLimit(20))
+      .mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.resolve(valentinaModelsInfo),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        arrayBuffer: () => Promise.resolve(wavBytes.buffer),
+      });
+    vi.stubGlobal("fetch", mockFetch);
+
+    const provider = buildSbv2SpeechProvider();
+    const result = await provider.synthesize({
+      text: [
+        "作った。",
+        "https://github.com/NEXTAltair/style-bert-vits2-bridge/issues/71?notification_referrer_id=very-long",
+      ].join("\n"),
+      providerConfig: { baseUrl: "http://localhost:5000" },
+    });
+
+    const voiceUrl = new URL(mockFetch.mock.calls[2][0]);
+    expect(voiceUrl.searchParams.get("text")).toBe("作った。");
+    expect(result.metadata).toMatchObject({ textPreparation: "url_sanitize" });
+  });
+
+  it("uses provider override language for rewritten text limit preflight", async () => {
+    const mockFetch = vi
+      .fn()
+      .mockResolvedValueOnce(openApiTextLimit(20))
+      .mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.resolve(valentinaModelsInfo),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        arrayBuffer: () => Promise.resolve(wavBytes.buffer),
+      });
+    vi.stubGlobal("fetch", mockFetch);
+
+    const provider = buildSbv2SpeechProvider();
+    const result = await provider.synthesize({
+      text: "https://github.com/NEXTAltair/style-bert-vits2-bridge/issues/71",
+      providerConfig: { baseUrl: "http://localhost:5000", defaultLanguage: "EN" },
+      providerOverrides: { language: "JP" },
+    });
+
+    const voiceUrl = new URL(mockFetch.mock.calls[2][0]);
+    expect(voiceUrl.searchParams.get("text")).toBe("GitHub の課題を更新しました。");
+    expect(voiceUrl.searchParams.get("language")).toBe("JP");
+    expect(result.metadata).toMatchObject({ textPreparation: "metadata_status_rewrite" });
+  });
+
+  it("uses selected voice profile language for rewritten text limit preflight", async () => {
+    const mockFetch = vi
+      .fn()
+      .mockResolvedValueOnce(openApiTextLimit(20))
+      .mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.resolve(valentinaModelsInfo),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        arrayBuffer: () => Promise.resolve(wavBytes.buffer),
+      });
+    vi.stubGlobal("fetch", mockFetch);
+
+    const provider = buildSbv2SpeechProvider();
+    const result = await provider.synthesize({
+      text: "https://github.com/NEXTAltair/style-bert-vits2-bridge/issues/71",
+      providerConfig: { baseUrl: "http://localhost:5000", defaultLanguage: "EN" },
+      providerOverrides: { voiceId: "valentina01_bright" },
+    });
+
+    const voiceUrl = new URL(mockFetch.mock.calls[2][0]);
+    expect(voiceUrl.searchParams.get("text")).toBe("GitHub の課題を更新しました。");
+    expect(voiceUrl.searchParams.get("language")).toBe("JP");
+    expect(result.metadata).toMatchObject({ textPreparation: "metadata_status_rewrite" });
   });
 
   it("defers SBV2 text limit checks for long metadata that will be rewritten", async () => {
