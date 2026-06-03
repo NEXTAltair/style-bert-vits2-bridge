@@ -116,7 +116,7 @@ const COMMAND_STATUS_SCRIPT_PATH = "(?:[a-z0-9:_-]+/[a-z0-9:_./-]+|[a-z0-9:_/-]*
 const COMMAND_STATUS_ARGUMENT = `(?:(?:-{1,2}[a-z][a-z0-9-]*)|(?:[a-z0-9:_./-]+\\s+-{1,2}[a-z][a-z0-9-]*)|(?:${COMMAND_STATUS_SCRIPT_PATH})|(?:(?:${COMMAND_STATUS_SUBCOMMANDS})\\b))`;
 const COMMAND_STATUS_COMMAND = `${COMMAND_STATUS_TOOLS}\\s+(?:(?:${COMMAND_STATUS_SUBCOMMANDS})\\b|(?:${COMMAND_STATUS_SCRIPT_PATH}))`;
 const GITHUB_ISSUE_OR_PR_URL =
-  "https?:\\/\\/github\\.com\\/[^\\s)]+\\/(issues|pull|pulls)\\/\\d+\\b(?:\\/[^?#\\s)]*)?(?:\\?[^#\\s)]*)?(?:#[^\\s)]+)?";
+  "https?:\\/\\/github\\.com\\/[^\\s)>`]+\\/(issues|pull|pulls)\\/\\d+\\b(?:\\/[^?#\\s)>`]*)?(?:\\?[^#\\s)>`]*)?(?:#[^\\s)>`]+)?";
 const GITHUB_ISSUE_OR_PR_MARKDOWN_LINK = `\\[[^\\]\\n]*\\]\\(\\s*${GITHUB_ISSUE_OR_PR_URL}\\s*\\)`;
 
 interface PreparedSpeechText {
@@ -569,18 +569,15 @@ export function buildSbv2SpeechProvider(options: Sbv2SpeechProviderOptions = {})
       const pronunciationReplacements = resolvePronunciationReplacements(config);
       const textCapabilities = await client.getTextCapabilities();
       const explicitText = extractExplicitTtsText(req.text);
-      const preflightLanguage =
-        asSbv2Language(providerOverrides?.language) ??
-        asSbv2Language(config.defaultLanguage) ??
-        asSbv2Language(config.language) ??
-        "JP";
-      const preflightPreparedText = explicitText
+      const earlyPreparedText = explicitText
         ? { text: explicitText, textPreparation: "explicit" as const }
-        : prepareSpeechText(req.text, preflightLanguage);
-      const preflightText = preflightPreparedText.textPreparation === "explicit"
-        ? preflightPreparedText.text
-        : applyPronunciationReplacements(preflightPreparedText.text, pronunciationReplacements);
-      assertSbv2TextWithinHardLimit(preflightText, textCapabilities.maxInputChars);
+        : prepareSpeechText(req.text, "JP");
+      if (earlyPreparedText.textPreparation === undefined || earlyPreparedText.textPreparation === "explicit") {
+        const earlyPreflightText = earlyPreparedText.textPreparation === "explicit"
+          ? earlyPreparedText.text
+          : applyPronunciationReplacements(earlyPreparedText.text, pronunciationReplacements);
+        assertSbv2TextWithinHardLimit(earlyPreflightText, textCapabilities.maxInputChars);
+      }
 
       try {
         resolvedVoice = await resolveVoiceProfile({
@@ -597,6 +594,14 @@ export function buildSbv2SpeechProvider(options: Sbv2SpeechProviderOptions = {})
           }),
         );
       }
+
+      const preflightPreparedText = explicitText
+        ? { text: explicitText, textPreparation: "explicit" as const }
+        : prepareSpeechText(req.text, resolvedVoice.language);
+      const preflightText = preflightPreparedText.textPreparation === "explicit"
+        ? preflightPreparedText.text
+        : applyPronunciationReplacements(preflightPreparedText.text, pronunciationReplacements);
+      assertSbv2TextWithinHardLimit(preflightText, textCapabilities.maxInputChars);
 
       let audioBuffer: Buffer;
       const preparedText = prepareSpeechText(req.text, resolvedVoice.language);
