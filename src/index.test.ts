@@ -872,6 +872,70 @@ describe("Style-Bert-VITS2 speech provider", () => {
     expect(result.metadata).toMatchObject({ textPreparation: "url_sanitize" });
   });
 
+  it("keeps meaningful Markdown GitHub link labels on link-only list items", async () => {
+    const mockFetch = vi
+      .fn()
+      .mockResolvedValueOnce(openApiTextLimit(400))
+      .mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.resolve(valentinaModelsInfo),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        arrayBuffer: () => Promise.resolve(wavBytes.buffer),
+      });
+    vi.stubGlobal("fetch", mockFetch);
+
+    const provider = buildSbv2SpeechProvider();
+    const result = await provider.synthesize({
+      text: [
+        "- [Fixed crash](https://github.com/org/repo/issues/71)",
+        "- [issue](https://github.com/org/repo/issues/72)",
+        "確認します。",
+      ].join("\n"),
+      providerConfig: { baseUrl: "http://localhost:5000" },
+    });
+
+    const voiceUrl = new URL(mockFetch.mock.calls[2][0]);
+    const spokenText = voiceUrl.searchParams.get("text");
+    expect(spokenText).toBe("Fixed crash\n確認します。");
+    expect(spokenText).not.toContain("https://github.com");
+    expect(spokenText).not.toContain("\nissue\n");
+    expect(result.metadata).toMatchObject({ textPreparation: "url_sanitize" });
+  });
+
+  it("drops Markdown reference-style GitHub link definitions", async () => {
+    const mockFetch = vi
+      .fn()
+      .mockResolvedValueOnce(openApiTextLimit(400))
+      .mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.resolve(valentinaModelsInfo),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        arrayBuffer: () => Promise.resolve(wavBytes.buffer),
+      });
+    vi.stubGlobal("fetch", mockFetch);
+
+    const provider = buildSbv2SpeechProvider();
+    const result = await provider.synthesize({
+      text: [
+        "対応しました。",
+        "[1]: https://github.com/org/repo/issues/71",
+        "[pr]: https://github.com/org/repo/pull/65",
+      ].join("\n"),
+      providerConfig: { baseUrl: "http://localhost:5000" },
+    });
+
+    const voiceUrl = new URL(mockFetch.mock.calls[2][0]);
+    const spokenText = voiceUrl.searchParams.get("text");
+    expect(spokenText).toBe("対応しました。");
+    expect(spokenText).not.toContain("[1]:");
+    expect(spokenText).not.toContain("[pr]:");
+    expect(result.metadata).toMatchObject({ textPreparation: "url_sanitize" });
+  });
+
   it("drops URL-only list markers from final response speech text", async () => {
     const mockFetch = vi
       .fn()

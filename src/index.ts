@@ -229,6 +229,7 @@ function cleanupSpeechLineAfterUrlRemoval(value: string): string {
     .replace(/`+\s*`+/g, "")
     .replace(/\s+([。、，,.!?！？:;])/g, "$1")
     .replace(/[ \t]{2,}/g, " ")
+    .replace(/^(?:[-*+]|\d+[.)])\s+/, "")
     .replace(/^(?:[-*+]|\d+[.)])\s*$/, "")
     .replace(/^[<>`]+$/, "")
     .replace(/^[、。，,.!?！？:;]+$/, "")
@@ -236,7 +237,11 @@ function cleanupSpeechLineAfterUrlRemoval(value: string): string {
 }
 
 function looksLikeGithubMetadataLabelRemainder(value: string): boolean {
-  return /^(?:(?:[-*+]|\d+[.)])\s*)?(?:(?:created|opened|updated|closed|reopened|merged|commented|added|posted)\s+)?(?:github\s+)?(?:issue|pr|pull request)(?:\s+#?\d+)?(?:\s+(?:created|opened|updated|closed|reopened|merged|commented|added|posted))?\s*[:#-]?\s*[、。，,.!?！？:;]*\s*$/i.test(value);
+  return /^(?:(?:[-*+]|\d+[.)])\s*)?(?:(?:created|opened|updated|closed|reopened|merged|commented|added|posted)\s+)?(?:github\s+)?(?:issue|pr|pull request)(?:(?:\s+#?\d+)|(?:\s*[:#-]\s*#?\d+))?(?:\s+(?:created|opened|updated|closed|reopened|merged|commented|added|posted))?\s*[:#-]?\s*[、。，,.!?！？:;]*\s*$/i.test(value);
+}
+
+function looksLikeMarkdownReferenceDefinitionRemainder(value: string): boolean {
+  return /^\[[^\]\n]+\]:\s*$/.test(value.trim());
 }
 
 function sanitizeGithubUrlsFromSpeechText(
@@ -270,14 +275,17 @@ function sanitizeGithubUrlsFromSpeechText(
     const lineWithoutLinks = cleanupSpeechLineAfterUrlRemoval(
       line.replace(markdownLinkPattern, "").replace(githubUrlPattern, ""),
     );
-    const sanitizedLine = !lineWithoutLinks || looksLikeGithubMetadataLabelRemainder(lineWithoutLinks)
-      ? lineWithoutLinks
-      : cleanupSpeechLineAfterUrlRemoval(
-        line
-          .replace(markdownLinkPattern, (_match, label: string) => label.trim())
-          .replace(githubUrlPattern, ""),
-      );
-    if (sanitizedLine && !looksLikeGithubMetadataLabelRemainder(sanitizedLine)) lines.push(sanitizedLine);
+    const lineWithLabels = cleanupSpeechLineAfterUrlRemoval(
+      line
+        .replace(markdownLinkPattern, (_match, label: string) => label.trim())
+        .replace(githubUrlPattern, ""),
+    );
+    const sanitizedLine = [lineWithLabels, lineWithoutLinks].find((candidate) =>
+      candidate &&
+      !looksLikeGithubMetadataLabelRemainder(candidate) &&
+      !looksLikeMarkdownReferenceDefinitionRemainder(candidate)
+    );
+    if (sanitizedLine) lines.push(sanitizedLine);
   }
 
   const sanitizedText = lines.join("\n").trim();
