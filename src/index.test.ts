@@ -658,7 +658,7 @@ describe("Style-Bert-VITS2 speech provider", () => {
     }
   });
 
-  it("does not rewrite mixed GitHub issue metadata and user-facing prose", async () => {
+  it("drops GitHub issue metadata URL lines from mixed user-facing prose", async () => {
     const mockFetch = vi
       .fn()
       .mockResolvedValueOnce(openApiTextLimit(400))
@@ -683,8 +683,120 @@ describe("Style-Bert-VITS2 speech provider", () => {
     });
 
     const voiceUrl = new URL(mockFetch.mock.calls[2][0]);
-    expect(voiceUrl.searchParams.get("text")).toBe(text);
-    expect(result.metadata).not.toHaveProperty("textPreparation");
+    expect(voiceUrl.searchParams.get("text")).toBe("Please review the repro steps below.");
+    expect(result.metadata).toMatchObject({ textPreparation: "url_sanitize" });
+  });
+
+  it("drops bare GitHub issue URL lines from final response speech text", async () => {
+    const mockFetch = vi
+      .fn()
+      .mockResolvedValueOnce(openApiTextLimit(400))
+      .mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.resolve(valentinaModelsInfo),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        arrayBuffer: () => Promise.resolve(wavBytes.buffer),
+      });
+    vi.stubGlobal("fetch", mockFetch);
+
+    const provider = buildSbv2SpeechProvider();
+    const result = await provider.synthesize({
+      text: [
+        "作った。",
+        "",
+        "https://github.com/NEXTAltair/style-bert-vits2-bridge/issues/71",
+        "",
+        "内容は確認します。",
+      ].join("\n"),
+      providerConfig: { baseUrl: "http://localhost:5000" },
+    });
+
+    const voiceUrl = new URL(mockFetch.mock.calls[2][0]);
+    const spokenText = voiceUrl.searchParams.get("text");
+    expect(spokenText).toBe("作った。\n内容は確認します。");
+    expect(spokenText).not.toContain("https://github.com");
+    expect(spokenText).not.toContain("issues/71");
+    expect(result.metadata).toMatchObject({ textPreparation: "url_sanitize" });
+  });
+
+  it("removes inline GitHub URLs from final response speech text", async () => {
+    const mockFetch = vi
+      .fn()
+      .mockResolvedValueOnce(openApiTextLimit(400))
+      .mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.resolve(valentinaModelsInfo),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        arrayBuffer: () => Promise.resolve(wavBytes.buffer),
+      });
+    vi.stubGlobal("fetch", mockFetch);
+
+    const provider = buildSbv2SpeechProvider();
+    const result = await provider.synthesize({
+      text: "作った。 https://github.com/NEXTAltair/style-bert-vits2-bridge/issues/71",
+      providerConfig: { baseUrl: "http://localhost:5000" },
+    });
+
+    const voiceUrl = new URL(mockFetch.mock.calls[2][0]);
+    expect(voiceUrl.searchParams.get("text")).toBe("作った。");
+    expect(result.metadata).toMatchObject({ textPreparation: "url_sanitize" });
+  });
+
+  it("rewrites bare GitHub URL-only speech text to natural metadata text", async () => {
+    const mockFetch = vi
+      .fn()
+      .mockResolvedValueOnce(openApiTextLimit(400))
+      .mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.resolve(valentinaModelsInfo),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        arrayBuffer: () => Promise.resolve(wavBytes.buffer),
+      });
+    vi.stubGlobal("fetch", mockFetch);
+
+    const provider = buildSbv2SpeechProvider();
+    const result = await provider.synthesize({
+      text: "https://github.com/NEXTAltair/style-bert-vits2-bridge/issues/71",
+      providerConfig: { baseUrl: "http://localhost:5000", defaultLanguage: "EN" },
+    });
+
+    const voiceUrl = new URL(mockFetch.mock.calls[2][0]);
+    expect(voiceUrl.searchParams.get("text")).toBe("The GitHub issue was updated.");
+    expect(result.metadata).toMatchObject({ textPreparation: "metadata_status_rewrite" });
+  });
+
+  it("checks the SBV2 text limit after GitHub URL sanitization", async () => {
+    const mockFetch = vi
+      .fn()
+      .mockResolvedValueOnce(openApiTextLimit(20))
+      .mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.resolve(valentinaModelsInfo),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        arrayBuffer: () => Promise.resolve(wavBytes.buffer),
+      });
+    vi.stubGlobal("fetch", mockFetch);
+
+    const provider = buildSbv2SpeechProvider();
+    const result = await provider.synthesize({
+      text: [
+        "作った。",
+        "https://github.com/NEXTAltair/style-bert-vits2-bridge/issues/71?notification_referrer_id=very-long",
+      ].join("\n"),
+      providerConfig: { baseUrl: "http://localhost:5000" },
+    });
+
+    const voiceUrl = new URL(mockFetch.mock.calls[2][0]);
+    expect(voiceUrl.searchParams.get("text")).toBe("作った。");
+    expect(result.metadata).toMatchObject({ textPreparation: "url_sanitize" });
   });
 
   it("defers SBV2 text limit checks for long metadata that will be rewritten", async () => {

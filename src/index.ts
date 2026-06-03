@@ -37,7 +37,7 @@ interface Sbv2TelemetryMetadata extends Record<string, unknown> {
   language?: string;
   outputFormat: "wav";
   audioBytes?: number;
-  textPreparation?: "explicit" | "tool_status_rewrite" | "metadata_status_rewrite";
+  textPreparation?: "explicit" | "tool_status_rewrite" | "metadata_status_rewrite" | "url_sanitize";
 }
 
 const TOOL_STATUS_REWRITE_TEXT: Record<NonNullable<Sbv2ResolvedVoiceProfile["language"]>, string> = {
@@ -115,6 +115,8 @@ const COMMAND_STATUS_SUBCOMMANDS = [
 const COMMAND_STATUS_SCRIPT_PATH = "(?:[a-z0-9:_-]+/[a-z0-9:_./-]+|[a-z0-9:_/-]*[a-z_][a-z0-9_-]*\\.[a-z][a-z0-9]+)";
 const COMMAND_STATUS_ARGUMENT = `(?:(?:-{1,2}[a-z][a-z0-9-]*)|(?:[a-z0-9:_./-]+\\s+-{1,2}[a-z][a-z0-9-]*)|(?:${COMMAND_STATUS_SCRIPT_PATH})|(?:(?:${COMMAND_STATUS_SUBCOMMANDS})\\b))`;
 const COMMAND_STATUS_COMMAND = `${COMMAND_STATUS_TOOLS}\\s+(?:(?:${COMMAND_STATUS_SUBCOMMANDS})\\b|(?:${COMMAND_STATUS_SCRIPT_PATH}))`;
+const GITHUB_ISSUE_OR_PR_URL =
+  "https?:\\/\\/github\\.com\\/[^\\s)]+\\/(issues|pull|pulls)\\/\\d+\\b(?:\\?[^#\\s)]*)?(?:#[^\\s)]+)?";
 
 interface PreparedSpeechText {
   text: string;
@@ -184,19 +186,18 @@ function classifyMetadataStatusText(value: string): MetadataStatusKind | undefin
   const text = value.trim();
   if (!text) return undefined;
 
-  const githubIssueOrPrUrl = "https?:\\/\\/github\\.com\\/[^\\s)]+\\/(issues|pull|pulls)\\/\\d+\\b(?:\\?[^#\\s)]*)?(?:#[^\\s)]+)?";
-  const githubIssueOrPrUrlPattern = new RegExp(githubIssueOrPrUrl, "i");
+  const githubIssueOrPrUrlPattern = new RegExp(GITHUB_ISSUE_OR_PR_URL, "i");
   if (!githubIssueOrPrUrlPattern.test(text)) return undefined;
 
   const metadataVerbs = "(?:created|opened|updated|closed|reopened|merged|commented|added|posted)";
   const metadataSubjects = "(?:github\\s+)?(?:issue|pr|pull request)";
   const metadataNumber = "(?:\\s+#?\\d+)?";
   const labelFirstMetadataLine = new RegExp(
-    `^(?:[-*]\\s*)?${metadataSubjects}${metadataNumber}(?:\\s+${metadataVerbs})?\\s*[:#-]\\s*${githubIssueOrPrUrl}\\s*$`,
+    `^(?:[-*]\\s*)?${metadataSubjects}${metadataNumber}(?:\\s+${metadataVerbs})?\\s*[:#-]\\s*${GITHUB_ISSUE_OR_PR_URL}\\s*$`,
     "i",
   );
   const verbFirstMetadataLine = new RegExp(
-    `^(?:[-*]\\s*)?${metadataVerbs}\\s+${metadataSubjects}${metadataNumber}\\s*[:#-]\\s*${githubIssueOrPrUrl}\\s*$`,
+    `^(?:[-*]\\s*)?${metadataVerbs}\\s+${metadataSubjects}${metadataNumber}\\s*[:#-]\\s*${GITHUB_ISSUE_OR_PR_URL}\\s*$`,
     "i",
   );
 
@@ -217,6 +218,62 @@ function classifyMetadataStatusText(value: string): MetadataStatusKind | undefin
   return kind;
 }
 
+function cleanupSpeechLineAfterUrlRemoval(value: string): string {
+  return value
+    .replace(/\(\s*\)/g, "")
+    .replace(/\[\s*\]\s*/g, "")
+    .replace(/\s+([。、，,.!?！？:;])/g, "$1")
+    .replace(/[ \t]{2,}/g, " ")
+    .trim();
+}
+
+function looksLikeGithubMetadataLabelRemainder(value: string): boolean {
+  return /^(?:[-*]\s*)?(?:(?:created|opened|updated|closed|reopened|merged|commented|added|posted)\s+)?(?:github\s+)?(?:issue|pr|pull request)(?:\s+#?\d+)?(?:\s+(?:created|opened|updated|closed|reopened|merged|commented|added|posted))?\s*[:#-]?\s*$/i.test(value);
+}
+
+function sanitizeGithubUrlsFromSpeechText(
+  value: string,
+  language: Sbv2ResolvedVoiceProfile["language"],
+): PreparedSpeechText | undefined {
+  const githubUrlPattern = new RegExp(GITHUB_ISSUE_OR_PR_URL, "gi");
+  if (!githubUrlPattern.test(value)) return undefined;
+
+  let kind: MetadataStatusKind | undefined;
+  const lines: string[] = [];
+
+  for (const line of value.split(/\r?\n/)) {
+    githubUrlPattern.lastIndex = 0;
+    const matches = Array.from(line.matchAll(githubUrlPattern));
+    if (!matches.length) {
+      if (line.trim()) lines.push(line.trim());
+      continue;
+    }
+
+    for (const match of matches) {
+      const resource = match[1]?.toLowerCase();
+      const lineKind: MetadataStatusKind = resource === "issues" ? "issue" : "pull_request";
+      kind ??= lineKind;
+      if (kind !== lineKind) kind = "github_item";
+    }
+
+    githubUrlPattern.lastIndex = 0;
+    const sanitizedLine = cleanupSpeechLineAfterUrlRemoval(line.replace(githubUrlPattern, ""));
+    if (sanitizedLine && !looksLikeGithubMetadataLabelRemainder(sanitizedLine)) lines.push(sanitizedLine);
+  }
+
+  const sanitizedText = lines.join("\n").trim();
+  if (sanitizedText) {
+    return { text: sanitizedText, textPreparation: "url_sanitize" };
+  }
+  if (kind) {
+    return {
+      text: METADATA_STATUS_REWRITE_TEXT[language ?? "JP"][kind],
+      textPreparation: "metadata_status_rewrite",
+    };
+  }
+  return undefined;
+}
+
 function prepareSpeechText(value: string, language: Sbv2ResolvedVoiceProfile["language"]): PreparedSpeechText {
   const explicitText = extractExplicitTtsText(value);
   if (explicitText) {
@@ -234,6 +291,9 @@ function prepareSpeechText(value: string, language: Sbv2ResolvedVoiceProfile["la
       textPreparation: "metadata_status_rewrite",
     };
   }
+
+  const sanitizedText = sanitizeGithubUrlsFromSpeechText(value, language);
+  if (sanitizedText) return sanitizedText;
 
   return { text: value };
 }
@@ -497,13 +557,13 @@ export function buildSbv2SpeechProvider(options: Sbv2SpeechProviderOptions = {})
       const pronunciationReplacements = resolvePronunciationReplacements(config);
       const textCapabilities = await client.getTextCapabilities();
       const explicitText = extractExplicitTtsText(req.text);
-      const metadataStatusKind = explicitText ? undefined : classifyMetadataStatusText(req.text);
-      const shouldDeferTextLimitCheck =
-        !explicitText && (looksLikeToolStatusText(req.text) || metadataStatusKind !== undefined);
-      if (!shouldDeferTextLimitCheck) {
-        const preflightText = explicitText ?? applyPronunciationReplacements(req.text, pronunciationReplacements);
-        assertSbv2TextWithinHardLimit(preflightText, textCapabilities.maxInputChars);
-      }
+      const preflightPreparedText = explicitText
+        ? { text: explicitText, textPreparation: "explicit" as const }
+        : prepareSpeechText(req.text, asSbv2Language(config.defaultLanguage) ?? asSbv2Language(config.language) ?? "JP");
+      const preflightText = preflightPreparedText.textPreparation === "explicit"
+        ? preflightPreparedText.text
+        : applyPronunciationReplacements(preflightPreparedText.text, pronunciationReplacements);
+      assertSbv2TextWithinHardLimit(preflightText, textCapabilities.maxInputChars);
 
       try {
         resolvedVoice = await resolveVoiceProfile({
