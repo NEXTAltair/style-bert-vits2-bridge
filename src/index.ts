@@ -116,7 +116,7 @@ const COMMAND_STATUS_SCRIPT_PATH = "(?:[a-z0-9:_-]+/[a-z0-9:_./-]+|[a-z0-9:_/-]*
 const COMMAND_STATUS_ARGUMENT = `(?:(?:-{1,2}[a-z][a-z0-9-]*)|(?:[a-z0-9:_./-]+\\s+-{1,2}[a-z][a-z0-9-]*)|(?:${COMMAND_STATUS_SCRIPT_PATH})|(?:(?:${COMMAND_STATUS_SUBCOMMANDS})\\b))`;
 const COMMAND_STATUS_COMMAND = `${COMMAND_STATUS_TOOLS}\\s+(?:(?:${COMMAND_STATUS_SUBCOMMANDS})\\b|(?:${COMMAND_STATUS_SCRIPT_PATH}))`;
 const GITHUB_ISSUE_OR_PR_URL =
-  "https?:\\/\\/github\\.com\\/[^\\/\\s)>`]+\\/[^\\/\\s)>`]+\\/(issues|pull|pulls)\\/\\d+\\b(?:\\.(?:diff|patch))?(?:\\/[^?#\\s)>`]*)?(?:\\?[^#\\s)>`]*)?(?:#[^\\s)>`]+)?";
+  "https?:\\/\\/github\\.com\\/[^\\/\\s)>`\\]]+\\/[^\\/\\s)>`\\]]+\\/(issues|pull|pulls)\\/\\d+\\b(?:\\.(?:diff|patch))?(?:\\/[^?#\\s)>`\\]]*)?(?:\\?[^#\\s)>`\\]]*)?(?:#[^\\s)>`\\]]+)?";
 const MARKDOWN_LINK_TITLE = `(?:"[^"\\n]*"|'[^'\\n]*'|\\([^\\)\\n]*\\))`;
 const GITHUB_ISSUE_OR_PR_MARKDOWN_DESTINATION = `(?:${GITHUB_ISSUE_OR_PR_URL}|<\\s*${GITHUB_ISSUE_OR_PR_URL}\\s*>)`;
 const GITHUB_ISSUE_OR_PR_MARKDOWN_LINK = `\\[([^\\]\\n]*)\\]\\(\\s*${GITHUB_ISSUE_OR_PR_MARKDOWN_DESTINATION}(?:\\s+${MARKDOWN_LINK_TITLE})?\\s*\\)`;
@@ -262,6 +262,22 @@ function collectGithubMarkdownReferenceIds(value: string): Set<string> {
   return new Set(Array.from(value.matchAll(definitionPattern), (match) => normalizeMarkdownReferenceLabel(match[1])));
 }
 
+function collectGithubMarkdownReferenceTitleLineIndexes(value: string): Set<number> {
+  const definitionWithoutTitlePattern = new RegExp(
+    `^\\s*\\[[^\\]\\n]+\\]:\\s*${GITHUB_ISSUE_OR_PR_MARKDOWN_DESTINATION}\\s*$`,
+    "i",
+  );
+  const titleLinePattern = new RegExp(`^\\s+${MARKDOWN_LINK_TITLE}\\s*$`);
+  const lines = value.split(/\r?\n/);
+  const indexes = new Set<number>();
+  for (let index = 1; index < lines.length; index += 1) {
+    if (definitionWithoutTitlePattern.test(lines[index - 1]) && titleLinePattern.test(lines[index])) {
+      indexes.add(index);
+    }
+  }
+  return indexes;
+}
+
 function normalizeMarkdownReferenceLabel(value: string): string {
   return value.trim().replace(/\s+/g, " ").toLowerCase();
 }
@@ -269,6 +285,15 @@ function normalizeMarkdownReferenceLabel(value: string): string {
 function replaceGithubMarkdownReferenceUsages(value: string, githubReferenceIds: Set<string>): string {
   if (!githubReferenceIds.size) return value;
   return value
+    .replace(/!\[([^\]\n]+)\]\[\]/g, (match, label: string) =>
+      githubReferenceIds.has(normalizeMarkdownReferenceLabel(label)) ? label.trim() : match,
+    )
+    .replace(/!\[([^\]\n]+)\]\[([^\]\n]+)\]/g, (match, label: string, id: string) =>
+      githubReferenceIds.has(normalizeMarkdownReferenceLabel(id)) ? label.trim() : match,
+    )
+    .replace(/!\[([^\]\n]+)\](?!\s*[:\[(])/g, (match, label: string) =>
+      githubReferenceIds.has(normalizeMarkdownReferenceLabel(label)) ? label.trim() : match,
+    )
     .replace(/\[([^\]\n]+)\]\[\]/g, (match, label: string) =>
       githubReferenceIds.has(normalizeMarkdownReferenceLabel(label)) ? label.trim() : match,
     )
@@ -296,11 +321,13 @@ function sanitizeGithubUrlsFromSpeechText(
   let kind: MetadataStatusKind | undefined;
   const lines: string[] = [];
   const githubReferenceIds = collectGithubMarkdownReferenceIds(value);
+  const githubReferenceTitleLineIndexes = collectGithubMarkdownReferenceTitleLineIndexes(value);
 
-  for (const line of value.split(/\r?\n/)) {
+  for (const [lineIndex, line] of value.split(/\r?\n/).entries()) {
     githubUrlPattern.lastIndex = 0;
     const matches = Array.from(line.matchAll(githubUrlPattern));
     if (!matches.length) {
+      if (githubReferenceTitleLineIndexes.has(lineIndex)) continue;
       const lineWithReferenceLabels = replaceGithubMarkdownReferenceUsages(line, githubReferenceIds).trim();
       if (lineWithReferenceLabels) lines.push(lineWithReferenceLabels);
       continue;
