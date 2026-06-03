@@ -224,8 +224,8 @@ function classifyMetadataStatusText(value: string): MetadataStatusKind | undefin
 
 function cleanupSpeechLineAfterUrlRemoval(value: string): string {
   return value
-    .replace(/\(\s*\)/g, "")
-    .replace(/\[\s*\]\s*/g, "")
+    .replace(/^\(\s*\)$/, "")
+    .replace(/^\[\s*\]$/, "")
     .replace(/<\s*>/g, "")
     .replace(/`+\s*`+/g, "")
     .replace(/\s+([。、，,.!?！？:;])/g, "$1")
@@ -234,6 +234,8 @@ function cleanupSpeechLineAfterUrlRemoval(value: string): string {
     .replace(/^#{1,6}\s*$/, "")
     .replace(/^(?:[-*+]|\d+[.)])\s+/, "")
     .replace(/^(?:[-*+]|\d+[.)])\s*$/, "")
+    .replace(/^([*_]{1,3})(.+)\1$/, "$2")
+    .replace(/^(?:[*_]\s*){2,}$/, "")
     .replace(/^[<>`]+$/, "")
     .replace(/^[、。，,.!?！？:;]+$/, "")
     .trim();
@@ -247,6 +249,21 @@ function looksLikeMarkdownReferenceDefinitionRemainder(value: string): boolean {
   return new RegExp(`^\\[[^\\]\\n]+\\]:\\s*(?:${MARKDOWN_LINK_TITLE})?\\s*$`).test(value.trim());
 }
 
+function collectGithubMarkdownReferenceIds(value: string): Set<string> {
+  const definitionPattern = new RegExp(
+    `^\\s*\\[([^\\]\\n]+)\\]:\\s*${GITHUB_ISSUE_OR_PR_URL}(?:\\s+${MARKDOWN_LINK_TITLE})?\\s*$`,
+    "gim",
+  );
+  return new Set(Array.from(value.matchAll(definitionPattern), (match) => match[1].toLowerCase()));
+}
+
+function replaceGithubMarkdownReferenceUsages(value: string, githubReferenceIds: Set<string>): string {
+  if (!githubReferenceIds.size) return value;
+  return value.replace(/\[([^\]\n]+)\]\[([^\]\n]+)\]/g, (match, label: string, id: string) =>
+    githubReferenceIds.has(id.toLowerCase()) ? label.trim() : match,
+  );
+}
+
 function sanitizeGithubUrlsFromSpeechText(
   value: string,
   language: Sbv2ResolvedVoiceProfile["language"],
@@ -257,12 +274,16 @@ function sanitizeGithubUrlsFromSpeechText(
 
   let kind: MetadataStatusKind | undefined;
   const lines: string[] = [];
+  const githubReferenceIds = collectGithubMarkdownReferenceIds(value);
 
   for (const line of value.split(/\r?\n/)) {
     githubUrlPattern.lastIndex = 0;
     const matches = Array.from(line.matchAll(githubUrlPattern));
     if (!matches.length) {
-      if (line.trim()) lines.push(line.trim());
+      const lineWithReferenceLabels = cleanupSpeechLineAfterUrlRemoval(
+        replaceGithubMarkdownReferenceUsages(line, githubReferenceIds),
+      );
+      if (lineWithReferenceLabels) lines.push(lineWithReferenceLabels);
       continue;
     }
 
@@ -279,7 +300,7 @@ function sanitizeGithubUrlsFromSpeechText(
       line.replace(markdownLinkPattern, "").replace(githubUrlPattern, ""),
     );
     const lineWithLabels = cleanupSpeechLineAfterUrlRemoval(
-      line
+      replaceGithubMarkdownReferenceUsages(line, githubReferenceIds)
         .replace(markdownLinkPattern, (_match, label: string) => label.trim())
         .replace(githubUrlPattern, ""),
     );
