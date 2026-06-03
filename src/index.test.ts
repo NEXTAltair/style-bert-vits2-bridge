@@ -662,6 +662,7 @@ describe("Style-Bert-VITS2 speech provider", () => {
     const inputs = [
       "PR: https://github.com/NEXTAltair/style-bert-vits2-bridge/pull/65/files",
       "PR: https://github.com/NEXTAltair/style-bert-vits2-bridge/pull/65/checks?check_run_id=123",
+      "PR: [#65](https://github.com/NEXTAltair/style-bert-vits2-bridge/pull/65/files)",
     ];
 
     for (const text of inputs) {
@@ -689,6 +690,7 @@ describe("Style-Bert-VITS2 speech provider", () => {
       expect(spokenText).toBe("The GitHub pull request was updated.");
       expect(spokenText).not.toContain("/files");
       expect(spokenText).not.toContain("/checks");
+      expect(spokenText).not.toContain("#65");
       expect(result.metadata).toMatchObject({ textPreparation: "metadata_status_rewrite" });
     }
   });
@@ -800,6 +802,7 @@ describe("Style-Bert-VITS2 speech provider", () => {
       text: [
         "- https://github.com/NEXTAltair/style-bert-vits2-bridge/issues/71",
         "1. https://github.com/NEXTAltair/style-bert-vits2-bridge/pull/73/files",
+        "- [issue](https://github.com/NEXTAltair/style-bert-vits2-bridge/issues/72)",
         "内容は確認します。",
       ].join("\n"),
       providerConfig: { baseUrl: "http://localhost:5000" },
@@ -810,6 +813,7 @@ describe("Style-Bert-VITS2 speech provider", () => {
     expect(spokenText).toBe("内容は確認します。");
     expect(spokenText).not.toContain("-");
     expect(spokenText).not.toContain("1.");
+    expect(spokenText).not.toContain("issue");
     expect(spokenText).not.toContain("https://github.com");
     expect(result.metadata).toMatchObject({ textPreparation: "url_sanitize" });
   });

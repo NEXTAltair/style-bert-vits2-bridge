@@ -117,6 +117,7 @@ const COMMAND_STATUS_ARGUMENT = `(?:(?:-{1,2}[a-z][a-z0-9-]*)|(?:[a-z0-9:_./-]+\
 const COMMAND_STATUS_COMMAND = `${COMMAND_STATUS_TOOLS}\\s+(?:(?:${COMMAND_STATUS_SUBCOMMANDS})\\b|(?:${COMMAND_STATUS_SCRIPT_PATH}))`;
 const GITHUB_ISSUE_OR_PR_URL =
   "https?:\\/\\/github\\.com\\/[^\\s)]+\\/(issues|pull|pulls)\\/\\d+\\b(?:\\/[^?#\\s)]*)?(?:\\?[^#\\s)]*)?(?:#[^\\s)]+)?";
+const GITHUB_ISSUE_OR_PR_MARKDOWN_LINK = `\\[[^\\]\\n]*\\]\\(\\s*${GITHUB_ISSUE_OR_PR_URL}\\s*\\)`;
 
 interface PreparedSpeechText {
   text: string;
@@ -237,6 +238,7 @@ function sanitizeGithubUrlsFromSpeechText(
   language: Sbv2ResolvedVoiceProfile["language"],
 ): PreparedSpeechText | undefined {
   const githubUrlPattern = new RegExp(GITHUB_ISSUE_OR_PR_URL, "gi");
+  const markdownLinkPattern = new RegExp(GITHUB_ISSUE_OR_PR_MARKDOWN_LINK, "gi");
   if (!githubUrlPattern.test(value)) return undefined;
 
   let kind: MetadataStatusKind | undefined;
@@ -258,7 +260,10 @@ function sanitizeGithubUrlsFromSpeechText(
     }
 
     githubUrlPattern.lastIndex = 0;
-    const sanitizedLine = cleanupSpeechLineAfterUrlRemoval(line.replace(githubUrlPattern, ""));
+    markdownLinkPattern.lastIndex = 0;
+    const sanitizedLine = cleanupSpeechLineAfterUrlRemoval(
+      line.replace(markdownLinkPattern, "").replace(githubUrlPattern, ""),
+    );
     if (sanitizedLine && !looksLikeGithubMetadataLabelRemainder(sanitizedLine)) lines.push(sanitizedLine);
   }
 

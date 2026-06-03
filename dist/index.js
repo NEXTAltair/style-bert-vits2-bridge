@@ -73,6 +73,7 @@ const COMMAND_STATUS_SCRIPT_PATH = "(?:[a-z0-9:_-]+/[a-z0-9:_./-]+|[a-z0-9:_/-]*
 const COMMAND_STATUS_ARGUMENT = `(?:(?:-{1,2}[a-z][a-z0-9-]*)|(?:[a-z0-9:_./-]+\\s+-{1,2}[a-z][a-z0-9-]*)|(?:${COMMAND_STATUS_SCRIPT_PATH})|(?:(?:${COMMAND_STATUS_SUBCOMMANDS})\\b))`;
 const COMMAND_STATUS_COMMAND = `${COMMAND_STATUS_TOOLS}\\s+(?:(?:${COMMAND_STATUS_SUBCOMMANDS})\\b|(?:${COMMAND_STATUS_SCRIPT_PATH}))`;
 const GITHUB_ISSUE_OR_PR_URL = "https?:\\/\\/github\\.com\\/[^\\s)]+\\/(issues|pull|pulls)\\/\\d+\\b(?:\\/[^?#\\s)]*)?(?:\\?[^#\\s)]*)?(?:#[^\\s)]+)?";
+const GITHUB_ISSUE_OR_PR_MARKDOWN_LINK = `\\[[^\\]\\n]*\\]\\(\\s*${GITHUB_ISSUE_OR_PR_URL}\\s*\\)`;
 function trimToUndefined(value) {
     return typeof value === "string" && value.trim() ? value.trim() : undefined;
 }
@@ -162,6 +163,7 @@ function looksLikeGithubMetadataLabelRemainder(value) {
 }
 function sanitizeGithubUrlsFromSpeechText(value, language) {
     const githubUrlPattern = new RegExp(GITHUB_ISSUE_OR_PR_URL, "gi");
+    const markdownLinkPattern = new RegExp(GITHUB_ISSUE_OR_PR_MARKDOWN_LINK, "gi");
     if (!githubUrlPattern.test(value))
         return undefined;
     let kind;
@@ -182,7 +184,8 @@ function sanitizeGithubUrlsFromSpeechText(value, language) {
                 kind = "github_item";
         }
         githubUrlPattern.lastIndex = 0;
-        const sanitizedLine = cleanupSpeechLineAfterUrlRemoval(line.replace(githubUrlPattern, ""));
+        markdownLinkPattern.lastIndex = 0;
+        const sanitizedLine = cleanupSpeechLineAfterUrlRemoval(line.replace(markdownLinkPattern, "").replace(githubUrlPattern, ""));
         if (sanitizedLine && !looksLikeGithubMetadataLabelRemainder(sanitizedLine))
             lines.push(sanitizedLine);
     }
