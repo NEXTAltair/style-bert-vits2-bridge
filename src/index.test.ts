@@ -663,6 +663,8 @@ describe("Style-Bert-VITS2 speech provider", () => {
       "PR: https://github.com/NEXTAltair/style-bert-vits2-bridge/pull/65/files",
       "PR: https://github.com/NEXTAltair/style-bert-vits2-bridge/pull/65/checks?check_run_id=123",
       "PR: [#65](https://github.com/NEXTAltair/style-bert-vits2-bridge/pull/65/files)",
+      "1. PR: https://github.com/NEXTAltair/style-bert-vits2-bridge/pull/65",
+      "PR: https://github.com/NEXTAltair/style-bert-vits2-bridge/pull/65.",
     ];
 
     for (const text of inputs) {
@@ -691,6 +693,7 @@ describe("Style-Bert-VITS2 speech provider", () => {
       expect(spokenText).not.toContain("/files");
       expect(spokenText).not.toContain("/checks");
       expect(spokenText).not.toContain("#65");
+      expect(spokenText).not.toContain("1. PR");
       expect(result.metadata).toMatchObject({ textPreparation: "metadata_status_rewrite" });
     }
   });
@@ -803,6 +806,9 @@ describe("Style-Bert-VITS2 speech provider", () => {
         "- https://github.com/NEXTAltair/style-bert-vits2-bridge/issues/71",
         "1. https://github.com/NEXTAltair/style-bert-vits2-bridge/pull/73/files",
         "- [issue](https://github.com/NEXTAltair/style-bert-vits2-bridge/issues/72)",
+        "<https://github.com/NEXTAltair/style-bert-vits2-bridge/issues/73>",
+        "`https://github.com/NEXTAltair/style-bert-vits2-bridge/issues/74`",
+        "https://github.com/NEXTAltair/style-bert-vits2-bridge/issues/75.",
         "内容は確認します。",
       ].join("\n"),
       providerConfig: { baseUrl: "http://localhost:5000" },
@@ -815,6 +821,8 @@ describe("Style-Bert-VITS2 speech provider", () => {
     expect(spokenText).not.toContain("1.");
     expect(spokenText).not.toContain("issue");
     expect(spokenText).not.toContain("https://github.com");
+    expect(spokenText).not.toContain("<>");
+    expect(spokenText).not.toContain("`");
     expect(result.metadata).toMatchObject({ textPreparation: "url_sanitize" });
   });
 

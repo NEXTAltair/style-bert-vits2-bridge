@@ -193,12 +193,14 @@ function classifyMetadataStatusText(value: string): MetadataStatusKind | undefin
   const metadataVerbs = "(?:created|opened|updated|closed|reopened|merged|commented|added|posted)";
   const metadataSubjects = "(?:github\\s+)?(?:issue|pr|pull request)";
   const metadataNumber = "(?:\\s+#?\\d+)?";
+  const listPrefix = "(?:(?:[-*+]|\\d+[.)])\\s*)?";
+  const terminalPunctuation = "[.。]?";
   const labelFirstMetadataLine = new RegExp(
-    `^(?:[-*]\\s*)?${metadataSubjects}${metadataNumber}(?:\\s+${metadataVerbs})?\\s*[:#-]\\s*${GITHUB_ISSUE_OR_PR_URL}\\s*$`,
+    `^${listPrefix}${metadataSubjects}${metadataNumber}(?:\\s+${metadataVerbs})?\\s*[:#-]\\s*${GITHUB_ISSUE_OR_PR_URL}${terminalPunctuation}\\s*$`,
     "i",
   );
   const verbFirstMetadataLine = new RegExp(
-    `^(?:[-*]\\s*)?${metadataVerbs}\\s+${metadataSubjects}${metadataNumber}\\s*[:#-]\\s*${GITHUB_ISSUE_OR_PR_URL}\\s*$`,
+    `^${listPrefix}${metadataVerbs}\\s+${metadataSubjects}${metadataNumber}\\s*[:#-]\\s*${GITHUB_ISSUE_OR_PR_URL}${terminalPunctuation}\\s*$`,
     "i",
   );
 
@@ -223,14 +225,18 @@ function cleanupSpeechLineAfterUrlRemoval(value: string): string {
   return value
     .replace(/\(\s*\)/g, "")
     .replace(/\[\s*\]\s*/g, "")
+    .replace(/<\s*>/g, "")
+    .replace(/`+\s*`+/g, "")
     .replace(/\s+([。、，,.!?！？:;])/g, "$1")
     .replace(/[ \t]{2,}/g, " ")
     .replace(/^(?:[-*+]|\d+[.)])\s*$/, "")
+    .replace(/^[<>`]+$/, "")
+    .replace(/^[、。，,.!?！？:;]+$/, "")
     .trim();
 }
 
 function looksLikeGithubMetadataLabelRemainder(value: string): boolean {
-  return /^(?:[-*]\s*)?(?:(?:created|opened|updated|closed|reopened|merged|commented|added|posted)\s+)?(?:github\s+)?(?:issue|pr|pull request)(?:\s+#?\d+)?(?:\s+(?:created|opened|updated|closed|reopened|merged|commented|added|posted))?\s*[:#-]?\s*$/i.test(value);
+  return /^(?:(?:[-*+]|\d+[.)])\s*)?(?:(?:created|opened|updated|closed|reopened|merged|commented|added|posted)\s+)?(?:github\s+)?(?:issue|pr|pull request)(?:\s+#?\d+)?(?:\s+(?:created|opened|updated|closed|reopened|merged|commented|added|posted))?\s*[:#-]?\s*[、。，,.!?！？:;]*\s*$/i.test(value);
 }
 
 function sanitizeGithubUrlsFromSpeechText(

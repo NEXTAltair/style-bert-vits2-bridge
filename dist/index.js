@@ -131,8 +131,10 @@ function classifyMetadataStatusText(value) {
     const metadataVerbs = "(?:created|opened|updated|closed|reopened|merged|commented|added|posted)";
     const metadataSubjects = "(?:github\\s+)?(?:issue|pr|pull request)";
     const metadataNumber = "(?:\\s+#?\\d+)?";
-    const labelFirstMetadataLine = new RegExp(`^(?:[-*]\\s*)?${metadataSubjects}${metadataNumber}(?:\\s+${metadataVerbs})?\\s*[:#-]\\s*${GITHUB_ISSUE_OR_PR_URL}\\s*$`, "i");
-    const verbFirstMetadataLine = new RegExp(`^(?:[-*]\\s*)?${metadataVerbs}\\s+${metadataSubjects}${metadataNumber}\\s*[:#-]\\s*${GITHUB_ISSUE_OR_PR_URL}\\s*$`, "i");
+    const listPrefix = "(?:(?:[-*+]|\\d+[.)])\\s*)?";
+    const terminalPunctuation = "[.。]?";
+    const labelFirstMetadataLine = new RegExp(`^${listPrefix}${metadataSubjects}${metadataNumber}(?:\\s+${metadataVerbs})?\\s*[:#-]\\s*${GITHUB_ISSUE_OR_PR_URL}${terminalPunctuation}\\s*$`, "i");
+    const verbFirstMetadataLine = new RegExp(`^${listPrefix}${metadataVerbs}\\s+${metadataSubjects}${metadataNumber}\\s*[:#-]\\s*${GITHUB_ISSUE_OR_PR_URL}${terminalPunctuation}\\s*$`, "i");
     const lines = text.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
     if (!lines.length)
         return undefined;
@@ -153,13 +155,17 @@ function cleanupSpeechLineAfterUrlRemoval(value) {
     return value
         .replace(/\(\s*\)/g, "")
         .replace(/\[\s*\]\s*/g, "")
+        .replace(/<\s*>/g, "")
+        .replace(/`+\s*`+/g, "")
         .replace(/\s+([。、，,.!?！？:;])/g, "$1")
         .replace(/[ \t]{2,}/g, " ")
         .replace(/^(?:[-*+]|\d+[.)])\s*$/, "")
+        .replace(/^[<>`]+$/, "")
+        .replace(/^[、。，,.!?！？:;]+$/, "")
         .trim();
 }
 function looksLikeGithubMetadataLabelRemainder(value) {
-    return /^(?:[-*]\s*)?(?:(?:created|opened|updated|closed|reopened|merged|commented|added|posted)\s+)?(?:github\s+)?(?:issue|pr|pull request)(?:\s+#?\d+)?(?:\s+(?:created|opened|updated|closed|reopened|merged|commented|added|posted))?\s*[:#-]?\s*$/i.test(value);
+    return /^(?:(?:[-*+]|\d+[.)])\s*)?(?:(?:created|opened|updated|closed|reopened|merged|commented|added|posted)\s+)?(?:github\s+)?(?:issue|pr|pull request)(?:\s+#?\d+)?(?:\s+(?:created|opened|updated|closed|reopened|merged|commented|added|posted))?\s*[:#-]?\s*[、。，,.!?！？:;]*\s*$/i.test(value);
 }
 function sanitizeGithubUrlsFromSpeechText(value, language) {
     const githubUrlPattern = new RegExp(GITHUB_ISSUE_OR_PR_URL, "gi");
