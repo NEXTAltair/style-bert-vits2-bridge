@@ -167,6 +167,13 @@ export async function runModelMerge(options) {
         };
         if (options.baseUrl) {
             candidateForFailedJob = candidate;
+            refreshForFailedJob = {
+                baseUrl: options.baseUrl,
+                refreshed: false,
+                foundInModelsInfo: false,
+                modelsInfoCount: 0,
+                outputAssetsRetained: true,
+            };
             const modelsInfo = await new Sbv2Client({ baseUrl: options.baseUrl }).refreshModels();
             const found = modelInfoContains(modelsInfo, plan.outputModelName);
             summary.refresh = {
@@ -176,9 +183,9 @@ export async function runModelMerge(options) {
                 modelsInfoCount: modelsInfo.length,
                 outputAssetsRetained: true,
             };
+            refreshForFailedJob = summary.refresh;
             logLines.push(`refreshed SBV2 models from ${options.baseUrl}`);
             if (!found) {
-                refreshForFailedJob = summary.refresh;
                 logLines.push(`merged model assets were retained at ${plan.outputDir}, but ${plan.outputModelName} was not found in /models/info`);
             }
             if (!found) {

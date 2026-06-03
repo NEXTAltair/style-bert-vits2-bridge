@@ -369,11 +369,20 @@ describe("SBV2 model merge", () => {
       const jobDir = path.join(jobsRoot, "sbv2-job-20260602000000-refreshf");
       const manifest = JSON.parse(readFileSync(path.join(jobDir, "manifest.json"), "utf8")) as {
         state: string;
-        inputSummary: { outputAssetsRetained?: boolean };
+        inputSummary: {
+          outputAssetsRetained?: boolean;
+          refresh?: { baseUrl?: string; refreshed?: boolean; foundInModelsInfo?: boolean; modelsInfoCount?: number };
+        };
         artifactPaths: string[];
       };
       expect(manifest.state).toBe("failed");
       expect(manifest.inputSummary.outputAssetsRetained).toBe(true);
+      expect(manifest.inputSummary.refresh).toMatchObject({
+        baseUrl: "http://localhost:5000",
+        refreshed: false,
+        foundInModelsInfo: false,
+        modelsInfoCount: 0,
+      });
       expect(manifest.artifactPaths).toContain(path.join(outputDir, "recipe.json"));
       expect(manifest.artifactPaths).toContain(path.join(outputDir, "merged.safetensors"));
 
@@ -381,11 +390,18 @@ describe("SBV2 model merge", () => {
         state: string;
         candidate?: { modelName?: string };
         outputAssetsRetained?: boolean;
+        refresh?: { baseUrl?: string; refreshed?: boolean; foundInModelsInfo?: boolean; modelsInfoCount?: number };
         firstError?: string;
       };
       expect(summary.state).toBe("failed");
       expect(summary.candidate?.modelName).toBe("merged");
       expect(summary.outputAssetsRetained).toBe(true);
+      expect(summary.refresh).toMatchObject({
+        baseUrl: "http://localhost:5000",
+        refreshed: false,
+        foundInModelsInfo: false,
+        modelsInfoCount: 0,
+      });
       expect(summary.firstError).toContain("server unavailable");
     } finally {
       globalThis.fetch = originalFetch;
