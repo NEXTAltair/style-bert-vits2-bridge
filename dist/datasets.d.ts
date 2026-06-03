@@ -40,6 +40,12 @@ export interface Sbv2DatasetStyleGroup {
     fileCount: number;
     files: string[];
 }
+export interface Sbv2DatasetSliceOptions {
+    minSec: number;
+    maxSec: number;
+    minSilenceDurMs: number;
+    numProcesses: number;
+}
 export interface Sbv2DatasetManifest {
     schemaVersion: 1;
     workspaceId: string;
@@ -93,6 +99,7 @@ export interface Sbv2DatasetPrepareSummary {
     esdListPath: string;
     rawWavCount: number;
     esdLineCount: number;
+    sliceOptions: Sbv2DatasetSliceOptions;
     styleGroups: Sbv2DatasetStyleGroup[];
     missingAudioReferences: string[];
     untranscribedWavs: string[];
@@ -115,6 +122,7 @@ export type PrepareDatasetCommandRunner = (executable: string, args: string[], o
 export interface PrepareDatasetOptions {
     manifestPath: string;
     jobsRoot?: string;
+    sliceOptions?: Partial<Sbv2DatasetSliceOptions>;
     commandRunner?: PrepareDatasetCommandRunner;
     now?: () => Date;
     randomId?: () => string;

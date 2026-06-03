@@ -57,6 +57,13 @@ export interface Sbv2DatasetStyleGroup {
   files: string[];
 }
 
+export interface Sbv2DatasetSliceOptions {
+  minSec: number;
+  maxSec: number;
+  minSilenceDurMs: number;
+  numProcesses: number;
+}
+
 export interface Sbv2DatasetManifest {
   schemaVersion: 1;
   workspaceId: string;
@@ -113,6 +120,7 @@ export interface Sbv2DatasetPrepareSummary {
   esdListPath: string;
   rawWavCount: number;
   esdLineCount: number;
+  sliceOptions: Sbv2DatasetSliceOptions;
   styleGroups: Sbv2DatasetStyleGroup[];
   missingAudioReferences: string[];
   untranscribedWavs: string[];
@@ -143,6 +151,7 @@ export type PrepareDatasetCommandRunner = (
 export interface PrepareDatasetOptions {
   manifestPath: string;
   jobsRoot?: string;
+  sliceOptions?: Partial<Sbv2DatasetSliceOptions>;
   commandRunner?: PrepareDatasetCommandRunner;
   now?: () => Date;
   randomId?: () => string;
@@ -180,6 +189,33 @@ export function resolveDatasetsRoot(value: string | undefined): string {
 
 export function resolveSbv2Root(value: string | undefined): string {
   return resolveUserPath(value?.trim() || process.env.SBV2_ROOT || DEFAULT_SBV2_ROOT);
+}
+
+function normalizeSliceOptions(options: Partial<Sbv2DatasetSliceOptions> | undefined): Sbv2DatasetSliceOptions {
+  const normalized = {
+    minSec: options?.minSec ?? DEFAULT_SLICE_MIN_SEC,
+    maxSec: options?.maxSec ?? DEFAULT_SLICE_MAX_SEC,
+    minSilenceDurMs: options?.minSilenceDurMs ?? DEFAULT_SLICE_MIN_SILENCE_DUR_MS,
+    numProcesses: options?.numProcesses ?? DEFAULT_SLICE_NUM_PROCESSES,
+  };
+
+  if (!Number.isFinite(normalized.minSec) || normalized.minSec <= 0) {
+    throw new Error("sliceOptions.minSec must be a positive finite number");
+  }
+  if (!Number.isFinite(normalized.maxSec) || normalized.maxSec <= 0) {
+    throw new Error("sliceOptions.maxSec must be a positive finite number");
+  }
+  if (normalized.minSec > normalized.maxSec) {
+    throw new Error("sliceOptions.minSec must be less than or equal to sliceOptions.maxSec");
+  }
+  if (!Number.isInteger(normalized.minSilenceDurMs) || normalized.minSilenceDurMs <= 0) {
+    throw new Error("sliceOptions.minSilenceDurMs must be a positive integer");
+  }
+  if (!Number.isInteger(normalized.numProcesses) || normalized.numProcesses <= 0) {
+    throw new Error("sliceOptions.numProcesses must be a positive integer");
+  }
+
+  return normalized;
 }
 
 function makeWorkspaceId(now: Date, randomId: () => string): string {
@@ -476,6 +512,7 @@ export async function readDatasetManifest(filePath: string): Promise<Sbv2Dataset
 export async function prepareDataset(options: PrepareDatasetOptions): Promise<PrepareDatasetResult> {
   const manifestPath = resolveUserPath(options.manifestPath);
   const dataset = await readDatasetManifest(manifestPath);
+  const sliceOptions = normalizeSliceOptions(options.sliceOptions);
   const runner = options.commandRunner ?? runSbv2Command;
   const now = options.now ?? (() => new Date());
   const randomId = options.randomId ?? randomUUID;
@@ -493,6 +530,7 @@ export async function prepareDataset(options: PrepareDatasetOptions): Promise<Pr
         workspaceId: dataset.workspaceId,
         modelName: dataset.modelName,
         datasetManifestPath: manifestPath,
+        sliceOptions,
       },
       artifactPaths: [manifestPath],
       firstError: message,
@@ -541,13 +579,13 @@ export async function prepareDataset(options: PrepareDatasetOptions): Promise<Pr
       "--input_dir",
       dataset.originalsDir,
       "--min_sec",
-      String(DEFAULT_SLICE_MIN_SEC),
+      String(sliceOptions.minSec),
       "--max_sec",
-      String(DEFAULT_SLICE_MAX_SEC),
+      String(sliceOptions.maxSec),
       "--min_silence_dur_ms",
-      String(DEFAULT_SLICE_MIN_SILENCE_DUR_MS),
+      String(sliceOptions.minSilenceDurMs),
       "--num_processes",
-      String(DEFAULT_SLICE_NUM_PROCESSES),
+      String(sliceOptions.numProcesses),
     ];
     await runAndLogCommand(runner, "uv", sliceArgs, dataset.sbv2Root, executedCommands, logLines);
 
@@ -575,7 +613,7 @@ export async function prepareDataset(options: PrepareDatasetOptions): Promise<Pr
     ];
     await runAndLogCommand(runner, "uv", transcribeArgs, dataset.sbv2Root, executedCommands, logLines);
 
-    const summary = await buildPrepareSummary(dataset, rawDir, esdListPath, executedCommands);
+    const summary = await buildPrepareSummary(dataset, rawDir, esdListPath, sliceOptions, executedCommands);
     const job = await createJobManifest({
       jobsRoot: options.jobsRoot,
       operation: "dataset-prepare",
@@ -587,6 +625,7 @@ export async function prepareDataset(options: PrepareDatasetOptions): Promise<Pr
         assetsPath,
         rawDir,
         esdListPath,
+        sliceOptions,
       },
       artifactPaths: [manifestPath, rawDir, esdListPath],
       progressSummary: `Dataset prepare completed for ${dataset.modelName}.`,
@@ -718,6 +757,7 @@ async function buildPrepareSummary(
   dataset: Sbv2DatasetManifest,
   rawDir: string,
   esdListPath: string,
+  sliceOptions: Sbv2DatasetSliceOptions,
   commands: Sbv2DatasetPrepareSummary["commands"],
 ): Promise<Sbv2DatasetPrepareSummary> {
   const rawFiles = (await collectDirectoryFiles(rawDir))
@@ -784,6 +824,7 @@ async function buildPrepareSummary(
     esdListPath,
     rawWavCount: rawFiles.length,
     esdLineCount: esdLines.length,
+    sliceOptions,
     styleGroups: dataset.styleGroups,
     missingAudioReferences,
     untranscribedWavs,

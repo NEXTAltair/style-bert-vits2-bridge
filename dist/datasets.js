@@ -38,6 +38,30 @@ export function resolveDatasetsRoot(value) {
 export function resolveSbv2Root(value) {
     return resolveUserPath(value?.trim() || process.env.SBV2_ROOT || DEFAULT_SBV2_ROOT);
 }
+function normalizeSliceOptions(options) {
+    const normalized = {
+        minSec: options?.minSec ?? DEFAULT_SLICE_MIN_SEC,
+        maxSec: options?.maxSec ?? DEFAULT_SLICE_MAX_SEC,
+        minSilenceDurMs: options?.minSilenceDurMs ?? DEFAULT_SLICE_MIN_SILENCE_DUR_MS,
+        numProcesses: options?.numProcesses ?? DEFAULT_SLICE_NUM_PROCESSES,
+    };
+    if (!Number.isFinite(normalized.minSec) || normalized.minSec <= 0) {
+        throw new Error("sliceOptions.minSec must be a positive finite number");
+    }
+    if (!Number.isFinite(normalized.maxSec) || normalized.maxSec <= 0) {
+        throw new Error("sliceOptions.maxSec must be a positive finite number");
+    }
+    if (normalized.minSec > normalized.maxSec) {
+        throw new Error("sliceOptions.minSec must be less than or equal to sliceOptions.maxSec");
+    }
+    if (!Number.isInteger(normalized.minSilenceDurMs) || normalized.minSilenceDurMs <= 0) {
+        throw new Error("sliceOptions.minSilenceDurMs must be a positive integer");
+    }
+    if (!Number.isInteger(normalized.numProcesses) || normalized.numProcesses <= 0) {
+        throw new Error("sliceOptions.numProcesses must be a positive integer");
+    }
+    return normalized;
+}
 function makeWorkspaceId(now, randomId) {
     const stamp = now.toISOString().replace(/[-:.TZ]/g, "").slice(0, 14);
     return `sbv2-dataset-${stamp}-${randomId().replace(/[^a-zA-Z0-9]/g, "").slice(0, 8)}`;
@@ -302,6 +326,7 @@ export async function readDatasetManifest(filePath) {
 export async function prepareDataset(options) {
     const manifestPath = resolveUserPath(options.manifestPath);
     const dataset = await readDatasetManifest(manifestPath);
+    const sliceOptions = normalizeSliceOptions(options.sliceOptions);
     const runner = options.commandRunner ?? runSbv2Command;
     const now = options.now ?? (() => new Date());
     const randomId = options.randomId ?? randomUUID;
@@ -318,6 +343,7 @@ export async function prepareDataset(options) {
                 workspaceId: dataset.workspaceId,
                 modelName: dataset.modelName,
                 datasetManifestPath: manifestPath,
+                sliceOptions,
             },
             artifactPaths: [manifestPath],
             firstError: message,
@@ -363,13 +389,13 @@ export async function prepareDataset(options) {
             "--input_dir",
             dataset.originalsDir,
             "--min_sec",
-            String(DEFAULT_SLICE_MIN_SEC),
+            String(sliceOptions.minSec),
             "--max_sec",
-            String(DEFAULT_SLICE_MAX_SEC),
+            String(sliceOptions.maxSec),
             "--min_silence_dur_ms",
-            String(DEFAULT_SLICE_MIN_SILENCE_DUR_MS),
+            String(sliceOptions.minSilenceDurMs),
             "--num_processes",
-            String(DEFAULT_SLICE_NUM_PROCESSES),
+            String(sliceOptions.numProcesses),
         ];
         await runAndLogCommand(runner, "uv", sliceArgs, dataset.sbv2Root, executedCommands, logLines);
         const transcribeArgs = [
@@ -395,7 +421,7 @@ export async function prepareDataset(options) {
             String(DEFAULT_TRANSCRIPTION_BATCH_SIZE),
         ];
         await runAndLogCommand(runner, "uv", transcribeArgs, dataset.sbv2Root, executedCommands, logLines);
-        const summary = await buildPrepareSummary(dataset, rawDir, esdListPath, executedCommands);
+        const summary = await buildPrepareSummary(dataset, rawDir, esdListPath, sliceOptions, executedCommands);
         const job = await createJobManifest({
             jobsRoot: options.jobsRoot,
             operation: "dataset-prepare",
@@ -407,6 +433,7 @@ export async function prepareDataset(options) {
                 assetsPath,
                 rawDir,
                 esdListPath,
+                sliceOptions,
             },
             artifactPaths: [manifestPath, rawDir, esdListPath],
             progressSummary: `Dataset prepare completed for ${dataset.modelName}.`,
@@ -514,7 +541,7 @@ function parseSimpleYamlString(text, key) {
 function resolveSbv2ConfigPath(sbv2Root, value) {
     return path.isAbsolute(value) ? value : path.join(sbv2Root, value);
 }
-async function buildPrepareSummary(dataset, rawDir, esdListPath, commands) {
+async function buildPrepareSummary(dataset, rawDir, esdListPath, sliceOptions, commands) {
     const rawFiles = (await collectDirectoryFiles(rawDir))
         .filter((file) => path.extname(file).toLowerCase() === ".wav")
         .map((file) => normalizeRelativePath(path.relative(rawDir, file)))
@@ -574,6 +601,7 @@ async function buildPrepareSummary(dataset, rawDir, esdListPath, commands) {
         esdListPath,
         rawWavCount: rawFiles.length,
         esdLineCount: esdLines.length,
+        sliceOptions,
         styleGroups: dataset.styleGroups,
         missingAudioReferences,
         untranscribedWavs,

@@ -280,6 +280,8 @@ describe("SBV2 dataset ingest", () => {
         "12",
         "--min_silence_dur_ms",
         "700",
+        "--num_processes",
+        "3",
       ]),
     );
     expect(calls[1].args).toEqual(
@@ -301,8 +303,20 @@ describe("SBV2 dataset ingest", () => {
       modelName: "prepare-voice",
       rawWavCount: 2,
       esdLineCount: 2,
+      sliceOptions: {
+        minSec: 2,
+        maxSec: 12,
+        minSilenceDurMs: 700,
+        numProcesses: 3,
+      },
       missingAudioReferences: [],
       untranscribedWavs: [],
+    });
+    expect(result.job.inputSummary.sliceOptions).toEqual({
+      minSec: 2,
+      maxSec: 12,
+      minSilenceDurMs: 700,
+      numProcesses: 3,
     });
     expect(result.summary.styleGroups.map((group) => group.styleName)).toEqual(["happy", "sad"]);
     expect(result.job).toMatchObject({
@@ -314,6 +328,73 @@ describe("SBV2 dataset ingest", () => {
     expect(result.job.artifactPaths).toContain(path.join(result.job.outputDir, "summary.json"));
     expect(JSON.parse(readFileSync(path.join(result.job.outputDir, "summary.json"), "utf8"))).toEqual(
       result.summary,
+    );
+  });
+
+  it("passes custom slice options to SBV2 and records the effective values", async () => {
+    const datasetsRoot = tempRoot("sbv2-datasets-");
+    const jobsRoot = tempRoot("sbv2-jobs-");
+    const sbv2Root = tempRoot("sbv2-root-");
+    writeFileSync(path.join(sbv2Root, "slice.py"), "");
+    writeFileSync(path.join(sbv2Root, "transcribe.py"), "");
+    const sourceFile = path.join(tempRoot("sbv2-source-"), "sample.wav");
+    writeFileSync(sourceFile, "audio");
+    const ingested = await ingestDataset({
+      datasetsRoot,
+      jobsRoot,
+      sbv2Root,
+      modelName: "custom-slice",
+      sourceAudioPath: sourceFile,
+      language: "ja",
+      useJpExtra: true,
+      probeAudio,
+    });
+    const calls: { args: string[] }[] = [];
+    const runner: PrepareDatasetCommandRunner = async (_executable, args) => {
+      calls.push({ args });
+      if (args.includes("slice.py")) {
+        mkdirSync(path.join(sbv2Root, "Data", "custom-slice", "raw"), { recursive: true });
+        writeFileSync(path.join(sbv2Root, "Data", "custom-slice", "raw", "sample-0.wav"), "a");
+      }
+      if (args.includes("transcribe.py")) {
+        writeFileSync(path.join(sbv2Root, "Data", "custom-slice", "esd.list"), "sample-0.wav|custom-slice|JP|こんにちは\n");
+      }
+      return {};
+    };
+
+    const result = await prepareDataset({
+      jobsRoot,
+      manifestPath: ingested.dataset.manifestPath,
+      sliceOptions: {
+        minSec: 0.7,
+        maxSec: 8.5,
+        minSilenceDurMs: 300,
+        numProcesses: 2,
+      },
+      commandRunner: runner,
+    });
+
+    expect(calls[0].args).toEqual(
+      expect.arrayContaining([
+        "--min_sec",
+        "0.7",
+        "--max_sec",
+        "8.5",
+        "--min_silence_dur_ms",
+        "300",
+        "--num_processes",
+        "2",
+      ]),
+    );
+    expect(result.summary.sliceOptions).toEqual({
+      minSec: 0.7,
+      maxSec: 8.5,
+      minSilenceDurMs: 300,
+      numProcesses: 2,
+    });
+    expect(result.job.inputSummary.sliceOptions).toEqual(result.summary.sliceOptions);
+    expect(readFileSync(result.job.logPath, "utf8")).toContain(
+      "--min_sec 0.7 --max_sec 8.5 --min_silence_dur_ms 300 --num_processes 2",
     );
   });
 
