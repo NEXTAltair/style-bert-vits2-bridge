@@ -1121,6 +1121,37 @@ describe("Style-Bert-VITS2 speech provider", () => {
     expect(result.metadata).toMatchObject({ textPreparation: "url_sanitize" });
   });
 
+  it("normalizes whitespace when matching Markdown reference-style GitHub labels", async () => {
+    const mockFetch = vi
+      .fn()
+      .mockResolvedValueOnce(openApiTextLimit(400))
+      .mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.resolve(valentinaModelsInfo),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        arrayBuffer: () => Promise.resolve(wavBytes.buffer),
+      });
+    vi.stubGlobal("fetch", mockFetch);
+
+    const provider = buildSbv2SpeechProvider();
+    const result = await provider.synthesize({
+      text: [
+        "Please see [the PR][pull   request].",
+        "[pull request]: https://github.com/org/repo/pull/65",
+      ].join("\n"),
+      providerConfig: { baseUrl: "http://localhost:5000" },
+    });
+
+    const voiceUrl = new URL(mockFetch.mock.calls[2][0]);
+    const spokenText = voiceUrl.searchParams.get("text");
+    expect(spokenText).toBe("Please see the PR.");
+    expect(spokenText).not.toContain("[pull");
+    expect(spokenText).not.toContain("https://github.com");
+    expect(result.metadata).toMatchObject({ textPreparation: "url_sanitize" });
+  });
+
   it("drops Markdown heading markers left by URL-only GitHub headings", async () => {
     const mockFetch = vi
       .fn()
@@ -1274,6 +1305,34 @@ describe("Style-Bert-VITS2 speech provider", () => {
     expect(result.metadata).toMatchObject({ textPreparation: "url_sanitize" });
   });
 
+  it("strips Markdown image markers from GitHub link labels", async () => {
+    const mockFetch = vi
+      .fn()
+      .mockResolvedValueOnce(openApiTextLimit(400))
+      .mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.resolve(valentinaModelsInfo),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        arrayBuffer: () => Promise.resolve(wavBytes.buffer),
+      });
+    vi.stubGlobal("fetch", mockFetch);
+
+    const provider = buildSbv2SpeechProvider();
+    const result = await provider.synthesize({
+      text: "![fixed crash](https://github.com/org/repo/issues/71)",
+      providerConfig: { baseUrl: "http://localhost:5000" },
+    });
+
+    const voiceUrl = new URL(mockFetch.mock.calls[2][0]);
+    const spokenText = voiceUrl.searchParams.get("text");
+    expect(spokenText).toBe("fixed crash");
+    expect(spokenText).not.toContain("!");
+    expect(spokenText).not.toContain("https://github.com");
+    expect(result.metadata).toMatchObject({ textPreparation: "url_sanitize" });
+  });
+
   it("drops URL-only list markers from final response speech text", async () => {
     const mockFetch = vi
       .fn()
@@ -1342,6 +1401,34 @@ describe("Style-Bert-VITS2 speech provider", () => {
     expect(spokenText).toBe("Call foo() after\nUse [] as the default:");
     expect(spokenText).toContain("foo()");
     expect(spokenText).toContain("[]");
+    expect(spokenText).not.toContain("https://github.com");
+    expect(result.metadata).toMatchObject({ textPreparation: "url_sanitize" });
+  });
+
+  it("preserves code identifiers on lines that also remove GitHub URLs", async () => {
+    const mockFetch = vi
+      .fn()
+      .mockResolvedValueOnce(openApiTextLimit(400))
+      .mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.resolve(valentinaModelsInfo),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        arrayBuffer: () => Promise.resolve(wavBytes.buffer),
+      });
+    vi.stubGlobal("fetch", mockFetch);
+
+    const provider = buildSbv2SpeechProvider();
+    const result = await provider.synthesize({
+      text: "Call __init__ before https://github.com/org/repo/issues/71",
+      providerConfig: { baseUrl: "http://localhost:5000" },
+    });
+
+    const voiceUrl = new URL(mockFetch.mock.calls[2][0]);
+    const spokenText = voiceUrl.searchParams.get("text");
+    expect(spokenText).toBe("Call __init__ before");
+    expect(spokenText).toContain("__init__");
     expect(spokenText).not.toContain("https://github.com");
     expect(result.metadata).toMatchObject({ textPreparation: "url_sanitize" });
   });
