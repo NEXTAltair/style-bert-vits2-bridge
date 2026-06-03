@@ -560,7 +560,7 @@ fs.writeFileSync(path.join(outputDir, "recipe.json"), JSON.stringify({ method: p
     ).resolves.toBe(0);
     const parsed = JSON.parse(runOut.output()) as {
       summary: { targetAssetsDir: string };
-      job: { outputDir: string; logPath: string };
+      job: { jobId: string; outputDir: string; logPath: string };
       pathRoles: { bridgeState?: string; sbv2LoadableModel?: string; summary?: string; jobLog?: string };
     };
     expect(parsed.summary.targetAssetsDir).toBe(path.join(sbv2Root, "model_assets", "new-voice"));
@@ -570,6 +570,54 @@ fs.writeFileSync(path.join(outputDir, "recipe.json"), JSON.stringify({ method: p
       summary: path.join(parsed.job.outputDir, "summary.json"),
       jobLog: parsed.job.logPath,
     });
+
+    const statusOut = createWriter();
+    await expect(
+      runCli(["jobs", "status", parsed.job.jobId, "--jobs-dir", jobsRoot, "--json"], {
+        stdout: statusOut.stream,
+        stderr: createWriter().stream,
+      }),
+    ).resolves.toBe(0);
+    const status = JSON.parse(statusOut.output()) as { job: { operation: string } };
+    expect(status.job.operation).toBe("model-rename");
+  });
+
+  it("omits dataset path roles when rename includes missing Data source", async () => {
+    const jobsRoot = tempJobsRoot();
+    const sbv2Root = mkdtempSync(path.join(tmpdir(), "sbv2-cli-rename-root-"));
+    mkdirSync(path.join(sbv2Root, "configs"), { recursive: true });
+    writeFileSync(path.join(sbv2Root, "configs", "paths.yml"), "dataset_root: Data\nassets_root: model_assets\n");
+    const modelDir = path.join(sbv2Root, "model_assets", "old-voice");
+    mkdirSync(modelDir, { recursive: true });
+    writeFileSync(path.join(modelDir, "config.json"), JSON.stringify(makeModelConfig("old-voice")));
+    writeFileSync(path.join(modelDir, "style_vectors.npy"), makeNpy([1, 2]));
+    writeFileSync(path.join(modelDir, "old-voice.safetensors"), makeSafetensors());
+
+    const stdout = createWriter();
+    await expect(
+      runCli(
+        [
+          "models",
+          "rename-run",
+          "--jobs-dir",
+          jobsRoot,
+          "--sbv2-root",
+          sbv2Root,
+          "--from-model-name",
+          "old-voice",
+          "--to-model-name",
+          "new-voice",
+          "--confirm-to-model-name",
+          "new-voice",
+          "--include-data",
+          "--json",
+        ],
+        { stdout: stdout.stream, stderr: createWriter().stream },
+      ),
+    ).resolves.toBe(0);
+    const parsed = JSON.parse(stdout.output()) as { pathRoles: { sbv2Dataset?: string }; job: { artifactPaths: string[] } };
+    expect(parsed.pathRoles.sbv2Dataset).toBeUndefined();
+    expect(parsed.job.artifactPaths).not.toContain(path.join(sbv2Root, "Data", "new-voice"));
   });
 
   it("rejects mismatched model merge parameters at the CLI layer", async () => {

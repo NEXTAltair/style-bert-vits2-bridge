@@ -349,6 +349,7 @@ function isSbv2JobManifest(value: unknown): value is Sbv2JobManifest {
       value.operation === "dataset-prepare" ||
       value.operation === "training-run" ||
       value.operation === "model-merge" ||
+      value.operation === "model-rename" ||
       value.operation === "model-promote" ||
       value.operation === "model-evaluate") &&
     typeof value.state === "string" &&

@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { mkdir, readdir, readFile, rename, stat, writeFile } from "node:fs/promises";
+import { mkdir, readdir, readFile, rename, rmdir, stat, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import path from "node:path";
 import { createJobManifest, type Sbv2JobManifest } from "./jobs.js";
@@ -147,6 +147,7 @@ export async function createModelRenamePlan(options: ModelRenameOptions): Promis
       });
     }
     changes.push(...configSpeakerChanges(config, configJsonPath, options.fromModelName, options.toModelName));
+    errors.push(...configSpeakerCollisionErrors(config, options.fromModelName, options.toModelName));
   }
 
   const safetensorsKept = await listTopLevelFiles(sourceAssetsDir, ".safetensors");
@@ -280,16 +281,14 @@ export async function runModelRename(options: ModelRenameRunOptions): Promise<Mo
     changesApplied.push(...plan.changes.filter((change) => change.kind === "json-field"));
     logLines.push(`updated config.json for ${plan.toModelName}`);
 
-    await mkdir(path.dirname(plan.targetAssetsDir), { recursive: true });
-    await rename(plan.sourceAssetsDir, plan.targetAssetsDir);
-    rollbackActions.push(async () => rename(plan.targetAssetsDir, plan.sourceAssetsDir));
+    await moveDirectoryWithoutOverwriting(plan.sourceAssetsDir, plan.targetAssetsDir);
+    rollbackActions.push(async () => moveDirectoryWithoutOverwriting(plan.targetAssetsDir, plan.sourceAssetsDir));
     changesApplied.push({ kind: "path-move", from: plan.sourceAssetsDir, to: plan.targetAssetsDir });
     logLines.push(`moved model assets to ${plan.targetAssetsDir}`);
 
     if (plan.includeData && (await pathExists(plan.sourceDataDir))) {
-      await mkdir(path.dirname(plan.targetDataDir), { recursive: true });
-      await rename(plan.sourceDataDir, plan.targetDataDir);
-      rollbackActions.push(async () => rename(plan.targetDataDir, plan.sourceDataDir));
+      await moveDirectoryWithoutOverwriting(plan.sourceDataDir, plan.targetDataDir);
+      rollbackActions.push(async () => moveDirectoryWithoutOverwriting(plan.targetDataDir, plan.sourceDataDir));
       changesApplied.push({ kind: "path-move", from: plan.sourceDataDir, to: plan.targetDataDir });
       logLines.push(`moved dataset directory to ${plan.targetDataDir}`);
 
@@ -399,11 +398,17 @@ function collectRenameArtifacts(plan: Sbv2ModelRenamePlan): string[] {
     path.join(plan.targetAssetsDir, "style_vectors.npy"),
     ...plan.safetensorsKept.map((filePath) => path.join(plan.targetAssetsDir, path.basename(filePath))),
   ];
-  if (plan.includeData) {
+  if (planIncludesDataMove(plan)) {
     artifacts.push(plan.targetDataDir);
     if (plan.renameEsdSpeaker) artifacts.push(path.join(plan.targetDataDir, "esd.list"));
   }
   return artifacts;
+}
+
+function planIncludesDataMove(plan: Sbv2ModelRenamePlan): boolean {
+  return plan.changes.some(
+    (change) => change.kind === "path-move" && change.from === plan.sourceDataDir && change.to === plan.targetDataDir,
+  );
 }
 
 function updateConfigJson(value: unknown, fromModelName: string, toModelName: string): unknown {
@@ -463,6 +468,59 @@ function configSpeakerChanges(
     });
   }
   return changes;
+}
+
+function configSpeakerCollisionErrors(config: Record<string, unknown>, fromModelName: string, toModelName: string): string[] {
+  if (!isRecord(config.data)) return [];
+  const errors: string[] = [];
+  if (
+    isRecord(config.data.spk2id) &&
+    Object.prototype.hasOwnProperty.call(config.data.spk2id, fromModelName) &&
+    Object.prototype.hasOwnProperty.call(config.data.spk2id, toModelName)
+  ) {
+    errors.push(`config.json data.spk2id already contains target speaker "${toModelName}"`);
+  }
+  if (
+    isRecord(config.data.id2spk) &&
+    Object.values(config.data.id2spk).some((value) => value === fromModelName) &&
+    Object.values(config.data.id2spk).some((value) => value === toModelName)
+  ) {
+    errors.push(`config.json data.id2spk already contains target speaker "${toModelName}"`);
+  }
+  return errors;
+}
+
+async function moveDirectoryWithoutOverwriting(sourceDir: string, targetDir: string): Promise<void> {
+  await mkdir(path.dirname(targetDir), { recursive: true });
+  await mkdir(targetDir);
+  const movedEntries: string[] = [];
+  try {
+    const entries = await readdir(sourceDir);
+    for (const entry of entries) {
+      const sourcePath = path.join(sourceDir, entry);
+      const targetPath = path.join(targetDir, entry);
+      if (await pathExists(targetPath)) {
+        throw new Error(`target path already exists while moving directory: ${targetPath}`);
+      }
+      await rename(sourcePath, targetPath);
+      movedEntries.push(entry);
+    }
+    await rmdir(sourceDir);
+  } catch (error) {
+    for (const entry of movedEntries.reverse()) {
+      const sourcePath = path.join(sourceDir, entry);
+      const targetPath = path.join(targetDir, entry);
+      if (!(await pathExists(sourcePath)) && (await pathExists(targetPath))) {
+        await rename(targetPath, sourcePath);
+      }
+    }
+    try {
+      await rmdir(targetDir);
+    } catch {
+      // Keep the original failure; a non-empty reservation is clearer in the job log via that failure.
+    }
+    throw error;
+  }
 }
 
 async function planEsdSpeakerChange(

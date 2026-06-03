@@ -981,8 +981,9 @@ function modelMergePathRoles(result) {
     };
 }
 function modelRenamePlanPathRoles(plan) {
+    const dataWillMove = plan.changes.some((change) => change.kind === "path-move" && change.from === plan.sourceDataDir && change.to === plan.targetDataDir);
     return {
-        ...(plan.includeData ? { sbv2Dataset: plan.targetDataDir } : {}),
+        ...(dataWillMove ? { sbv2Dataset: plan.targetDataDir } : {}),
         sbv2LoadableModel: plan.targetAssetsDir,
     };
 }

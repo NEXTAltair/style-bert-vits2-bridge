@@ -146,6 +146,51 @@ describe("SBV2 model rename", () => {
     expect(plan.compatibility.errors.join("\n")).toContain('config.json model_name "different" does not match "old-voice"');
   });
 
+  it("rejects target speaker name collisions before rewriting config maps", async () => {
+    const sbv2Root = createSbv2Root();
+    const modelDir = writeModelAssets(sbv2Root, "old-voice");
+    writeFileSync(
+      path.join(modelDir, "config.json"),
+      JSON.stringify({
+        ...makeConfig("old-voice"),
+        data: {
+          n_speakers: 2,
+          num_styles: 1,
+          spk2id: { "old-voice": 0, "new-voice": 1 },
+          id2spk: { "0": "old-voice", "1": "new-voice" },
+          style2id: { Neutral: 0 },
+        },
+      }),
+    );
+
+    const plan = await createModelRenamePlan({
+      sbv2Root,
+      fromModelName: "old-voice",
+      toModelName: "new-voice",
+    });
+
+    expect(plan.compatibility.compatible).toBe(false);
+    expect(plan.compatibility.errors).toContain('config.json data.spk2id already contains target speaker "new-voice"');
+    expect(plan.compatibility.errors).toContain('config.json data.id2spk already contains target speaker "new-voice"');
+  });
+
+  it("does not publish dataset artifacts when includeData is set but Data source is absent", async () => {
+    const sbv2Root = createSbv2Root();
+    writeModelAssets(sbv2Root, "old-voice");
+
+    const result = await runModelRename({
+      sbv2Root,
+      jobsRoot: tempRoot("sbv2-model-rename-jobs-"),
+      fromModelName: "old-voice",
+      toModelName: "new-voice",
+      confirmToModelName: "new-voice",
+      includeData: true,
+    });
+
+    expect(result.plan.compatibility.warnings.join("\n")).toContain("dataset directory was not found");
+    expect(result.job.artifactPaths).not.toContain(path.join(sbv2Root, "Data", "new-voice"));
+  });
+
   it("keeps renamed assets when refresh verification fails", async () => {
     const sbv2Root = createSbv2Root();
     const jobsRoot = tempRoot("sbv2-model-rename-jobs-");

@@ -1073,16 +1073,25 @@ function modelMergePathRoles(result: {
 function modelRenamePlanPathRoles(plan: {
   targetAssetsDir: string;
   targetDataDir: string;
-  includeData: boolean;
+  changes: Array<{ kind: string; from: string; to: string }>;
+  sourceDataDir: string;
 }): Sbv2PathRoles {
+  const dataWillMove = plan.changes.some(
+    (change) => change.kind === "path-move" && change.from === plan.sourceDataDir && change.to === plan.targetDataDir,
+  );
   return {
-    ...(plan.includeData ? { sbv2Dataset: plan.targetDataDir } : {}),
+    ...(dataWillMove ? { sbv2Dataset: plan.targetDataDir } : {}),
     sbv2LoadableModel: plan.targetAssetsDir,
   };
 }
 
 function modelRenamePathRoles(result: {
-  plan: { targetAssetsDir: string; targetDataDir: string; includeData: boolean };
+  plan: {
+    targetAssetsDir: string;
+    targetDataDir: string;
+    changes: Array<{ kind: string; from: string; to: string }>;
+    sourceDataDir: string;
+  };
   job: Sbv2JobManifest;
 }): Sbv2PathRoles {
   return {
