@@ -46,7 +46,7 @@ const TOOL_STATUS_REWRITE_TEXT: Record<NonNullable<Sbv2ResolvedVoiceProfile["lan
   ZH: "命令执行失败。我会尝试其他方法。",
 };
 
-const COMMAND_STATUS_TOOLS = "(?:gh|git|pnpm|npm|yarn|uv|python(?:\\d+(?:\\.\\d+)*)?|node(?:\\d+(?:\\.\\d+)*)?|bash|sh)";
+const COMMAND_STATUS_TOOLS = "(?:gh|git|pnpm|npm|npx|yarn|uv|python(?:\\d+(?:\\.\\d+)*)?|node(?:\\d+(?:\\.\\d+)*)?|bash|sh|tsc|vitest)";
 const COMMAND_STATUS_SUBCOMMANDS = [
   "add",
   "api",
@@ -91,7 +91,7 @@ const COMMAND_STATUS_SUBCOMMANDS = [
   "upgrade",
   "version",
 ].join("|");
-const COMMAND_STATUS_SCRIPT_PATH = "[a-z0-9:_./-]*(?:/|\\.)[a-z0-9:_./-]+";
+const COMMAND_STATUS_SCRIPT_PATH = "(?:[a-z0-9:_-]+/[a-z0-9:_./-]+|[a-z0-9:_/-]*[a-z_][a-z0-9_-]*\\.[a-z][a-z0-9]+)";
 const COMMAND_STATUS_ARGUMENT = `(?:(?:-{1,2}[a-z][a-z0-9-]*)|(?:[a-z0-9:_./-]+\\s+-{1,2}[a-z][a-z0-9-]*)|(?:${COMMAND_STATUS_SCRIPT_PATH})|(?:(?:${COMMAND_STATUS_SUBCOMMANDS})\\b))`;
 const COMMAND_STATUS_COMMAND = `${COMMAND_STATUS_TOOLS}\\s+(?:(?:${COMMAND_STATUS_SUBCOMMANDS})\\b|(?:${COMMAND_STATUS_SCRIPT_PATH}))`;
 
@@ -137,23 +137,26 @@ function looksLikeToolStatusText(value: string): boolean {
   const text = value.trim();
   if (!text) return false;
 
+  const hasDiagnosticFailure = /(?:^|\n)\s*(?:error|fatal):|(?:^|\n)\s*npm\s+ERR!|(?:^|\n)\s*ERR_PNPM_[A-Z0-9_]+|(?:^|\n)\s*YN\d{4}:\s*Error\b/i.test(text);
   const hasFailureStatus = /(?:^|\s)(?:failed|exit code\s*:?\s*\d+|command failed)(?:[:.]|$|\s)/i.test(text) ||
-    /(?:^|\n)\s*(?:error|fatal):/i.test(text);
+    hasDiagnosticFailure;
   if (!hasFailureStatus) return false;
 
   const commandInvocation = new RegExp(
-    `(?:^|\\n)\\s*(?:[⚠🛠️\\s]+)?${COMMAND_STATUS_TOOLS}\\s+${COMMAND_STATUS_ARGUMENT}`,
+    `(?:^|\\n)\\s*(?:(?:Error:\\s*)?Command failed(?: with exit code\\s*:?\\s*\\d+)?:\\s*)?(?:[⚠🛠️\\s]+)?${COMMAND_STATUS_TOOLS}\\s+${COMMAND_STATUS_ARGUMENT}`,
     "i",
   );
   const hasOperatorPrefix = /(?:^|\s)[⚠🛠][\s️]/u.test(text);
   const hasCwdSuffix = /\(\s*in\s+(?:~\/|\/|[A-Za-z]:\\)[^)]+\)/i.test(text);
-  const hasMultilineError = /\n\s*(?:error|fatal|failed|exit code\s*:?\s*\d+|command failed)(?:[:.]|$|\s)/i.test(text);
+  const hasCommandFailurePrefix = /(?:^|\n)\s*(?:Error:\s*)?Command failed(?: with exit code\s*:?\s*\d+)?:/i.test(text);
+  const hasMultilineError = /\n\s*(?:error|fatal|failed|exit code\s*:?\s*\d+|command failed)(?:[:.]|$|\s)/i.test(text) ||
+    hasDiagnosticFailure;
   const hasUndecoratedCommandFailure = new RegExp(
     `(?:^|\\n)\\s*${COMMAND_STATUS_COMMAND}[^\\n]*\\b(?:failed|exit code\\s*:?\\s*\\d+|command failed)\\b`,
     "i",
   ).test(text);
 
-  return commandInvocation.test(text) && (hasOperatorPrefix || hasCwdSuffix || hasMultilineError || hasUndecoratedCommandFailure || /\s-{1,2}[a-z][a-z0-9-]*(?:[=\s]|$)/i.test(text));
+  return commandInvocation.test(text) && (hasOperatorPrefix || hasCwdSuffix || hasCommandFailurePrefix || hasMultilineError || hasUndecoratedCommandFailure || /\s-{1,2}[a-z][a-z0-9-]*(?:[=\s]|$)/i.test(text));
 }
 
 function prepareSpeechText(value: string, language: Sbv2ResolvedVoiceProfile["language"]): PreparedSpeechText {
