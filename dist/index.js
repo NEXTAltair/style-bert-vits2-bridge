@@ -2,6 +2,59 @@ import { definePluginEntry } from "openclaw/plugin-sdk/plugin-entry";
 import { applyPronunciationReplacements, resolvePronunciationReplacements, } from "./pronunciation.js";
 import { SBV2_FALLBACK_VOICE_TEXT_MAX_CHARS, Sbv2Client } from "./sbv2-client.js";
 import { listVoiceProfiles, parseVoiceDirectiveToken, resolveVoiceProfile, } from "./voice-resolver.js";
+const TOOL_STATUS_REWRITE_TEXT = {
+    JP: "コマンドが失敗しました。別の方法で進めます。",
+    EN: "The command failed. I will try another way.",
+    ZH: "命令执行失败。我会尝试其他方法。",
+};
+const COMMAND_STATUS_TOOLS = "(?:gh|git|pnpm|npm|npx|yarn|uv|python(?:\\d+(?:\\.\\d+)*)?|node(?:\\d+(?:\\.\\d+)*)?|bash|sh|tsc|vitest)";
+const COMMAND_STATUS_SUBCOMMANDS = [
+    "add",
+    "api",
+    "branch",
+    "build",
+    "check",
+    "checkout",
+    "ci",
+    "clone",
+    "commit",
+    "config",
+    "dev",
+    "diff",
+    "dlx",
+    "exec",
+    "fetch",
+    "install",
+    "issue",
+    "lint",
+    "log",
+    "merge",
+    "pack",
+    "pr",
+    "publish",
+    "pull",
+    "push",
+    "rebase",
+    "remote",
+    "remove",
+    "repo",
+    "reset",
+    "restore",
+    "run",
+    "show",
+    "stash",
+    "start",
+    "status",
+    "switch",
+    "tag",
+    "test",
+    "update",
+    "upgrade",
+    "version",
+].join("|");
+const COMMAND_STATUS_SCRIPT_PATH = "(?:[a-z0-9:_-]+/[a-z0-9:_./-]+|[a-z0-9:_/-]*[a-z_][a-z0-9_-]*\\.[a-z][a-z0-9]+)";
+const COMMAND_STATUS_ARGUMENT = `(?:(?:-{1,2}[a-z][a-z0-9-]*)|(?:[a-z0-9:_./-]+\\s+-{1,2}[a-z][a-z0-9-]*)|(?:${COMMAND_STATUS_SCRIPT_PATH})|(?:(?:${COMMAND_STATUS_SUBCOMMANDS})\\b))`;
+const COMMAND_STATUS_COMMAND = `${COMMAND_STATUS_TOOLS}\\s+(?:(?:${COMMAND_STATUS_SUBCOMMANDS})\\b|(?:${COMMAND_STATUS_SCRIPT_PATH}))`;
 function trimToUndefined(value) {
     return typeof value === "string" && value.trim() ? value.trim() : undefined;
 }
@@ -26,6 +79,38 @@ function rateWpmToLength(value) {
     if (rateWpm === undefined || rateWpm <= 0)
         return undefined;
     return clamp(180 / rateWpm, 0.5, 2);
+}
+function extractExplicitTtsText(value) {
+    const match = value.match(/\[\[tts:text\]\]([\s\S]*?)\[\[\/tts:text\]\]/);
+    return match?.[1]?.trim() || undefined;
+}
+function looksLikeToolStatusText(value) {
+    const text = value.trim();
+    if (!text)
+        return false;
+    const hasDiagnosticFailure = /(?:^|\n)\s*(?:error|fatal):|(?:^|\n)\s*npm\s+ERR!|(?:^|\n)\s*ERR_PNPM_[A-Z0-9_]+|(?:^|\n)\s*YN\d{4}:\s*Error\b/i.test(text);
+    const hasFailureStatus = /(?:^|\s)(?:failed|exit code\s*:?\s*\d+|command failed)(?:[:.]|$|\s)/i.test(text) ||
+        hasDiagnosticFailure;
+    if (!hasFailureStatus)
+        return false;
+    const commandInvocation = new RegExp(`(?:^|\\n)\\s*(?:(?:Error:\\s*)?Command failed(?: with exit code\\s*:?\\s*\\d+)?:\\s*)?(?:[⚠🛠️\\s]+)?${COMMAND_STATUS_TOOLS}\\s+${COMMAND_STATUS_ARGUMENT}`, "i");
+    const hasOperatorPrefix = /(?:^|\s)[⚠🛠][\s️]/u.test(text);
+    const hasCwdSuffix = /\(\s*in\s+(?:~\/|\/|[A-Za-z]:\\)[^)]+\)/i.test(text);
+    const hasCommandFailurePrefix = /(?:^|\n)\s*(?:Error:\s*)?Command failed(?: with exit code\s*:?\s*\d+)?:/i.test(text);
+    const hasMultilineError = /\n\s*(?:error|fatal|failed|exit code\s*:?\s*\d+|command failed)(?:[:.]|$|\s)/i.test(text) ||
+        hasDiagnosticFailure;
+    const hasUndecoratedCommandFailure = new RegExp(`(?:^|\\n)\\s*${COMMAND_STATUS_COMMAND}[^\\n]*\\b(?:failed|exit code\\s*:?\\s*\\d+|command failed)\\b`, "i").test(text);
+    return commandInvocation.test(text) && (hasOperatorPrefix || hasCwdSuffix || hasCommandFailurePrefix || hasMultilineError || hasUndecoratedCommandFailure || /\s-{1,2}[a-z][a-z0-9-]*(?:[=\s]|$)/i.test(text));
+}
+function prepareSpeechText(value, language) {
+    const explicitText = extractExplicitTtsText(value);
+    if (explicitText) {
+        return { text: explicitText, textPreparation: "explicit" };
+    }
+    if (looksLikeToolStatusText(value)) {
+        return { text: TOOL_STATUS_REWRITE_TEXT[language ?? "JP"], textPreparation: "tool_status_rewrite" };
+    }
+    return { text: value };
 }
 function parseSbv2VoiceId(value) {
     const raw = trimToUndefined(value);
@@ -109,7 +194,7 @@ function readVoiceContext(config, overrides) {
 }
 function buildTelemetryMetadata(args) {
     const { resolvedVoice } = args;
-    return {
+    const metadata = {
         provider: "style-bert-vits2",
         baseUrl: sanitizeBaseUrl(args.baseUrl),
         voiceId: resolvedVoice.voiceId,
@@ -127,6 +212,9 @@ function buildTelemetryMetadata(args) {
         outputFormat: "wav",
         audioBytes: args.audioBytes,
     };
+    if (args.textPreparation)
+        metadata.textPreparation = args.textPreparation;
+    return metadata;
 }
 function formatTelemetryContext(metadata) {
     const entries = Object.entries(metadata).filter(([, value]) => value !== undefined);
@@ -255,9 +343,13 @@ export function buildSbv2SpeechProvider(options = {}) {
             const providerOverrides = normalizeOverrides(req.providerOverrides);
             let resolvedVoice;
             const pronunciationReplacements = resolvePronunciationReplacements(config);
-            const synthesisText = applyPronunciationReplacements(req.text, pronunciationReplacements);
             const textCapabilities = await client.getTextCapabilities();
-            assertSbv2TextWithinHardLimit(synthesisText, textCapabilities.maxInputChars);
+            const explicitText = extractExplicitTtsText(req.text);
+            const shouldDeferTextLimitCheck = !explicitText && looksLikeToolStatusText(req.text);
+            if (!shouldDeferTextLimitCheck) {
+                const preflightText = explicitText ?? applyPronunciationReplacements(req.text, pronunciationReplacements);
+                assertSbv2TextWithinHardLimit(preflightText, textCapabilities.maxInputChars);
+            }
             try {
                 resolvedVoice = await resolveVoiceProfile({
                     client,
@@ -272,7 +364,12 @@ export function buildSbv2SpeechProvider(options = {}) {
                 }));
             }
             let audioBuffer;
+            const preparedText = prepareSpeechText(req.text, resolvedVoice.language);
             try {
+                const synthesisText = preparedText.textPreparation === "explicit"
+                    ? preparedText.text
+                    : applyPronunciationReplacements(preparedText.text, pronunciationReplacements);
+                assertSbv2TextWithinHardLimit(synthesisText, textCapabilities.maxInputChars);
                 audioBuffer = await client.synthesize({
                     text: synthesisText,
                     modelName: resolvedVoice.modelName,
@@ -294,12 +391,14 @@ export function buildSbv2SpeechProvider(options = {}) {
                 throw withTelemetryContext(error, buildTelemetryMetadata({
                     baseUrl,
                     resolvedVoice,
+                    textPreparation: preparedText.textPreparation,
                 }));
             }
             const metadata = buildTelemetryMetadata({
                 baseUrl,
                 resolvedVoice,
                 audioBytes: audioBuffer.length,
+                textPreparation: preparedText.textPreparation,
             });
             options.logger?.debug?.("style-bert-vits2 synthesis resolved", metadata);
             return {

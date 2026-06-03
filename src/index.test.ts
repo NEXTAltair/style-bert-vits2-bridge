@@ -20,6 +20,9 @@ const valentinaModelsInfo = {
   },
 };
 
+const observedToolFailureText =
+  '⚠️ 🛠️ gh issue close 2 --repo NEXTAltair/openclaw --reason not planned --comment "Opened in the wrong repository. This belong… (in ~/src/openclaw) failed';
+
 function openApiTextLimit(maxLength: number) {
   return {
     ok: true,
@@ -360,6 +363,676 @@ describe("Style-Bert-VITS2 speech provider", () => {
     expect(voiceUrl.searchParams.get("speaker_name")).toBe("valentina01_bright");
     expect(voiceUrl.searchParams.get("style")).toBe("00_Neutral");
     expect(voiceUrl.searchParams.get("language")).toBe("JP");
+  });
+
+  it("rewrites raw tool status failure text before calling /voice", async () => {
+    const mockFetch = vi
+      .fn()
+      .mockResolvedValueOnce(openApiTextLimit(400))
+      .mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.resolve(valentinaModelsInfo),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        arrayBuffer: () => Promise.resolve(wavBytes.buffer),
+      });
+    vi.stubGlobal("fetch", mockFetch);
+
+    const provider = buildSbv2SpeechProvider();
+    const result = await provider.synthesize({
+      text: observedToolFailureText,
+      providerConfig: { baseUrl: "http://localhost:5000" },
+    });
+
+    const voiceUrl = new URL(mockFetch.mock.calls[2][0]);
+    const spokenText = voiceUrl.searchParams.get("text");
+    expect(spokenText).toBe("コマンドが失敗しました。別の方法で進めます。");
+    expect(spokenText).not.toContain("gh issue close");
+    expect(spokenText).not.toContain("--repo");
+    expect(spokenText).not.toContain("~/src/openclaw");
+    expect(spokenText).not.toContain("⚠️");
+    expect(result.metadata).toMatchObject({ textPreparation: "tool_status_rewrite" });
+  });
+
+  it("uses the resolved synthesis language for rewritten tool status text", async () => {
+    const mockFetch = vi
+      .fn()
+      .mockResolvedValueOnce(openApiTextLimit(400))
+      .mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.resolve(valentinaModelsInfo),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        arrayBuffer: () => Promise.resolve(wavBytes.buffer),
+      });
+    vi.stubGlobal("fetch", mockFetch);
+
+    const provider = buildSbv2SpeechProvider();
+    await provider.synthesize({
+      text: observedToolFailureText,
+      providerConfig: { baseUrl: "http://localhost:5000", defaultLanguage: "EN" },
+    });
+
+    const voiceUrl = new URL(mockFetch.mock.calls[2][0]);
+    expect(voiceUrl.searchParams.get("text")).toBe("The command failed. I will try another way.");
+    expect(voiceUrl.searchParams.get("language")).toBe("EN");
+  });
+
+  it("passes ordinary Japanese text through without tool status rewriting", async () => {
+    const mockFetch = vi
+      .fn()
+      .mockResolvedValueOnce(openApiTextLimit(400))
+      .mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.resolve(valentinaModelsInfo),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        arrayBuffer: () => Promise.resolve(wavBytes.buffer),
+      });
+    vi.stubGlobal("fetch", mockFetch);
+
+    const provider = buildSbv2SpeechProvider();
+    const result = await provider.synthesize({
+      text: "GitHub issue のクローズに失敗しました。理由を確認します。",
+      providerConfig: { baseUrl: "http://localhost:5000" },
+    });
+
+    const voiceUrl = new URL(mockFetch.mock.calls[2][0]);
+    expect(voiceUrl.searchParams.get("text")).toBe("GitHub issue のクローズに失敗しました。理由を確認します。");
+    expect(result.metadata).not.toHaveProperty("textPreparation");
+  });
+
+  it("does not rewrite natural narration about a failed command", async () => {
+    const mockFetch = vi
+      .fn()
+      .mockResolvedValueOnce(openApiTextLimit(400))
+      .mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.resolve(valentinaModelsInfo),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        arrayBuffer: () => Promise.resolve(wavBytes.buffer),
+      });
+    vi.stubGlobal("fetch", mockFetch);
+
+    const provider = buildSbv2SpeechProvider();
+    const result = await provider.synthesize({
+      text: "The git command failed for NEXTAltair/openclaw, so I will check the repository state.",
+      providerConfig: { baseUrl: "http://localhost:5000", defaultLanguage: "EN" },
+    });
+
+    const voiceUrl = new URL(mockFetch.mock.calls[2][0]);
+    expect(voiceUrl.searchParams.get("text")).toBe(
+      "The git command failed for NEXTAltair/openclaw, so I will check the repository state.",
+    );
+    expect(result.metadata).not.toHaveProperty("textPreparation");
+  });
+
+  it("does not treat failure verbs as command subcommands", async () => {
+    const mockFetch = vi
+      .fn()
+      .mockResolvedValueOnce(openApiTextLimit(400))
+      .mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.resolve(valentinaModelsInfo),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        arrayBuffer: () => Promise.resolve(wavBytes.buffer),
+      });
+    vi.stubGlobal("fetch", mockFetch);
+
+    const provider = buildSbv2SpeechProvider();
+    const result = await provider.synthesize({
+      text: "Python failed to parse the file, so I will inspect the syntax.",
+      providerConfig: { baseUrl: "http://localhost:5000", defaultLanguage: "EN" },
+    });
+
+    const voiceUrl = new URL(mockFetch.mock.calls[2][0]);
+    expect(voiceUrl.searchParams.get("text")).toBe(
+      "Python failed to parse the file, so I will inspect the syntax.",
+    );
+    expect(result.metadata).not.toHaveProperty("textPreparation");
+  });
+
+  it("does not treat tool-name prose as command output", async () => {
+    const mockFetch = vi
+      .fn()
+      .mockResolvedValueOnce(openApiTextLimit(400))
+      .mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.resolve(valentinaModelsInfo),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        arrayBuffer: () => Promise.resolve(wavBytes.buffer),
+      });
+    vi.stubGlobal("fetch", mockFetch);
+
+    const provider = buildSbv2SpeechProvider();
+    const result = await provider.synthesize({
+      text: "Python script failed to parse the file, and Node process failed to start.",
+      providerConfig: { baseUrl: "http://localhost:5000", defaultLanguage: "EN" },
+    });
+
+    const voiceUrl = new URL(mockFetch.mock.calls[2][0]);
+    expect(voiceUrl.searchParams.get("text")).toBe(
+      "Python script failed to parse the file, and Node process failed to start.",
+    );
+    expect(result.metadata).not.toHaveProperty("textPreparation");
+  });
+
+  it("rewrites colon-delimited CLI errors", async () => {
+    const mockFetch = vi
+      .fn()
+      .mockResolvedValueOnce(openApiTextLimit(400))
+      .mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.resolve(valentinaModelsInfo),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        arrayBuffer: () => Promise.resolve(wavBytes.buffer),
+      });
+    vi.stubGlobal("fetch", mockFetch);
+
+    const provider = buildSbv2SpeechProvider();
+    const result = await provider.synthesize({
+      text: "git status --bad\nerror: unknown option",
+      providerConfig: { baseUrl: "http://localhost:5000", defaultLanguage: "EN" },
+    });
+
+    const voiceUrl = new URL(mockFetch.mock.calls[2][0]);
+    expect(voiceUrl.searchParams.get("text")).toBe("The command failed. I will try another way.");
+    expect(result.metadata).toMatchObject({ textPreparation: "tool_status_rewrite" });
+  });
+
+  it("rewrites failed command lines that use single-dash options", async () => {
+    const mockFetch = vi
+      .fn()
+      .mockResolvedValueOnce(openApiTextLimit(400))
+      .mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.resolve(valentinaModelsInfo),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        arrayBuffer: () => Promise.resolve(wavBytes.buffer),
+      });
+    vi.stubGlobal("fetch", mockFetch);
+
+    const provider = buildSbv2SpeechProvider();
+    const result = await provider.synthesize({
+      text: "python -m pytest failed",
+      providerConfig: { baseUrl: "http://localhost:5000", defaultLanguage: "EN" },
+    });
+
+    const voiceUrl = new URL(mockFetch.mock.calls[2][0]);
+    expect(voiceUrl.searchParams.get("text")).toBe("The command failed. I will try another way.");
+    expect(result.metadata).toMatchObject({ textPreparation: "tool_status_rewrite" });
+  });
+
+  it("rewrites versioned interpreter command failures", async () => {
+    const mockFetch = vi
+      .fn()
+      .mockResolvedValueOnce(openApiTextLimit(400))
+      .mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.resolve(valentinaModelsInfo),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        arrayBuffer: () => Promise.resolve(wavBytes.buffer),
+      });
+    vi.stubGlobal("fetch", mockFetch);
+
+    const provider = buildSbv2SpeechProvider();
+    const result = await provider.synthesize({
+      text: "python3.12 -m pytest failed",
+      providerConfig: { baseUrl: "http://localhost:5000", defaultLanguage: "EN" },
+    });
+
+    const voiceUrl = new URL(mockFetch.mock.calls[2][0]);
+    expect(voiceUrl.searchParams.get("text")).toBe("The command failed. I will try another way.");
+    expect(result.metadata).toMatchObject({ textPreparation: "tool_status_rewrite" });
+  });
+
+  it("does not treat version prose as script-path command failures", async () => {
+    const inputs = ["Python 3.12 failed to parse the file", "node v20.1 failed to start"];
+
+    for (const text of inputs) {
+      const mockFetch = vi
+        .fn()
+        .mockResolvedValueOnce(openApiTextLimit(400))
+        .mockResolvedValueOnce({
+          ok: true,
+          json: () => Promise.resolve(valentinaModelsInfo),
+        })
+        .mockResolvedValueOnce({
+          ok: true,
+          arrayBuffer: () => Promise.resolve(wavBytes.buffer),
+        });
+      vi.stubGlobal("fetch", mockFetch);
+
+      const provider = buildSbv2SpeechProvider();
+      const result = await provider.synthesize({
+        text,
+        providerConfig: { baseUrl: "http://localhost:5000", defaultLanguage: "EN" },
+      });
+
+      const voiceUrl = new URL(mockFetch.mock.calls[2][0]);
+      expect(voiceUrl.searchParams.get("text")).toBe(text);
+      expect(result.metadata).not.toHaveProperty("textPreparation");
+    }
+  });
+
+  it("rewrites script-path command failures", async () => {
+    const inputs = ["node scripts/check.js failed", "bash scripts/deploy.sh failed", "🛠️ python tools/run.py failed"];
+
+    for (const text of inputs) {
+      const mockFetch = vi
+        .fn()
+        .mockResolvedValueOnce(openApiTextLimit(400))
+        .mockResolvedValueOnce({
+          ok: true,
+          json: () => Promise.resolve(valentinaModelsInfo),
+        })
+        .mockResolvedValueOnce({
+          ok: true,
+          arrayBuffer: () => Promise.resolve(wavBytes.buffer),
+        });
+      vi.stubGlobal("fetch", mockFetch);
+
+      const provider = buildSbv2SpeechProvider();
+      const result = await provider.synthesize({
+        text,
+        providerConfig: { baseUrl: "http://localhost:5000", defaultLanguage: "EN" },
+      });
+
+      const voiceUrl = new URL(mockFetch.mock.calls[2][0]);
+      expect(voiceUrl.searchParams.get("text")).toBe("The command failed. I will try another way.");
+      expect(result.metadata).toMatchObject({ textPreparation: "tool_status_rewrite" });
+    }
+  });
+
+  it("rewrites package-manager diagnostic failures", async () => {
+    const inputs = [
+      "npm ci --ignore-scripts\nnpm ERR! code EUSAGE",
+      "pnpm install\nERR_PNPM_PEER_DEP_ISSUES",
+      "yarn install\nYN0001: Error: package failed",
+    ];
+
+    for (const text of inputs) {
+      const mockFetch = vi
+        .fn()
+        .mockResolvedValueOnce(openApiTextLimit(400))
+        .mockResolvedValueOnce({
+          ok: true,
+          json: () => Promise.resolve(valentinaModelsInfo),
+        })
+        .mockResolvedValueOnce({
+          ok: true,
+          arrayBuffer: () => Promise.resolve(wavBytes.buffer),
+        });
+      vi.stubGlobal("fetch", mockFetch);
+
+      const provider = buildSbv2SpeechProvider();
+      const result = await provider.synthesize({
+        text,
+        providerConfig: { baseUrl: "http://localhost:5000", defaultLanguage: "EN" },
+      });
+
+      const voiceUrl = new URL(mockFetch.mock.calls[2][0]);
+      expect(voiceUrl.searchParams.get("text")).toBe("The command failed. I will try another way.");
+      expect(result.metadata).toMatchObject({ textPreparation: "tool_status_rewrite" });
+    }
+  });
+
+  it("rewrites direct check and test executable failures", async () => {
+    const inputs = ["tsc --noEmit failed", "vitest run failed", "npx tsc --noEmit failed"];
+
+    for (const text of inputs) {
+      const mockFetch = vi
+        .fn()
+        .mockResolvedValueOnce(openApiTextLimit(400))
+        .mockResolvedValueOnce({
+          ok: true,
+          json: () => Promise.resolve(valentinaModelsInfo),
+        })
+        .mockResolvedValueOnce({
+          ok: true,
+          arrayBuffer: () => Promise.resolve(wavBytes.buffer),
+        });
+      vi.stubGlobal("fetch", mockFetch);
+
+      const provider = buildSbv2SpeechProvider();
+      const result = await provider.synthesize({
+        text,
+        providerConfig: { baseUrl: "http://localhost:5000", defaultLanguage: "EN" },
+      });
+
+      const voiceUrl = new URL(mockFetch.mock.calls[2][0]);
+      expect(voiceUrl.searchParams.get("text")).toBe("The command failed. I will try another way.");
+      expect(result.metadata).toMatchObject({ textPreparation: "tool_status_rewrite" });
+    }
+  });
+
+  it("rewrites command-failed prefixes before command invocations", async () => {
+    const inputs = [
+      "Command failed with exit code 1: git status --short",
+      "Error: Command failed with exit code 1: npm ci",
+    ];
+
+    for (const text of inputs) {
+      const mockFetch = vi
+        .fn()
+        .mockResolvedValueOnce(openApiTextLimit(400))
+        .mockResolvedValueOnce({
+          ok: true,
+          json: () => Promise.resolve(valentinaModelsInfo),
+        })
+        .mockResolvedValueOnce({
+          ok: true,
+          arrayBuffer: () => Promise.resolve(wavBytes.buffer),
+        });
+      vi.stubGlobal("fetch", mockFetch);
+
+      const provider = buildSbv2SpeechProvider();
+      const result = await provider.synthesize({
+        text,
+        providerConfig: { baseUrl: "http://localhost:5000", defaultLanguage: "EN" },
+      });
+
+      const voiceUrl = new URL(mockFetch.mock.calls[2][0]);
+      expect(voiceUrl.searchParams.get("text")).toBe("The command failed. I will try another way.");
+      expect(result.metadata).toMatchObject({ textPreparation: "tool_status_rewrite" });
+    }
+  });
+
+  it("rewrites colon-form exit codes", async () => {
+    const mockFetch = vi
+      .fn()
+      .mockResolvedValueOnce(openApiTextLimit(400))
+      .mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.resolve(valentinaModelsInfo),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        arrayBuffer: () => Promise.resolve(wavBytes.buffer),
+      });
+    vi.stubGlobal("fetch", mockFetch);
+
+    const provider = buildSbv2SpeechProvider();
+    const result = await provider.synthesize({
+      text: "git status --short\nexit code: 1",
+      providerConfig: { baseUrl: "http://localhost:5000", defaultLanguage: "EN" },
+    });
+
+    const voiceUrl = new URL(mockFetch.mock.calls[2][0]);
+    expect(voiceUrl.searchParams.get("text")).toBe("The command failed. I will try another way.");
+    expect(result.metadata).toMatchObject({ textPreparation: "tool_status_rewrite" });
+  });
+
+  it("rewrites undecorated failed command status lines", async () => {
+    const mockFetch = vi
+      .fn()
+      .mockResolvedValueOnce(openApiTextLimit(400))
+      .mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.resolve(valentinaModelsInfo),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        arrayBuffer: () => Promise.resolve(wavBytes.buffer),
+      });
+    vi.stubGlobal("fetch", mockFetch);
+
+    const provider = buildSbv2SpeechProvider();
+    const result = await provider.synthesize({
+      text: "git status failed",
+      providerConfig: { baseUrl: "http://localhost:5000", defaultLanguage: "EN" },
+    });
+
+    const voiceUrl = new URL(mockFetch.mock.calls[2][0]);
+    expect(voiceUrl.searchParams.get("text")).toBe("The command failed. I will try another way.");
+    expect(result.metadata).toMatchObject({ textPreparation: "tool_status_rewrite" });
+  });
+
+  it("rewrites failed command statuses with common subcommands", async () => {
+    const inputs = ["🛠️ git diff failed", "npm ci failed", "pnpm lint failed"];
+
+    for (const text of inputs) {
+      const mockFetch = vi
+        .fn()
+        .mockResolvedValueOnce(openApiTextLimit(400))
+        .mockResolvedValueOnce({
+          ok: true,
+          json: () => Promise.resolve(valentinaModelsInfo),
+        })
+        .mockResolvedValueOnce({
+          ok: true,
+          arrayBuffer: () => Promise.resolve(wavBytes.buffer),
+        });
+      vi.stubGlobal("fetch", mockFetch);
+
+      const provider = buildSbv2SpeechProvider();
+      const result = await provider.synthesize({
+        text,
+        providerConfig: { baseUrl: "http://localhost:5000", defaultLanguage: "EN" },
+      });
+
+      const voiceUrl = new URL(mockFetch.mock.calls[2][0]);
+      expect(voiceUrl.searchParams.get("text")).toBe("The command failed. I will try another way.");
+      expect(result.metadata).toMatchObject({ textPreparation: "tool_status_rewrite" });
+    }
+  });
+
+  it("rewrites operator-prefixed command failure status lines", async () => {
+    const mockFetch = vi
+      .fn()
+      .mockResolvedValueOnce(openApiTextLimit(400))
+      .mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.resolve(valentinaModelsInfo),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        arrayBuffer: () => Promise.resolve(wavBytes.buffer),
+      });
+    vi.stubGlobal("fetch", mockFetch);
+
+    const provider = buildSbv2SpeechProvider();
+    const result = await provider.synthesize({
+      text: "🛠️ git status failed",
+      providerConfig: { baseUrl: "http://localhost:5000", defaultLanguage: "EN" },
+    });
+
+    const voiceUrl = new URL(mockFetch.mock.calls[2][0]);
+    expect(voiceUrl.searchParams.get("text")).toBe("The command failed. I will try another way.");
+    expect(result.metadata).toMatchObject({ textPreparation: "tool_status_rewrite" });
+  });
+
+  it("does not turn emoji-prefixed non-failure warnings into command failures", async () => {
+    const mockFetch = vi
+      .fn()
+      .mockResolvedValueOnce(openApiTextLimit(400))
+      .mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.resolve(valentinaModelsInfo),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        arrayBuffer: () => Promise.resolve(wavBytes.buffer),
+      });
+    vi.stubGlobal("fetch", mockFetch);
+
+    const provider = buildSbv2SpeechProvider();
+    const result = await provider.synthesize({
+      text: "⚠️ High CPU usage detected.",
+      providerConfig: { baseUrl: "http://localhost:5000", defaultLanguage: "EN" },
+    });
+
+    const voiceUrl = new URL(mockFetch.mock.calls[2][0]);
+    expect(voiceUrl.searchParams.get("text")).toBe("⚠️ High CPU usage detected.");
+    expect(result.metadata).not.toHaveProperty("textPreparation");
+  });
+
+  it("does not turn emoji-prefixed natural failures into command failures", async () => {
+    const mockFetch = vi
+      .fn()
+      .mockResolvedValueOnce(openApiTextLimit(400))
+      .mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.resolve(valentinaModelsInfo),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        arrayBuffer: () => Promise.resolve(wavBytes.buffer),
+      });
+    vi.stubGlobal("fetch", mockFetch);
+
+    const provider = buildSbv2SpeechProvider();
+    const result = await provider.synthesize({
+      text: "⚠️ Database connection failed.",
+      providerConfig: { baseUrl: "http://localhost:5000", defaultLanguage: "EN" },
+    });
+
+    const voiceUrl = new URL(mockFetch.mock.calls[2][0]);
+    expect(voiceUrl.searchParams.get("text")).toBe("⚠️ Database connection failed.");
+    expect(result.metadata).not.toHaveProperty("textPreparation");
+  });
+
+  it("does not rewrite negated error narration about command flags", async () => {
+    const mockFetch = vi
+      .fn()
+      .mockResolvedValueOnce(openApiTextLimit(400))
+      .mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.resolve(valentinaModelsInfo),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        arrayBuffer: () => Promise.resolve(wavBytes.buffer),
+      });
+    vi.stubGlobal("fetch", mockFetch);
+
+    const provider = buildSbv2SpeechProvider();
+    const result = await provider.synthesize({
+      text: "git status --short is not an error.",
+      providerConfig: { baseUrl: "http://localhost:5000", defaultLanguage: "EN" },
+    });
+
+    const voiceUrl = new URL(mockFetch.mock.calls[2][0]);
+    expect(voiceUrl.searchParams.get("text")).toBe("git status --short is not an error.");
+    expect(result.metadata).not.toHaveProperty("textPreparation");
+  });
+
+  it("rewrites fatal CLI diagnostics", async () => {
+    const mockFetch = vi
+      .fn()
+      .mockResolvedValueOnce(openApiTextLimit(400))
+      .mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.resolve(valentinaModelsInfo),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        arrayBuffer: () => Promise.resolve(wavBytes.buffer),
+      });
+    vi.stubGlobal("fetch", mockFetch);
+
+    const provider = buildSbv2SpeechProvider();
+    const result = await provider.synthesize({
+      text: "git status\nfatal: not a git repository",
+      providerConfig: { baseUrl: "http://localhost:5000", defaultLanguage: "EN" },
+    });
+
+    const voiceUrl = new URL(mockFetch.mock.calls[2][0]);
+    expect(voiceUrl.searchParams.get("text")).toBe("The command failed. I will try another way.");
+    expect(result.metadata).toMatchObject({ textPreparation: "tool_status_rewrite" });
+  });
+
+  it("does not treat cwd suffixes without command context as tool status", async () => {
+    const mockFetch = vi
+      .fn()
+      .mockResolvedValueOnce(openApiTextLimit(400))
+      .mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.resolve(valentinaModelsInfo),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        arrayBuffer: () => Promise.resolve(wavBytes.buffer),
+      });
+    vi.stubGlobal("fetch", mockFetch);
+
+    const provider = buildSbv2SpeechProvider();
+    const result = await provider.synthesize({
+      text: "Loading config (in /etc/app) failed.",
+      providerConfig: { baseUrl: "http://localhost:5000", defaultLanguage: "EN" },
+    });
+
+    const voiceUrl = new URL(mockFetch.mock.calls[2][0]);
+    expect(voiceUrl.searchParams.get("text")).toBe("Loading config (in /etc/app) failed.");
+    expect(result.metadata).not.toHaveProperty("textPreparation");
+  });
+
+  it("does not turn emoji-prefixed running tool status into command failures", async () => {
+    const mockFetch = vi
+      .fn()
+      .mockResolvedValueOnce(openApiTextLimit(400))
+      .mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.resolve(valentinaModelsInfo),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        arrayBuffer: () => Promise.resolve(wavBytes.buffer),
+      });
+    vi.stubGlobal("fetch", mockFetch);
+
+    const provider = buildSbv2SpeechProvider();
+    const result = await provider.synthesize({
+      text: "🛠️ git status is still running.",
+      providerConfig: { baseUrl: "http://localhost:5000", defaultLanguage: "EN" },
+    });
+
+    const voiceUrl = new URL(mockFetch.mock.calls[2][0]);
+    expect(voiceUrl.searchParams.get("text")).toBe("🛠️ git status is still running.");
+    expect(result.metadata).not.toHaveProperty("textPreparation");
+  });
+
+  it("allows explicit tts text to speak command-like text intentionally", async () => {
+    const mockFetch = vi
+      .fn()
+      .mockResolvedValueOnce(openApiTextLimit(400))
+      .mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.resolve(valentinaModelsInfo),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        arrayBuffer: () => Promise.resolve(wavBytes.buffer),
+      });
+    vi.stubGlobal("fetch", mockFetch);
+
+    const provider = buildSbv2SpeechProvider();
+    const result = await provider.synthesize({
+      text: "[[tts:text]]gh issue close 2 --repo NEXTAltair/openclaw failed[[/tts:text]]",
+      providerConfig: {
+        baseUrl: "http://localhost:5000",
+        pronunciationReplacements: { gh: "ジーエイチ" },
+      },
+    });
+
+    const voiceUrl = new URL(mockFetch.mock.calls[2][0]);
+    expect(voiceUrl.searchParams.get("text")).toBe("gh issue close 2 --repo NEXTAltair/openclaw failed");
+    expect(result.metadata).toMatchObject({ textPreparation: "explicit" });
   });
 
   it("passes SBV2 generation tuning defaults through to /voice", async () => {
