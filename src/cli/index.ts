@@ -31,6 +31,7 @@ import {
   runModelMerge,
   type Sbv2ModelMergeMethod,
 } from "../model-merge.js";
+import { createModelRenamePlan, runModelRename } from "../model-rename.js";
 import {
   cancelJob,
   createDummyJob,
@@ -70,6 +71,11 @@ interface CliOptions {
   mergeMethod?: Sbv2ModelMergeMethod;
   outputModelName?: string;
   confirmOutputModelName?: string;
+  fromModelName?: string;
+  toModelName?: string;
+  confirmToModelName?: string;
+  includeData?: boolean;
+  renameEsdSpeaker?: boolean;
   modelA?: string;
   modelAFile?: string;
   modelB?: string;
@@ -133,6 +139,8 @@ Commands:
   models candidates      List promotable SBV2 model artifact candidates.
   models merge-plan      Print an agent-safe SBV2 model merge plan without running it.
   models merge-run       Run a planned SBV2 model merge and write a job.
+  models rename-plan     Print a safe SBV2 model rename plan without changing files.
+  models rename-run      Rename an SBV2 model directory and write a job.
   models promote         Promote model artifacts into SBV2 model_assets.
   evaluation run         Generate sample WAVs and an evaluation report for a model candidate.
   evaluation note        Add or update a human listening note in an evaluation report.
@@ -166,6 +174,12 @@ Options:
                             Required exact model name confirmation for models promote.
   --confirm-output-model-name <name>
                             Required exact output model name confirmation for models merge-run.
+  --from-model-name <name> Source model name for models rename-*.
+  --to-model-name <name>   Target model name for models rename-*.
+  --confirm-to-model-name <name>
+                            Required exact target model name confirmation for models rename-run.
+  --include-data           Also move Data/<model> when renaming.
+  --rename-esd-speaker     Also rename exact matching speaker fields in Data/<model>/esd.list.
   --model-a <name>         Model A for model merge.
   --model-a-file <name>    Model A top-level safetensors filename inside its model directory.
   --model-b <name>         Model B for model merge.
@@ -456,6 +470,54 @@ Options:
 Example:
   sbv2-bridge models promote --model-name my-model --confirm-model-name my-model`;
     }
+    if (command === "rename-plan") {
+      return `Usage: sbv2-bridge models rename-plan [options]
+
+Print a safe SBV2 model rename plan without changing files.
+
+Required:
+  --from-model-name <name> Source model name, matching model_assets/<name>.
+  --to-model-name <name>   Target model name.
+
+Options:
+  --sbv2-root <path>       SBV2 repository root.
+  --include-data           Also move Data/<model>.
+  --rename-esd-speaker     Also rename exact matching speaker fields in Data/<model>/esd.list.
+  --json                   Print machine-readable JSON.
+  -h, --help               Show this help.
+
+Notes:
+  .safetensors filenames are not renamed because SBV2 selects models by model_assets directory name.
+
+Example:
+  sbv2-bridge models rename-plan --from-model-name generated_20260603 --to-model-name readable_voice`;
+    }
+    if (command === "rename-run") {
+      return `Usage: sbv2-bridge models rename-run [options]
+
+Rename an SBV2 model directory and write a job.
+
+Required:
+  --from-model-name <name> Source model name, matching model_assets/<name>.
+  --to-model-name <name>   Target model name.
+  --confirm-to-model-name <name>
+                            Required exact target model name confirmation.
+
+Options:
+  --jobs-dir <path>        Job manifest/log root.
+  --sbv2-root <path>       SBV2 repository root.
+  --include-data           Also move Data/<model>.
+  --rename-esd-speaker     Also rename exact matching speaker fields in Data/<model>/esd.list.
+  --base-url <url>         SBV2 API base URL for refresh and /models/info checks.
+  --json                   Print machine-readable JSON.
+  -h, --help               Show this help.
+
+Notes:
+  .safetensors filenames are not renamed because SBV2 selects models by model_assets directory name.
+
+Example:
+  sbv2-bridge models rename-run --from-model-name generated_20260603 --to-model-name readable_voice --confirm-to-model-name readable_voice`;
+    }
     throw new Error(`Unknown models command: ${command}`);
   }
 
@@ -714,6 +776,19 @@ function parseArgs(argv: string[]): ParsedCommand {
     } else if (arg === "--confirm-output-model-name" && next) {
       options.confirmOutputModelName = next;
       index += 1;
+    } else if (arg === "--from-model-name" && next) {
+      options.fromModelName = next;
+      index += 1;
+    } else if (arg === "--to-model-name" && next) {
+      options.toModelName = next;
+      index += 1;
+    } else if (arg === "--confirm-to-model-name" && next) {
+      options.confirmToModelName = next;
+      index += 1;
+    } else if (arg === "--include-data") {
+      options.includeData = true;
+    } else if (arg === "--rename-esd-speaker") {
+      options.renameEsdSpeaker = true;
     } else if (arg === "--model-a" && next) {
       options.modelA = next;
       index += 1;
@@ -930,6 +1005,16 @@ function buildModelMergeOptions(options: CliOptions) {
   };
 }
 
+function buildModelRenameOptions(options: CliOptions) {
+  return {
+    sbv2Root: options.sbv2Root,
+    fromModelName: requireString(options.fromModelName, "--from-model-name"),
+    toModelName: requireString(options.toModelName, "--to-model-name"),
+    includeData: options.includeData,
+    renameEsdSpeaker: options.renameEsdSpeaker,
+  };
+}
+
 function requireValue<T>(value: T | undefined, name: string): T {
   if (value === undefined) {
     throw new Error(`Missing ${name}`);
@@ -980,6 +1065,38 @@ function modelMergePathRoles(result: {
     bridgeState: result.job.outputDir,
     sbv2LoadableModel: result.plan.outputDir,
     recipe: result.summary.recipePath,
+    summary: path.join(result.job.outputDir, "summary.json"),
+    jobLog: result.job.logPath,
+  };
+}
+
+function modelRenamePlanPathRoles(plan: {
+  targetAssetsDir: string;
+  targetDataDir: string;
+  changes: Array<{ kind: string; from: string; to: string }>;
+  sourceDataDir: string;
+}): Sbv2PathRoles {
+  const dataWillMove = plan.changes.some(
+    (change) => change.kind === "path-move" && change.from === plan.sourceDataDir && change.to === plan.targetDataDir,
+  );
+  return {
+    ...(dataWillMove ? { sbv2Dataset: plan.targetDataDir } : {}),
+    sbv2LoadableModel: plan.targetAssetsDir,
+  };
+}
+
+function modelRenamePathRoles(result: {
+  plan: {
+    targetAssetsDir: string;
+    targetDataDir: string;
+    changes: Array<{ kind: string; from: string; to: string }>;
+    sourceDataDir: string;
+  };
+  job: Sbv2JobManifest;
+}): Sbv2PathRoles {
+  return {
+    bridgeState: result.job.outputDir,
+    ...modelRenamePlanPathRoles(result.plan),
     summary: path.join(result.job.outputDir, "summary.json"),
     jobLog: result.job.logPath,
   };
@@ -1172,6 +1289,49 @@ export async function runCli(argv: string[], io: CliIO = {}): Promise<number> {
           writeLine(stdout, `summary: ${result.job.outputDir}/summary.json`);
           writeLine(stdout, `job: ${result.job.jobId}`);
           writeLine(stdout, `log: ${result.job.logPath}`);
+        }
+        return 0;
+      }
+      if (parsed.command === "rename-plan") {
+        const plan = await createModelRenamePlan(buildModelRenameOptions(options));
+        const pathRoles = modelRenamePlanPathRoles(plan);
+        if (options.json) {
+          printJson(stdout, { ok: true, plan, pathRoles });
+        } else {
+          writeLine(stdout, `model rename plan ${plan.fromModelName} -> ${plan.toModelName}`);
+          writeLine(stdout, `source: ${plan.sourceAssetsDir}`);
+          writeLine(stdout, `target: ${plan.targetAssetsDir}`);
+          writeLine(stdout, `compatible: ${plan.compatibility.compatible ? "yes" : "no"}`);
+          for (const change of plan.changes) {
+            writeLine(stdout, `change: ${change.kind} ${change.from} -> ${change.to}`);
+          }
+          for (const warning of plan.compatibility.warnings) writeLine(stdout, `warning: ${warning}`);
+          for (const error of plan.compatibility.errors) writeLine(stdout, `error: ${error}`);
+        }
+        return plan.compatibility.compatible ? 0 : 1;
+      }
+      if (parsed.command === "rename-run") {
+        const result = await runModelRename({
+          ...buildModelRenameOptions(options),
+          jobsRoot: options.jobsRoot,
+          confirmToModelName: requireString(options.confirmToModelName, "--confirm-to-model-name"),
+          baseUrl: options.baseUrl,
+        });
+        const pathRoles = modelRenamePathRoles(result);
+        if (options.json) {
+          printJson(stdout, { ok: true, plan: result.plan, summary: result.summary, job: result.job, pathRoles });
+        } else {
+          writeLine(stdout, `renamed ${result.summary.fromModelName} -> ${result.summary.toModelName}`);
+          writeLine(stdout, `SBV2 loadable model: ${result.summary.targetAssetsDir}`);
+          if (result.summary.refresh) {
+            writeLine(
+              stdout,
+              `refresh: ${result.summary.refresh.foundNewInModelsInfo && !result.summary.refresh.foundOldInModelsInfo ? "verified" : "failed"}`,
+            );
+          }
+          writeLine(stdout, `summary: ${result.job.outputDir}/summary.json`);
+          writeLine(stdout, `job: ${result.job.jobId}`);
+          writeLine(stdout, `job log: ${result.job.logPath}`);
         }
         return 0;
       }
