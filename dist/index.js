@@ -7,6 +7,11 @@ const TOOL_STATUS_REWRITE_TEXT = {
     EN: "The command failed. I will try another way.",
     ZH: "命令执行失败。我会尝试其他方法。",
 };
+const METADATA_STATUS_REWRITE_TEXT = {
+    JP: "GitHub の課題を更新しました。",
+    EN: "The GitHub issue was updated.",
+    ZH: "GitHub 问题已更新。",
+};
 const COMMAND_STATUS_TOOLS = "(?:gh|git|pnpm|npm|npx|yarn|uv|python(?:\\d+(?:\\.\\d+)*)?|node(?:\\d+(?:\\.\\d+)*)?|bash|sh|tsc|vitest)";
 const COMMAND_STATUS_SUBCOMMANDS = [
     "add",
@@ -102,6 +107,19 @@ function looksLikeToolStatusText(value) {
     const hasUndecoratedCommandFailure = new RegExp(`(?:^|\\n)\\s*${COMMAND_STATUS_COMMAND}[^\\n]*\\b(?:failed|exit code\\s*:?\\s*\\d+|command failed)\\b`, "i").test(text);
     return commandInvocation.test(text) && (hasOperatorPrefix || hasCwdSuffix || hasCommandFailurePrefix || hasMultilineError || hasUndecoratedCommandFailure || /\s-{1,2}[a-z][a-z0-9-]*(?:[=\s]|$)/i.test(text));
 }
+function looksLikeMetadataStatusText(value) {
+    const text = value.trim();
+    if (!text)
+        return false;
+    const githubIssueOrPrUrl = /https?:\/\/github\.com\/[^\s)]+\/(?:issues|pull|pulls)\/\d+\b/i;
+    if (!githubIssueOrPrUrl.test(text))
+        return false;
+    const lines = text.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+    const hasMetadataLabel = lines.some((line) => /^(?:[-*]\s*)?(?:issue|github issue|pr|github pr|pull request)\s*[:#-]/i.test(line));
+    const hasStatusPhrase = /\b(?:issue|pr|pull request)\b[^.!?。！？\n]{0,80}\b(?:created|opened|updated|closed|reopened|merged|commented|added|posted)\b/i.test(text);
+    const looksMostlyLikeMetadata = lines.length <= 3 && text.length <= 500;
+    return looksMostlyLikeMetadata && (hasMetadataLabel || hasStatusPhrase);
+}
 function prepareSpeechText(value, language) {
     const explicitText = extractExplicitTtsText(value);
     if (explicitText) {
@@ -109,6 +127,9 @@ function prepareSpeechText(value, language) {
     }
     if (looksLikeToolStatusText(value)) {
         return { text: TOOL_STATUS_REWRITE_TEXT[language ?? "JP"], textPreparation: "tool_status_rewrite" };
+    }
+    if (looksLikeMetadataStatusText(value)) {
+        return { text: METADATA_STATUS_REWRITE_TEXT[language ?? "JP"], textPreparation: "metadata_status_rewrite" };
     }
     return { text: value };
 }
@@ -345,7 +366,7 @@ export function buildSbv2SpeechProvider(options = {}) {
             const pronunciationReplacements = resolvePronunciationReplacements(config);
             const textCapabilities = await client.getTextCapabilities();
             const explicitText = extractExplicitTtsText(req.text);
-            const shouldDeferTextLimitCheck = !explicitText && looksLikeToolStatusText(req.text);
+            const shouldDeferTextLimitCheck = !explicitText && (looksLikeToolStatusText(req.text) || looksLikeMetadataStatusText(req.text));
             if (!shouldDeferTextLimitCheck) {
                 const preflightText = explicitText ?? applyPronunciationReplacements(req.text, pronunciationReplacements);
                 assertSbv2TextWithinHardLimit(preflightText, textCapabilities.maxInputChars);
