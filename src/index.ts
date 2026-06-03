@@ -116,8 +116,8 @@ const COMMAND_STATUS_SCRIPT_PATH = "(?:[a-z0-9:_-]+/[a-z0-9:_./-]+|[a-z0-9:_/-]*
 const COMMAND_STATUS_ARGUMENT = `(?:(?:-{1,2}[a-z][a-z0-9-]*)|(?:[a-z0-9:_./-]+\\s+-{1,2}[a-z][a-z0-9-]*)|(?:${COMMAND_STATUS_SCRIPT_PATH})|(?:(?:${COMMAND_STATUS_SUBCOMMANDS})\\b))`;
 const COMMAND_STATUS_COMMAND = `${COMMAND_STATUS_TOOLS}\\s+(?:(?:${COMMAND_STATUS_SUBCOMMANDS})\\b|(?:${COMMAND_STATUS_SCRIPT_PATH}))`;
 const GITHUB_ISSUE_OR_PR_URL =
-  "https?:\\/\\/github\\.com\\/[^\\s)>`]+\\/(issues|pull|pulls)\\/\\d+\\b(?:\\/[^?#\\s)>`]*)?(?:\\?[^#\\s)>`]*)?(?:#[^\\s)>`]+)?";
-const GITHUB_ISSUE_OR_PR_MARKDOWN_LINK = `\\[[^\\]\\n]*\\]\\(\\s*${GITHUB_ISSUE_OR_PR_URL}\\s*\\)`;
+  "https?:\\/\\/github\\.com\\/[^\\/\\s)>`]+\\/[^\\/\\s)>`]+\\/(issues|pull|pulls)\\/\\d+\\b(?:\\/[^?#\\s)>`]*)?(?:\\?[^#\\s)>`]*)?(?:#[^\\s)>`]+)?";
+const GITHUB_ISSUE_OR_PR_MARKDOWN_LINK = `\\[([^\\]\\n]*)\\]\\(\\s*${GITHUB_ISSUE_OR_PR_URL}\\s*\\)`;
 
 interface PreparedSpeechText {
   text: string;
@@ -267,9 +267,16 @@ function sanitizeGithubUrlsFromSpeechText(
 
     githubUrlPattern.lastIndex = 0;
     markdownLinkPattern.lastIndex = 0;
-    const sanitizedLine = cleanupSpeechLineAfterUrlRemoval(
+    const lineWithoutLinks = cleanupSpeechLineAfterUrlRemoval(
       line.replace(markdownLinkPattern, "").replace(githubUrlPattern, ""),
     );
+    const sanitizedLine = !lineWithoutLinks || looksLikeGithubMetadataLabelRemainder(lineWithoutLinks)
+      ? lineWithoutLinks
+      : cleanupSpeechLineAfterUrlRemoval(
+        line
+          .replace(markdownLinkPattern, (_match, label: string) => label.trim())
+          .replace(githubUrlPattern, ""),
+      );
     if (sanitizedLine && !looksLikeGithubMetadataLabelRemainder(sanitizedLine)) lines.push(sanitizedLine);
   }
 

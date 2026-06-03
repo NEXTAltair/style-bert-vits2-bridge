@@ -786,6 +786,32 @@ describe("Style-Bert-VITS2 speech provider", () => {
     expect(result.metadata).toMatchObject({ textPreparation: "url_sanitize" });
   });
 
+  it("ignores non-issue GitHub file paths that contain issue-like segments", async () => {
+    const mockFetch = vi
+      .fn()
+      .mockResolvedValueOnce(openApiTextLimit(400))
+      .mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.resolve(valentinaModelsInfo),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        arrayBuffer: () => Promise.resolve(wavBytes.buffer),
+      });
+    vi.stubGlobal("fetch", mockFetch);
+
+    const provider = buildSbv2SpeechProvider();
+    const text = "See https://github.com/org/repo/blob/main/docs/issues/71.md for details.";
+    const result = await provider.synthesize({
+      text,
+      providerConfig: { baseUrl: "http://localhost:5000" },
+    });
+
+    const voiceUrl = new URL(mockFetch.mock.calls[2][0]);
+    expect(voiceUrl.searchParams.get("text")).toBe(text);
+    expect(result.metadata).not.toMatchObject({ textPreparation: "url_sanitize" });
+  });
+
   it("removes Markdown-wrapped GitHub subpage URLs from inline prose", async () => {
     const mockFetch = vi
       .fn()
@@ -815,6 +841,33 @@ describe("Style-Bert-VITS2 speech provider", () => {
     expect(spokenText).not.toContain("<");
     expect(spokenText).not.toContain(">");
     expect(spokenText).not.toContain("`");
+    expect(spokenText).not.toContain("https://github.com");
+    expect(result.metadata).toMatchObject({ textPreparation: "url_sanitize" });
+  });
+
+  it("keeps Markdown GitHub link labels in inline prose", async () => {
+    const mockFetch = vi
+      .fn()
+      .mockResolvedValueOnce(openApiTextLimit(400))
+      .mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.resolve(valentinaModelsInfo),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        arrayBuffer: () => Promise.resolve(wavBytes.buffer),
+      });
+    vi.stubGlobal("fetch", mockFetch);
+
+    const provider = buildSbv2SpeechProvider();
+    const result = await provider.synthesize({
+      text: "Please see [the pull request](https://github.com/org/repo/pull/65) for details.",
+      providerConfig: { baseUrl: "http://localhost:5000" },
+    });
+
+    const voiceUrl = new URL(mockFetch.mock.calls[2][0]);
+    const spokenText = voiceUrl.searchParams.get("text");
+    expect(spokenText).toBe("Please see the pull request for details.");
     expect(spokenText).not.toContain("https://github.com");
     expect(result.metadata).toMatchObject({ textPreparation: "url_sanitize" });
   });
