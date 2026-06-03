@@ -29,13 +29,21 @@ SBV2 は `model_assets/` 内のディレクトリ名でモデルを指定しま�
 
 ## スタイル
 
-スタイルはモデルごとに異なります。一般的なスタイル名: `Neutral`, `01`, `02`, `03`, `04` など。
+スタイルはモデルごとに異なります。SBV2 に渡してよい style 名は、ロード済みモデルの `/models/info` に出る `style2id` のキーだけです。
 
 - `style`: スタイル名（デフォルト "Neutral"）
 - `style_weight`: スタイルの強さ（デフォルト 1.0）
   - **1.0 を超えると音声が崩壊する可能性があります**。0.0〜1.0 の範囲で調整してください。
 
 スタイルは「どの声が良いか」を決める項目ではありません。選択済みの model / speaker を保ったまま、明るい、落ち着いた、注意喚起などの表情を切り替える項目です。
+
+### style の実体
+
+SBV2 の style は `style_vectors.npy` の行と `config.json` の `data.style2id` の対応で決まります。カスタムモデルでは、raw 音声を `Data/<model>/raw/<style名>/*.wav` のように分類してから style vector を生成します。
+
+`raw` 直下に WAV だけがあるモデルは、基本的に `Neutral` だけになります。style サブフォルダが 2 個以上ある場合は、`Neutral` と各サブフォルダ名が style として生成されます。
+
+`clear`、`soft`、`bright`、`alert` などはエージェント内の tone 分類です。`style2id` に同名の style が存在しない限り、SBV2 に渡す style 名ではありません。`length`、`sdp_ratio`、`noise`、`assist_text` などで作った比較音声も、学習済み style とは別物として扱います。
 
 ## 話速
 
@@ -88,7 +96,7 @@ Valentina 系モデルの style は SBV2 共通の emotion taxonomy ではなく
 
 Valentina などの style 対応モデルでは、まず現在使う `model_name` と `speaker_name` を声の同一性として固定します。その後、現在の感情、文脈、応答温度に合わせて `style2id` 内の style を動的に選びます。
 
-`clear`、`soft`、`serious`、`alert` などの tone は、エージェントが文脈に応じて style を選ぶための分類名であり、SBV2 に送る style 名ではありません。
+`clear`、`soft`、`serious`、`alert` などの tone は、エージェントが文脈に応じて style を選ぶための分類名です。該当する実 style が無いモデルでは `Neutral` を使い、必要なら推論パラメータで控えめに調整します。
 
 ### 選択ルール
 
