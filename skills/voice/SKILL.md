@@ -50,6 +50,38 @@ SBV2 は `model_assets/` 内のディレクトリ名でモデルを指定しま�
 
 `assist_text` は常用しません。短い文脈だけでは意図した tone が出ない場合に、短い補助文を一時的に足します。説明文のような長い補助テキストや、本文と矛盾する感情は避けてください。
 
+## 読み置換辞書
+
+`pronunciationReplacements` / `pronunciationReplacementsPath` は、自然な会話文として読み上げたい語の読みを補正するための辞書です。辞書は「読ませたい言葉の読みを直す」ために使い、そもそも TTS に投げるべきではない text を読める形にする逃げ道として使いません。
+
+辞書に追加してよいもの:
+
+- 製品名: `Style-Bert-VITS2`, `OpenClaw`
+- モデル名: `SBV2`, `Valentina`
+- よく使う略語: `API`, `TTS`
+- 固有名詞や専門語で、モデルが自然な会話文の中で繰り返し読み間違えるもの
+
+辞書で処理しないもの:
+
+- URL
+- `Issue: https://...` のような GitHub issue / PR status 行
+- shell command
+- tool / status / operator output
+- error log
+- file path
+- repo slug
+- JSON
+- stack trace
+
+これらは読み置換ではなく、TTS に投げる前の eligibility、filter、要約、skip、または tool/status text preparation 側で扱います。たとえば `Issue: https://...` を辞書で救おうとせず、必要なら「Issue を確認しました」のような自然文に変換するか、読み上げ対象から外してください。
+
+読み間違いを見つけた時の triage:
+
+1. その text が自然な会話文として意図して読み上げたい内容か確認する。
+2. URL、command、log、status、JSON、path、stack trace なら辞書ではなく eligibility / filter / 要約 / skip 側で扱う。
+3. 会話文中の固有名詞、製品名、略語、専門語の継続的な読み間違いなら辞書に追加する。
+4. 置換後の文が SBV2 `/voice` の text hard limit を超えないことを確認する。
+
 ## Valentina style / emotion 選択
 
 Valentina 系モデルの style は SBV2 共通の emotion taxonomy ではなく、モデルごとの `style2id` に定義された style 名です。`/docs` は API 仕様確認用であり、ロード済みモデル情報は `/models/info` で確認できます。
