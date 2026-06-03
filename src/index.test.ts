@@ -538,6 +538,7 @@ describe("Style-Bert-VITS2 speech provider", () => {
   it("rewrites GitHub comment and review URL metadata status lines", async () => {
     const inputs = [
       ["Commented issue: https://github.com/NEXTAltair/style-bert-vits2-bridge/issues/64#issuecomment-123", "The GitHub issue was updated."],
+      ["Issue: https://github.com/NEXTAltair/style-bert-vits2-bridge/issues/64?notification_referrer_id=abc123", "The GitHub issue was updated."],
       ["Posted PR: https://github.com/NEXTAltair/style-bert-vits2-bridge/pull/65#discussion_r123", "The GitHub pull request was updated."],
     ] as const;
 
@@ -565,6 +566,64 @@ describe("Style-Bert-VITS2 speech provider", () => {
       expect(voiceUrl.searchParams.get("text")).toBe(expectedText);
       expect(result.metadata).toMatchObject({ textPreparation: "metadata_status_rewrite" });
     }
+  });
+
+  it("rewrites mixed issue and PR metadata-only blocks generically", async () => {
+    const mockFetch = vi
+      .fn()
+      .mockResolvedValueOnce(openApiTextLimit(400))
+      .mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.resolve(valentinaModelsInfo),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        arrayBuffer: () => Promise.resolve(wavBytes.buffer),
+      });
+    vi.stubGlobal("fetch", mockFetch);
+
+    const provider = buildSbv2SpeechProvider();
+    const result = await provider.synthesize({
+      text: [
+        "Issue: https://github.com/NEXTAltair/style-bert-vits2-bridge/issues/64",
+        "PR: https://github.com/NEXTAltair/style-bert-vits2-bridge/pull/65",
+      ].join("\n"),
+      providerConfig: { baseUrl: "http://localhost:5000", defaultLanguage: "EN" },
+    });
+
+    const voiceUrl = new URL(mockFetch.mock.calls[2][0]);
+    expect(voiceUrl.searchParams.get("text")).toBe("The GitHub items were updated.");
+    expect(result.metadata).toMatchObject({ textPreparation: "metadata_status_rewrite" });
+  });
+
+  it("rewrites longer metadata-only link blocks before SBV2 text-limit checks", async () => {
+    const mockFetch = vi
+      .fn()
+      .mockResolvedValueOnce(openApiTextLimit(40))
+      .mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.resolve(valentinaModelsInfo),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        arrayBuffer: () => Promise.resolve(wavBytes.buffer),
+      });
+    vi.stubGlobal("fetch", mockFetch);
+
+    const provider = buildSbv2SpeechProvider();
+    const result = await provider.synthesize({
+      text: [
+        "Issue: https://github.com/NEXTAltair/style-bert-vits2-bridge/issues/64",
+        "Issue: https://github.com/NEXTAltair/style-bert-vits2-bridge/issues/65",
+        "Issue: https://github.com/NEXTAltair/style-bert-vits2-bridge/issues/66",
+        "Issue: https://github.com/NEXTAltair/style-bert-vits2-bridge/issues/67",
+      ].join("\n"),
+      providerConfig: { baseUrl: "http://localhost:5000", defaultLanguage: "EN" },
+    });
+
+    const voiceUrl = new URL(mockFetch.mock.calls[2][0]);
+    expect(voiceUrl.searchParams.get("text")).toBe("The GitHub issue was updated.");
+    expect(result.metadata).toMatchObject({ textPreparation: "metadata_status_rewrite" });
   });
 
   it("rewrites numbered GitHub issue and PR metadata labels", async () => {

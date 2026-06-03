@@ -45,20 +45,23 @@ const TOOL_STATUS_REWRITE_TEXT: Record<NonNullable<Sbv2ResolvedVoiceProfile["lan
   EN: "The command failed. I will try another way.",
   ZH: "命令执行失败。我会尝试其他方法。",
 };
-type MetadataStatusKind = "issue" | "pull_request";
+type MetadataStatusKind = "github_item" | "issue" | "pull_request";
 const METADATA_STATUS_REWRITE_TEXT: Record<
   NonNullable<Sbv2ResolvedVoiceProfile["language"]>,
   Record<MetadataStatusKind, string>
 > = {
   JP: {
+    github_item: "GitHub の項目を更新しました。",
     issue: "GitHub の課題を更新しました。",
     pull_request: "GitHub のプルリクエストを更新しました。",
   },
   EN: {
+    github_item: "The GitHub items were updated.",
     issue: "The GitHub issue was updated.",
     pull_request: "The GitHub pull request was updated.",
   },
   ZH: {
+    github_item: "GitHub 项目已更新。",
     issue: "GitHub 问题已更新。",
     pull_request: "GitHub 拉取请求已更新。",
   },
@@ -181,7 +184,7 @@ function classifyMetadataStatusText(value: string): MetadataStatusKind | undefin
   const text = value.trim();
   if (!text) return undefined;
 
-  const githubIssueOrPrUrl = "https?:\\/\\/github\\.com\\/[^\\s)]+\\/(issues|pull|pulls)\\/\\d+\\b(?:#[^\\s)]+)?";
+  const githubIssueOrPrUrl = "https?:\\/\\/github\\.com\\/[^\\s)]+\\/(issues|pull|pulls)\\/\\d+\\b(?:\\?[^#\\s)]*)?(?:#[^\\s)]+)?";
   const githubIssueOrPrUrlPattern = new RegExp(githubIssueOrPrUrl, "i");
   if (!githubIssueOrPrUrlPattern.test(text)) return undefined;
 
@@ -198,8 +201,7 @@ function classifyMetadataStatusText(value: string): MetadataStatusKind | undefin
   );
 
   const lines = text.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
-  const looksMostlyLikeMetadata = lines.length <= 3 && text.length <= 500;
-  if (!looksMostlyLikeMetadata) return undefined;
+  if (!lines.length) return undefined;
 
   let kind: MetadataStatusKind | undefined;
   for (const line of lines) {
@@ -209,7 +211,7 @@ function classifyMetadataStatusText(value: string): MetadataStatusKind | undefin
 
     const lineKind: MetadataStatusKind = resource === "issues" ? "issue" : "pull_request";
     kind ??= lineKind;
-    if (kind !== lineKind) return undefined;
+    if (kind !== lineKind) kind = "github_item";
   }
 
   return kind;

@@ -9,14 +9,17 @@ const TOOL_STATUS_REWRITE_TEXT = {
 };
 const METADATA_STATUS_REWRITE_TEXT = {
     JP: {
+        github_item: "GitHub の項目を更新しました。",
         issue: "GitHub の課題を更新しました。",
         pull_request: "GitHub のプルリクエストを更新しました。",
     },
     EN: {
+        github_item: "The GitHub items were updated.",
         issue: "The GitHub issue was updated.",
         pull_request: "The GitHub pull request was updated.",
     },
     ZH: {
+        github_item: "GitHub 项目已更新。",
         issue: "GitHub 问题已更新。",
         pull_request: "GitHub 拉取请求已更新。",
     },
@@ -120,7 +123,7 @@ function classifyMetadataStatusText(value) {
     const text = value.trim();
     if (!text)
         return undefined;
-    const githubIssueOrPrUrl = "https?:\\/\\/github\\.com\\/[^\\s)]+\\/(issues|pull|pulls)\\/\\d+\\b(?:#[^\\s)]+)?";
+    const githubIssueOrPrUrl = "https?:\\/\\/github\\.com\\/[^\\s)]+\\/(issues|pull|pulls)\\/\\d+\\b(?:\\?[^#\\s)]*)?(?:#[^\\s)]+)?";
     const githubIssueOrPrUrlPattern = new RegExp(githubIssueOrPrUrl, "i");
     if (!githubIssueOrPrUrlPattern.test(text))
         return undefined;
@@ -130,8 +133,7 @@ function classifyMetadataStatusText(value) {
     const labelFirstMetadataLine = new RegExp(`^(?:[-*]\\s*)?${metadataSubjects}${metadataNumber}(?:\\s+${metadataVerbs})?\\s*[:#-]\\s*${githubIssueOrPrUrl}\\s*$`, "i");
     const verbFirstMetadataLine = new RegExp(`^(?:[-*]\\s*)?${metadataVerbs}\\s+${metadataSubjects}${metadataNumber}\\s*[:#-]\\s*${githubIssueOrPrUrl}\\s*$`, "i");
     const lines = text.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
-    const looksMostlyLikeMetadata = lines.length <= 3 && text.length <= 500;
-    if (!looksMostlyLikeMetadata)
+    if (!lines.length)
         return undefined;
     let kind;
     for (const line of lines) {
@@ -142,7 +144,7 @@ function classifyMetadataStatusText(value) {
         const lineKind = resource === "issues" ? "issue" : "pull_request";
         kind ??= lineKind;
         if (kind !== lineKind)
-            return undefined;
+            kind = "github_item";
     }
     return kind;
 }
