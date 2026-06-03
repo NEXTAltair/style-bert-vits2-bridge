@@ -323,6 +323,104 @@ describe("sbv2-bridge CLI", () => {
     expect(parsed.plan.coefficients).toEqual({ modelACoeff: 1, modelBCoeff: -1, modelCCoeff: 0 });
   });
 
+  it("prints model merge run path roles as JSON", async () => {
+    const jobsRoot = tempJobsRoot();
+    const sbv2Root = mkdtempSync(path.join(tmpdir(), "sbv2-cli-merge-root-"));
+    const binRoot = mkdtempSync(path.join(tmpdir(), "sbv2-cli-bin-"));
+    mkdirSync(path.join(sbv2Root, "configs"), { recursive: true });
+    writeFileSync(path.join(sbv2Root, "configs", "paths.yml"), "assets_root: model_assets\n");
+    for (const modelName of ["model-a", "model-b"]) {
+      const modelDir = path.join(sbv2Root, "model_assets", modelName);
+      mkdirSync(modelDir, { recursive: true });
+      writeFileSync(path.join(modelDir, "config.json"), JSON.stringify(makeModelConfig(modelName)));
+      writeFileSync(path.join(modelDir, "style_vectors.npy"), makeNpy([1, 2]));
+      writeFileSync(path.join(modelDir, `${modelName}.safetensors`), makeSafetensors());
+    }
+    const fakeUv = path.join(binRoot, "uv");
+    writeFileSync(
+      fakeUv,
+      `#!/usr/bin/env node
+const fs = require("node:fs");
+const path = require("node:path");
+const payload = JSON.parse(process.argv[process.argv.length - 1]);
+const outputDir = path.join(process.cwd(), "model_assets", payload.outputName);
+const modelADir = path.dirname(payload.modelPathA);
+fs.mkdirSync(outputDir, { recursive: true });
+const config = JSON.parse(fs.readFileSync(path.join(modelADir, "config.json"), "utf8"));
+config.model_name = payload.outputName;
+config.data.spk2id = { [payload.outputName]: 0 };
+fs.writeFileSync(path.join(outputDir, "config.json"), JSON.stringify(config));
+fs.copyFileSync(path.join(modelADir, "style_vectors.npy"), path.join(outputDir, "style_vectors.npy"));
+fs.copyFileSync(payload.modelPathA, path.join(outputDir, payload.outputName + ".safetensors"));
+fs.writeFileSync(path.join(outputDir, "recipe.json"), JSON.stringify({ method: payload.method }));
+`,
+    );
+    chmodSync(fakeUv, 0o755);
+
+    const previousPath = process.env.PATH;
+    process.env.PATH = `${binRoot}:${previousPath ?? ""}`;
+    try {
+      const stdout = createWriter();
+      const stderr = createWriter();
+      await expect(
+        runCli(
+          [
+            "models",
+            "merge-run",
+            "--jobs-dir",
+            jobsRoot,
+            "--sbv2-root",
+            sbv2Root,
+            "--method",
+            "usual",
+            "--output-model-name",
+            "merged",
+            "--confirm-output-model-name",
+            "merged",
+            "--model-a",
+            "model-a",
+            "--model-b",
+            "model-b",
+            "--voice-weight",
+            "0.1",
+            "--voice-pitch-weight",
+            "0.2",
+            "--speech-style-weight",
+            "0.3",
+            "--tempo-weight",
+            "0.4",
+            "--json",
+          ],
+          { stdout: stdout.stream, stderr: stderr.stream },
+        ),
+      ).resolves.toBe(0);
+      expect(stderr.output()).toBe("");
+
+      const parsed = JSON.parse(stdout.output()) as {
+        summary: { recipePath: string };
+        job: { outputDir: string; logPath: string; inputSummary: { recipePath?: string } };
+        pathRoles: {
+          bridgeState?: string;
+          sbv2LoadableModel?: string;
+          recipe?: string;
+          summary?: string;
+          jobLog?: string;
+        };
+      };
+      expect(parsed.summary.recipePath).toBe(path.join(sbv2Root, "model_assets", "merged", "recipe.json"));
+      expect(parsed.job.inputSummary.recipePath).toBe(parsed.summary.recipePath);
+      expect(parsed.pathRoles).toEqual({
+        bridgeState: parsed.job.outputDir,
+        sbv2LoadableModel: path.join(sbv2Root, "model_assets", "merged"),
+        recipe: path.join(sbv2Root, "model_assets", "merged", "recipe.json"),
+        summary: path.join(parsed.job.outputDir, "summary.json"),
+        jobLog: parsed.job.logPath,
+      });
+    } finally {
+      process.env.PATH = previousPath;
+    }
+  });
+
   it("rejects mismatched model merge parameters at the CLI layer", async () => {
     const stdout = createWriter();
     const stderr = createWriter();

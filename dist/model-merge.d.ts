@@ -91,6 +91,7 @@ export interface Sbv2ModelMergeSummary {
     method: Sbv2ModelMergeMethod;
     outputModelName: string;
     outputDir: string;
+    recipePath: string;
     plan: Sbv2ModelMergePlan;
     candidate: Sbv2ModelCandidate;
     refresh?: {
@@ -98,6 +99,7 @@ export interface Sbv2ModelMergeSummary {
         refreshed: boolean;
         foundInModelsInfo: boolean;
         modelsInfoCount: number;
+        outputAssetsRetained: boolean;
     };
     nextSteps: string[];
 }

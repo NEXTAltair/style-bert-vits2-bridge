@@ -111,6 +111,7 @@ export interface Sbv2ModelMergeSummary {
   method: Sbv2ModelMergeMethod;
   outputModelName: string;
   outputDir: string;
+  recipePath: string;
   plan: Sbv2ModelMergePlan;
   candidate: Sbv2ModelCandidate;
   refresh?: {
@@ -118,6 +119,7 @@ export interface Sbv2ModelMergeSummary {
     refreshed: boolean;
     foundInModelsInfo: boolean;
     modelsInfoCount: number;
+    outputAssetsRetained: boolean;
   };
   nextSteps: string[];
 }
@@ -224,22 +226,25 @@ export async function runModelMerge(options: ModelMergeRunOptions): Promise<Mode
   const logLines: string[] = [`model merge started for ${plan.outputModelName}`];
   const outputExistedBeforeRun = await pathExists(plan.outputDir);
   let cleanupOutputOnFailure = !outputExistedBeforeRun;
+  let candidateForFailedJob: Sbv2ModelCandidate | undefined;
+  let refreshForFailedJob: Sbv2ModelMergeSummary["refresh"] | undefined;
 
   const fail = async (error: unknown): Promise<never> => {
     const message = error instanceof Error ? error.message : String(error);
     if (cleanupOutputOnFailure && (await pathExists(plan.outputDir))) {
       await cleanupOutputDir(plan.outputDir, logLines);
     }
-    await createJobManifest({
+    const outputAssetsRetained = await pathExists(plan.outputDir);
+    const artifactPaths = outputAssetsRetained && candidateForFailedJob ? collectMergeArtifacts(plan, candidateForFailedJob) : [];
+    const job = await createJobManifest({
       jobsRoot: options.jobsRoot,
       operation: "model-merge",
       state: "failed",
-      inputSummary: {
-        method: plan.method,
-        outputModelName: plan.outputModelName,
-        outputDir: plan.outputDir,
-      },
-      artifactPaths: [],
+      inputSummary: buildModelMergeInputSummary(plan, {
+        refresh: refreshForFailedJob,
+        outputAssetsRetained,
+      }),
+      artifactPaths,
       firstError: message,
       retryable: false,
       progressSummary: `Model merge failed for ${plan.outputModelName}.`,
@@ -247,6 +252,39 @@ export async function runModelMerge(options: ModelMergeRunOptions): Promise<Mode
       now,
       randomId,
     });
+    const summaryPath = path.join(job.outputDir, "summary.json");
+    await writeFile(
+      summaryPath,
+      `${JSON.stringify(
+        {
+          schemaVersion: 1,
+          state: "failed",
+          method: plan.method,
+          outputModelName: plan.outputModelName,
+          outputDir: plan.outputDir,
+          recipePath: mergeRecipePath(plan),
+          plan,
+          ...(candidateForFailedJob ? { candidate: candidateForFailedJob } : {}),
+          ...(refreshForFailedJob ? { refresh: refreshForFailedJob } : {}),
+          outputAssetsRetained,
+          firstError: message,
+          nextSteps: outputAssetsRetained
+            ? [
+                `Inspect ${plan.outputDir} and ${mergeRecipePath(plan)}.`,
+                "Refresh SBV2 models again or check SBV2 server model loading state.",
+              ]
+            : ["Review the job log and rerun models merge-plan before retrying."],
+        },
+        null,
+        2,
+      )}\n`,
+      "utf8",
+    );
+    const updatedJob: Sbv2JobManifest = {
+      ...job,
+      artifactPaths: [...job.artifactPaths, summaryPath],
+    };
+    await writeFile(path.join(job.outputDir, "manifest.json"), `${JSON.stringify(updatedJob, null, 2)}\n`, "utf8");
     throw error;
   };
 
@@ -268,6 +306,7 @@ export async function runModelMerge(options: ModelMergeRunOptions): Promise<Mode
       method: plan.method,
       outputModelName: plan.outputModelName,
       outputDir: plan.outputDir,
+      recipePath: mergeRecipePath(plan),
       plan,
       candidate,
       nextSteps: [
@@ -278,6 +317,14 @@ export async function runModelMerge(options: ModelMergeRunOptions): Promise<Mode
     };
 
     if (options.baseUrl) {
+      candidateForFailedJob = candidate;
+      refreshForFailedJob = {
+        baseUrl: options.baseUrl,
+        refreshed: false,
+        foundInModelsInfo: false,
+        modelsInfoCount: 0,
+        outputAssetsRetained: true,
+      };
       const modelsInfo = await new Sbv2Client({ baseUrl: options.baseUrl }).refreshModels();
       const found = modelInfoContains(modelsInfo, plan.outputModelName);
       summary.refresh = {
@@ -285,8 +332,13 @@ export async function runModelMerge(options: ModelMergeRunOptions): Promise<Mode
         refreshed: true,
         foundInModelsInfo: found,
         modelsInfoCount: modelsInfo.length,
+        outputAssetsRetained: true,
       };
+      refreshForFailedJob = summary.refresh;
       logLines.push(`refreshed SBV2 models from ${options.baseUrl}`);
+      if (!found) {
+        logLines.push(`merged model assets were retained at ${plan.outputDir}, but ${plan.outputModelName} was not found in /models/info`);
+      }
       if (!found) {
         throw new Error(`Merged model "${plan.outputModelName}" was not found in /models/info after refresh`);
       }
@@ -295,11 +347,7 @@ export async function runModelMerge(options: ModelMergeRunOptions): Promise<Mode
     const job = await createJobManifest({
       jobsRoot: options.jobsRoot,
       operation: "model-merge",
-      inputSummary: {
-        method: plan.method,
-        outputModelName: plan.outputModelName,
-        outputDir: plan.outputDir,
-      },
+      inputSummary: buildModelMergeInputSummary(plan, { refresh: summary.refresh, outputAssetsRetained: true }),
       artifactPaths: collectMergeArtifacts(plan, candidate),
       progressSummary: `Model merge completed for ${plan.outputModelName}.`,
       logLines: [...logLines, `model merge succeeded for ${plan.outputModelName}`],
@@ -317,6 +365,50 @@ export async function runModelMerge(options: ModelMergeRunOptions): Promise<Mode
   } catch (error) {
     return fail(error);
   }
+}
+
+function buildModelMergeInputSummary(
+  plan: Sbv2ModelMergePlan,
+  options: {
+    refresh?: Sbv2ModelMergeSummary["refresh"];
+    outputAssetsRetained?: boolean;
+  } = {},
+): Record<string, unknown> {
+  return {
+    method: plan.method,
+    outputModelName: plan.outputModelName,
+    outputDir: plan.outputDir,
+    outputSafetensorsPath: plan.outputSafetensorsPath,
+    recipePath: mergeRecipePath(plan),
+    inputModels: {
+      a: summarizeMergeInput(plan.inputModels.a),
+      b: summarizeMergeInput(plan.inputModels.b),
+      ...(plan.inputModels.c ? { c: summarizeMergeInput(plan.inputModels.c) } : {}),
+    },
+    ...(plan.weights ? { weights: plan.weights } : {}),
+    ...(plan.coefficients ? { coefficients: plan.coefficients } : {}),
+    slerp: plan.slerp,
+    compatibility: plan.compatibility,
+    expectedArtifacts: plan.expectedArtifacts,
+    ...(options.refresh ? { refresh: options.refresh } : {}),
+    ...(options.outputAssetsRetained !== undefined ? { outputAssetsRetained: options.outputAssetsRetained } : {}),
+  };
+}
+
+function summarizeMergeInput(input: Sbv2ModelMergeInput): Record<string, unknown> {
+  return {
+    modelName: input.modelName,
+    modelDir: input.modelDir,
+    safetensorsPath: input.safetensorsPath,
+    configJsonPath: input.configJsonPath,
+    styleVectorsPath: input.styleVectorsPath,
+    speakerCount: input.speakerCount,
+    styleVectorShape: input.styleVectorShape,
+  };
+}
+
+function mergeRecipePath(plan: Sbv2ModelMergePlan): string {
+  return path.join(plan.outputDir, "recipe.json");
 }
 
 async function inspectMergeInput(options: {

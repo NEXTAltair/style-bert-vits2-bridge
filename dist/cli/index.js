@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import { realpathSync } from "node:fs";
+import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { DEFAULT_SLICE_MAX_SEC, DEFAULT_SLICE_MIN_SEC, ingestDataset, prepareDataset, } from "../datasets.js";
 import { createTrainingPlan, parseTrainingStage, runTraining, } from "../training.js";
@@ -483,6 +484,15 @@ function trainingPathRoles(plan, job) {
         ...(job ? { jobLog: job.logPath } : {}),
     };
 }
+function modelMergePathRoles(result) {
+    return {
+        bridgeState: result.job.outputDir,
+        sbv2LoadableModel: result.plan.outputDir,
+        recipe: result.summary.recipePath,
+        summary: path.join(result.job.outputDir, "summary.json"),
+        jobLog: result.job.logPath,
+    };
+}
 export async function runCli(argv, io = {}) {
     const stdout = io.stdout ?? process.stdout;
     const stderr = io.stderr ?? process.stderr;
@@ -651,8 +661,16 @@ export async function runCli(argv, io = {}) {
                     confirmOutputModelName: requireString(options.confirmOutputModelName, "--confirm-output-model-name"),
                     baseUrl: options.baseUrl,
                 });
+                const pathRoles = modelMergePathRoles(result);
                 if (options.json) {
-                    printJson(stdout, { ok: true, plan: result.plan, candidate: result.candidate, summary: result.summary, job: result.job });
+                    printJson(stdout, {
+                        ok: true,
+                        plan: result.plan,
+                        candidate: result.candidate,
+                        summary: result.summary,
+                        job: result.job,
+                        pathRoles,
+                    });
                 }
                 else {
                     writeLine(stdout, `merged ${result.summary.outputModelName}`);

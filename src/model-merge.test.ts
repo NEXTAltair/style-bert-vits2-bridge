@@ -238,6 +238,32 @@ describe("SBV2 model merge", () => {
       state: "succeeded",
     });
     expect(result.candidate.promotable).toBe(true);
+    expect(result.summary.recipePath).toBe(path.join(sbv2Root, "model_assets", "merged", "recipe.json"));
+    expect(result.summary.refresh).toBeUndefined();
+    expect(result.job.inputSummary).toMatchObject({
+      method: "usual",
+      outputModelName: "merged",
+      outputDir: path.join(sbv2Root, "model_assets", "merged"),
+      outputSafetensorsPath: path.join(sbv2Root, "model_assets", "merged", "merged.safetensors"),
+      recipePath: path.join(sbv2Root, "model_assets", "merged", "recipe.json"),
+      weights: {
+        voiceWeight: 0.1,
+        voicePitchWeight: 0.2,
+        speechStyleWeight: 0.3,
+        tempoWeight: 0.4,
+      },
+      inputModels: {
+        a: {
+          modelName: "model-a",
+          safetensorsPath: path.join(sbv2Root, "model_assets", "model-a", "model-a.safetensors"),
+        },
+        b: {
+          modelName: "model-b",
+          safetensorsPath: path.join(sbv2Root, "model_assets", "model-b", "model-b.safetensors"),
+        },
+      },
+      outputAssetsRetained: true,
+    });
     expect(readFileSync(path.join(result.job.outputDir, "summary.json"), "utf8")).toContain('"outputModelName": "merged"');
   });
 
@@ -276,6 +302,107 @@ describe("SBV2 model merge", () => {
       ).rejects.toThrow('was not found in /models/info after refresh');
       expect(existsSync(outputDir)).toBe(true);
       expect(existsSync(path.join(outputDir, "merged.safetensors"))).toBe(true);
+      const manifest = JSON.parse(readFileSync(path.join(jobsRoot, "sbv2-job-20260602000000-abcdef12", "manifest.json"), "utf8")) as {
+        state: string;
+        inputSummary: {
+          outputAssetsRetained?: boolean;
+          refresh?: { foundInModelsInfo?: boolean; outputAssetsRetained?: boolean };
+        };
+        artifactPaths: string[];
+      };
+      expect(manifest.state).toBe("failed");
+      expect(manifest.inputSummary.outputAssetsRetained).toBe(true);
+      expect(manifest.inputSummary.refresh).toMatchObject({
+        foundInModelsInfo: false,
+        outputAssetsRetained: true,
+      });
+      expect(manifest.artifactPaths).toContain(path.join(outputDir, "recipe.json"));
+      expect(manifest.artifactPaths).toContain(path.join(jobsRoot, "sbv2-job-20260602000000-abcdef12", "summary.json"));
+
+      const summary = JSON.parse(readFileSync(path.join(jobsRoot, "sbv2-job-20260602000000-abcdef12", "summary.json"), "utf8")) as {
+        state: string;
+        outputAssetsRetained?: boolean;
+        refresh?: { foundInModelsInfo?: boolean };
+        nextSteps: string[];
+      };
+      expect(summary.state).toBe("failed");
+      expect(summary.outputAssetsRetained).toBe(true);
+      expect(summary.refresh?.foundInModelsInfo).toBe(false);
+      expect(summary.nextSteps.join("\n")).toContain(outputDir);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it("records retained merge artifacts when refresh request fails", async () => {
+    const sbv2Root = createSbv2Root();
+    const jobsRoot = tempRoot("sbv2-model-merge-jobs-");
+    writeModelAssets(sbv2Root, "model-a");
+    writeModelAssets(sbv2Root, "model-b");
+    const outputDir = path.join(sbv2Root, "model_assets", "merged");
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = async () => {
+      throw new Error("server unavailable");
+    };
+
+    try {
+      await expect(
+        runModelMerge({
+          ...commonWeightOptions(sbv2Root),
+          method: "usual",
+          confirmOutputModelName: "merged",
+          jobsRoot,
+          baseUrl: "http://localhost:5000",
+          commandRunner: async (_executable, _args, options) => {
+            mkdirSync(outputDir, { recursive: true });
+            writeFileSync(path.join(outputDir, "config.json"), JSON.stringify(makeConfig("merged")));
+            writeFileSync(path.join(outputDir, "style_vectors.npy"), makeNpy([1, 2]));
+            writeFileSync(path.join(outputDir, "merged.safetensors"), makeSafetensors());
+            writeFileSync(path.join(outputDir, "recipe.json"), JSON.stringify({ method: "usual" }));
+            return { stdout: `merged in ${options.cwd}` };
+          },
+          now: () => new Date("2026-06-02T00:00:00.000Z"),
+          randomId: () => "refreshfail",
+        }),
+      ).rejects.toThrow("server unavailable");
+
+      const jobDir = path.join(jobsRoot, "sbv2-job-20260602000000-refreshf");
+      const manifest = JSON.parse(readFileSync(path.join(jobDir, "manifest.json"), "utf8")) as {
+        state: string;
+        inputSummary: {
+          outputAssetsRetained?: boolean;
+          refresh?: { baseUrl?: string; refreshed?: boolean; foundInModelsInfo?: boolean; modelsInfoCount?: number };
+        };
+        artifactPaths: string[];
+      };
+      expect(manifest.state).toBe("failed");
+      expect(manifest.inputSummary.outputAssetsRetained).toBe(true);
+      expect(manifest.inputSummary.refresh).toMatchObject({
+        baseUrl: "http://localhost:5000",
+        refreshed: false,
+        foundInModelsInfo: false,
+        modelsInfoCount: 0,
+      });
+      expect(manifest.artifactPaths).toContain(path.join(outputDir, "recipe.json"));
+      expect(manifest.artifactPaths).toContain(path.join(outputDir, "merged.safetensors"));
+
+      const summary = JSON.parse(readFileSync(path.join(jobDir, "summary.json"), "utf8")) as {
+        state: string;
+        candidate?: { modelName?: string };
+        outputAssetsRetained?: boolean;
+        refresh?: { baseUrl?: string; refreshed?: boolean; foundInModelsInfo?: boolean; modelsInfoCount?: number };
+        firstError?: string;
+      };
+      expect(summary.state).toBe("failed");
+      expect(summary.candidate?.modelName).toBe("merged");
+      expect(summary.outputAssetsRetained).toBe(true);
+      expect(summary.refresh).toMatchObject({
+        baseUrl: "http://localhost:5000",
+        refreshed: false,
+        foundInModelsInfo: false,
+        modelsInfoCount: 0,
+      });
+      expect(summary.firstError).toContain("server unavailable");
     } finally {
       globalThis.fetch = originalFetch;
     }

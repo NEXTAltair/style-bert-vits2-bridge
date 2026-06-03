@@ -304,7 +304,11 @@ sbv2-bridge models merge-run \
   --json
 ```
 
-`models merge-run` は `model-merge` job、`summary.json`、`recipe.json`、生成された `config.json` / `style_vectors.npy` / `.safetensors` を記録します。`--base-url` を渡すと SBV2 `/models/refresh` 後に `/models/info` で出力モデルが見えるか確認します。既存の出力モデル名や入力モデル名と同じ出力名は拒否し、上書きはしません。
+`models merge-run` は `model-merge` job、`summary.json`、`recipe.json`、生成された `config.json` / `style_vectors.npy` / `.safetensors` を記録します。job manifest の `inputSummary` には入力 model、選択された `.safetensors`、weight / coefficient、出力 path、recipe path、refresh 結果を入れるため、OpenClaw 側の wrapper は CLI JSON、job manifest、summary から履歴表示や通知用 payload を組み立てられます。
+
+`--base-url` を渡すと SBV2 `/models/refresh` 後に `/models/info` で出力モデルが見えるか確認します。merge artifact の生成後に refresh 確認だけが失敗した場合、job は failed になりますが、生成済みの `model_assets/<outputName>` は削除せず、manifest / summary に `outputAssetsRetained: true` と refresh 結果を記録します。既存の出力モデル名や入力モデル名と同じ出力名は拒否し、上書きはしません。
+
+この bridge は現時点では OpenClaw runtime へ制作 job event を直接 push しません。OC 側へ伝える境界は `models merge-run --json` の `pathRoles`、job manifest、`summary.json`、`job.log` です。OC 側で UI 通知、job timeline、voice list cache refresh が必要な場合は、これらの構造化結果を読む production tool / wrapper 側で扱います。
 
 複数 style の Style ベクトルマージはモデル本体マージとは別操作です。この bridge の初期モデル本体マージは SBV2 upstream と同じく `Neutral` 1件の style を生成し、複数 style の対応表作成や `style_vectors.npy` 更新は #47 の対象です。
 
