@@ -107,6 +107,73 @@ describe("sbv2-bridge CLI", () => {
     expect(stdout.output()).toContain("--slice-num-processes <n>");
   });
 
+  it("prints command-specific help for model merge plan without requiring merge args", async () => {
+    const stdout = createWriter();
+    const stderr = createWriter();
+
+    await expect(runCli(["models", "merge-plan", "--help"], { stdout: stdout.stream, stderr: stderr.stream })).resolves.toBe(
+      0,
+    );
+
+    expect(stderr.output()).toBe("");
+    expect(stdout.output()).toContain("Usage: sbv2-bridge models merge-plan [options]");
+    expect(stdout.output()).toContain("--method <name>");
+    expect(stdout.output()).toContain("--model-a <name>");
+    expect(stdout.output()).toContain("--model-b <name>");
+    expect(stdout.output()).toContain("--output-model-name <name>");
+    expect(stdout.output()).toContain("--model-c <name>");
+    expect(stdout.output()).toContain("--json");
+    expect(stdout.output()).not.toContain("datasets ingest");
+  });
+
+  it("accepts short help after a command with required args", async () => {
+    const stdout = createWriter();
+    const stderr = createWriter();
+
+    await expect(runCli(["models", "merge-plan", "-h"], { stdout: stdout.stream, stderr: stderr.stream })).resolves.toBe(
+      0,
+    );
+
+    expect(stderr.output()).toBe("");
+    expect(stdout.output()).toContain("Usage: sbv2-bridge models merge-plan [options]");
+  });
+
+  it("prints merge-run help with confirmation and refresh options", async () => {
+    const stdout = createWriter();
+    const stderr = createWriter();
+
+    await expect(runCli(["models", "merge-run", "--help"], { stdout: stdout.stream, stderr: stderr.stream })).resolves.toBe(
+      0,
+    );
+
+    expect(stderr.output()).toBe("");
+    expect(stdout.output()).toContain("Usage: sbv2-bridge models merge-run [options]");
+    expect(stdout.output()).toContain("--confirm-output-model-name <name>");
+    expect(stdout.output()).toContain("--base-url <url>");
+  });
+
+  it("reports unknown commands even when command help is requested", async () => {
+    const stdout = createWriter();
+    const stderr = createWriter();
+
+    await expect(runCli(["models", "missing", "--help"], { stdout: stdout.stream, stderr: stderr.stream })).resolves.toBe(1);
+
+    expect(stdout.output()).toBe("");
+    expect(stderr.output()).toContain("Unknown models command: missing");
+  });
+
+  it("keeps global help available", async () => {
+    const stdout = createWriter();
+    const stderr = createWriter();
+
+    await expect(runCli(["--help"], { stdout: stdout.stream, stderr: stderr.stream })).resolves.toBe(0);
+
+    expect(stderr.output()).toBe("");
+    expect(stdout.output()).toContain("Usage: sbv2-bridge <group> <command> [options]");
+    expect(stdout.output()).toContain("models merge-plan");
+    expect(stdout.output()).toContain("datasets ingest");
+  });
+
   it("starts a dummy job and reads its status as JSON", async () => {
     const jobsRoot = tempJobsRoot();
     const stdout = createWriter();

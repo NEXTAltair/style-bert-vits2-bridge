@@ -94,6 +94,7 @@ interface ParsedCommand {
   command: string;
   args: string[];
   options: CliOptions;
+  helpRequested: boolean;
 }
 
 interface Sbv2PathRoles {
@@ -211,6 +212,411 @@ Options:
   );
 }
 
+function printCommandHelp(stdout: Pick<typeof process.stdout, "write">, group: string, command: string): void {
+  const help = getCommandHelp(group, command);
+  writeLine(stdout, help);
+}
+
+function getCommandHelp(group: string, command: string): string {
+  if (group === "datasets") {
+    if (command === "ingest") {
+      return `Usage: sbv2-bridge datasets ingest [options]
+
+Copy audio into a bridge dataset workspace and write a manifest.
+
+Required:
+  --model-name <name>      SBV2 model name for the dataset.
+  --source <path>          Source audio file or directory.
+  --use-jp-extra | --no-use-jp-extra
+                            Explicit JP-Extra training choice.
+
+Options:
+  --jobs-dir <path>        Job manifest/log root.
+  --datasets-dir <path>    Dataset workspace root.
+  --sbv2-root <path>       SBV2 repository root.
+  --language <ja|en|zh>    Dataset language. Default ja.
+  --json                   Print machine-readable JSON.
+  -h, --help               Show this help.
+
+Example:
+  sbv2-bridge datasets ingest --model-name my-model --source ./wavs --language ja --use-jp-extra`;
+    }
+    if (command === "prepare") {
+      return `Usage: sbv2-bridge datasets prepare [options]
+
+Run SBV2 slice/transcribe for an ingested dataset manifest.
+
+Required:
+  --manifest <path>        Dataset manifest path.
+
+Options:
+  --jobs-dir <path>        Job manifest/log root.
+  --slice-min-sec <n>      Minimum seconds of a slice. Default 2.
+  --slice-max-sec <n>      Maximum seconds of a slice. Default 12.
+  --slice-min-silence-dur-ms <n>
+                            Silence duration in ms considered a split point. Default 700.
+  --slice-num-processes <n>
+                            SBV2 slice.py process count. Default 3.
+  --json                   Print machine-readable JSON.
+  -h, --help               Show this help.
+
+Example:
+  sbv2-bridge datasets prepare --manifest ./dataset.json --slice-min-sec 1 --slice-max-sec 10`;
+    }
+    throw new Error(`Unknown datasets command: ${command}`);
+  }
+
+  if (group === "training") {
+    if (command === "plan") {
+      return `Usage: sbv2-bridge training plan [options]
+
+Print an agent-safe SBV2 training plan without running it.
+
+Required:
+  --manifest <path>        Dataset manifest path.
+
+Options:
+  --stage <name>           Training stage. May be repeated. Defaults to all stages.
+  --batch-size <n>         Training batch size. Default 2.
+  --epochs <n>             Training epochs. Default 100.
+  --save-every-steps <n>   Checkpoint/eval interval. Default 1000.
+  --log-interval <n>       Training log interval. Default 200.
+  --num-processes <n>      Resample/style_gen process count.
+  --val-per-lang <n>       Validation rows per speaker/language field. Default 0.
+  --yomi-error <mode>      Yomi error mode: raise, skip, or use. Default skip.
+  --normalize              Normalize audio during resample.
+  --trim                   Trim leading/trailing silence during resample.
+  --skip-default-style     Pass --skip_default_style to train_ms.
+  --speedup                Pass --speedup to train_ms.
+  --not-use-custom-batch-sampler
+                            Pass --not_use_custom_batch_sampler to train_ms.
+  --json                   Print machine-readable JSON.
+  -h, --help               Show this help.
+
+Example:
+  sbv2-bridge training plan --manifest ./dataset.json --stage resample --stage train`;
+    }
+    if (command === "run") {
+      return `Usage: sbv2-bridge training run [options]
+
+Run selected SBV2 training stages and write a job.
+
+Required:
+  --manifest <path>        Dataset manifest path.
+
+Options:
+  --jobs-dir <path>        Job manifest/log root.
+  --stage <name>           Training stage. May be repeated. Defaults to all stages.
+  --batch-size <n>         Training batch size. Default 2.
+  --epochs <n>             Training epochs. Default 100.
+  --save-every-steps <n>   Checkpoint/eval interval. Default 1000.
+  --log-interval <n>       Training log interval. Default 200.
+  --num-processes <n>      Resample/style_gen process count.
+  --val-per-lang <n>       Validation rows per speaker/language field. Default 0.
+  --yomi-error <mode>      Yomi error mode: raise, skip, or use. Default skip.
+  --normalize              Normalize audio during resample.
+  --trim                   Trim leading/trailing silence during resample.
+  --skip-default-style     Pass --skip_default_style to train_ms.
+  --speedup                Pass --speedup to train_ms.
+  --not-use-custom-batch-sampler
+                            Pass --not_use_custom_batch_sampler to train_ms.
+  --json                   Print machine-readable JSON.
+  -h, --help               Show this help.
+
+Example:
+  sbv2-bridge training run --manifest ./dataset.json --stage resample --stage train`;
+    }
+    throw new Error(`Unknown training command: ${command}`);
+  }
+
+  if (group === "models") {
+    if (command === "candidates") {
+      return `Usage: sbv2-bridge models candidates [options]
+
+List promotable SBV2 model artifact candidates.
+
+Options:
+  --manifest <path>        Dataset manifest path.
+  --sbv2-root <path>       SBV2 repository root.
+  --model-name <name>      Filter by model name.
+  --source <path>          Source model artifact directory.
+  --json                   Print machine-readable JSON.
+  -h, --help               Show this help.
+
+Example:
+  sbv2-bridge models candidates --model-name my-model`;
+    }
+    if (command === "merge-plan") {
+      return `Usage: sbv2-bridge models merge-plan [options]
+
+Print an agent-safe SBV2 model merge plan without running it.
+
+Required:
+  --method <name>          Model merge method: usual, add-diff, weighted-sum, add-null.
+  --model-a <name>         Model A for model merge.
+  --model-b <name>         Model B for model merge.
+  --output-model-name <name>
+                            New model name for model merge output.
+
+Conditionally required:
+  --model-c <name>         Required for add-diff and weighted-sum.
+
+Optional file selectors:
+  --model-a-file <name>    Model A top-level safetensors filename.
+  --model-b-file <name>    Model B top-level safetensors filename.
+  --model-c-file <name>    Model C top-level safetensors filename.
+
+Weights for usual/add-diff/add-null:
+  --voice-weight <n>       Voice quality weight.
+  --voice-pitch-weight <n> Voice pitch weight.
+  --speech-style-weight <n>
+                            Speech style weight.
+  --tempo-weight <n>       Tempo weight.
+  --slerp                  Use spherical interpolation for usual merge.
+
+Coefficients for weighted-sum:
+  --model-a-coeff <n>      Model A coefficient.
+  --model-b-coeff <n>      Model B coefficient.
+  --model-c-coeff <n>      Model C coefficient.
+
+Options:
+  --sbv2-root <path>       SBV2 repository root.
+  --json                   Print machine-readable JSON.
+  -h, --help               Show this help.
+
+Example:
+  sbv2-bridge models merge-plan --method usual --model-a base --model-b donor --output-model-name merged`;
+    }
+    if (command === "merge-run") {
+      return `Usage: sbv2-bridge models merge-run [options]
+
+Run a planned SBV2 model merge and write a job.
+
+Required:
+  --method <name>          Model merge method: usual, add-diff, weighted-sum, add-null.
+  --model-a <name>         Model A for model merge.
+  --model-b <name>         Model B for model merge.
+  --output-model-name <name>
+                            New model name for model merge output.
+  --confirm-output-model-name <name>
+                            Required exact output model name confirmation.
+
+Conditionally required:
+  --model-c <name>         Required for add-diff and weighted-sum.
+
+Optional file selectors:
+  --model-a-file <name>    Model A top-level safetensors filename.
+  --model-b-file <name>    Model B top-level safetensors filename.
+  --model-c-file <name>    Model C top-level safetensors filename.
+
+Weights for usual/add-diff/add-null:
+  --voice-weight <n>       Voice quality weight.
+  --voice-pitch-weight <n> Voice pitch weight.
+  --speech-style-weight <n>
+                            Speech style weight.
+  --tempo-weight <n>       Tempo weight.
+  --slerp                  Use spherical interpolation for usual merge.
+
+Coefficients for weighted-sum:
+  --model-a-coeff <n>      Model A coefficient.
+  --model-b-coeff <n>      Model B coefficient.
+  --model-c-coeff <n>      Model C coefficient.
+
+Options:
+  --jobs-dir <path>        Job manifest/log root.
+  --sbv2-root <path>       SBV2 repository root.
+  --base-url <url>         SBV2 API base URL for refresh and /models/info checks.
+  --json                   Print machine-readable JSON.
+  -h, --help               Show this help.
+
+Example:
+  sbv2-bridge models merge-run --method usual --model-a base --model-b donor --output-model-name merged --confirm-output-model-name merged`;
+    }
+    if (command === "promote") {
+      return `Usage: sbv2-bridge models promote [options]
+
+Promote model artifacts into SBV2 model_assets.
+
+Required:
+  --confirm-model-name <name>
+                            Required exact model name confirmation.
+
+Options:
+  --jobs-dir <path>        Job manifest/log root.
+  --manifest <path>        Dataset manifest path.
+  --sbv2-root <path>       SBV2 repository root.
+  --model-name <name>      Model name.
+  --source <path>          Source model artifact directory.
+  --backup-existing        Back up an existing target before promoting.
+  --base-url <url>         SBV2 API base URL for refresh and /models/info checks.
+  --evaluation <path>      Evaluation manifest path.
+  --json                   Print machine-readable JSON.
+  -h, --help               Show this help.
+
+Example:
+  sbv2-bridge models promote --model-name my-model --confirm-model-name my-model`;
+    }
+    throw new Error(`Unknown models command: ${command}`);
+  }
+
+  if (group === "evaluation") {
+    if (command === "run") {
+      return `Usage: sbv2-bridge evaluation run [options]
+
+Generate sample WAVs and an evaluation report for a model candidate.
+
+Required:
+  --base-url <url>         SBV2 API base URL.
+
+Options:
+  --jobs-dir <path>        Job manifest/log root.
+  --manifest <path>        Dataset manifest path.
+  --sbv2-root <path>       SBV2 repository root.
+  --model-name <name>      Model name.
+  --source <path>          Source model artifact directory.
+  --test-set <path>        JSON evaluation test set.
+  --json                   Print machine-readable JSON.
+  -h, --help               Show this help.
+
+Example:
+  sbv2-bridge evaluation run --base-url http://127.0.0.1:5000 --model-name my-model`;
+    }
+    if (command === "note") {
+      return `Usage: sbv2-bridge evaluation note [options]
+
+Add or update a human listening note in an evaluation report.
+
+Required:
+  --evaluation <path>      Evaluation manifest path.
+  --case <id>              Evaluation test case id.
+  --message <text>         Listening note.
+
+Options:
+  --decision <mode>        Listening decision: adopt, hold, or reject. Default hold.
+  --json                   Print machine-readable JSON.
+  -h, --help               Show this help.
+
+Example:
+  sbv2-bridge evaluation note --evaluation ./evaluation.json --case sample-1 --decision hold --message "needs review"`;
+    }
+    if (command === "summary") {
+      return `Usage: sbv2-bridge evaluation summary [options]
+
+Print an evaluation report summary.
+
+Required:
+  --evaluation <path>      Evaluation manifest path.
+
+Options:
+  --json                   Print machine-readable JSON.
+  -h, --help               Show this help.
+
+Example:
+  sbv2-bridge evaluation summary --evaluation ./evaluation.json`;
+    }
+    throw new Error(`Unknown evaluation command: ${command}`);
+  }
+
+  if (group === "jobs") {
+    if (command === "start-dummy") {
+      return `Usage: sbv2-bridge jobs start-dummy [options]
+
+Start a synchronous dummy job and write manifest/log files.
+
+Options:
+  --jobs-dir <path>        Job manifest/log root.
+  --message <text>         Dummy job log message.
+  --fail                   Make start-dummy write a failed manifest.
+  --json                   Print machine-readable JSON.
+  -h, --help               Show this help.
+
+Example:
+  sbv2-bridge jobs start-dummy --message hello`;
+    }
+    if (command === "list") {
+      return `Usage: sbv2-bridge jobs list [options]
+
+List known jobs.
+
+Options:
+  --jobs-dir <path>        Job manifest/log root.
+  --json                   Print machine-readable JSON.
+  -h, --help               Show this help.
+
+Example:
+  sbv2-bridge jobs list`;
+    }
+    if (command === "status") {
+      return `Usage: sbv2-bridge jobs status <jobId> [options]
+
+Print a job manifest.
+
+Options:
+  --jobs-dir <path>        Job manifest/log root.
+  --json                   Print machine-readable JSON.
+  -h, --help               Show this help.
+
+Example:
+  sbv2-bridge jobs status job-123`;
+    }
+    if (command === "log") {
+      return `Usage: sbv2-bridge jobs log <jobId> [options]
+
+Print a job log.
+
+Options:
+  --jobs-dir <path>        Job manifest/log root.
+  --tail <lines>           Print the last N log lines.
+  -h, --help               Show this help.
+
+Example:
+  sbv2-bridge jobs log job-123 --tail 50`;
+    }
+    if (command === "cancel") {
+      return `Usage: sbv2-bridge jobs cancel <jobId> [options]
+
+Report whether a job can be cancelled.
+
+Options:
+  --jobs-dir <path>        Job manifest/log root.
+  --json                   Print machine-readable JSON.
+  -h, --help               Show this help.
+
+Example:
+  sbv2-bridge jobs cancel job-123`;
+    }
+    if (command === "resume") {
+      return `Usage: sbv2-bridge jobs resume <jobId> [options]
+
+Report whether a job can be resumed.
+
+Options:
+  --jobs-dir <path>        Job manifest/log root.
+  --json                   Print machine-readable JSON.
+  -h, --help               Show this help.
+
+Example:
+  sbv2-bridge jobs resume job-123`;
+    }
+    if (command === "retry") {
+      return `Usage: sbv2-bridge jobs retry <jobId> [options]
+
+Retry a retryable dummy job.
+
+Options:
+  --jobs-dir <path>        Job manifest/log root.
+  --json                   Print machine-readable JSON.
+  -h, --help               Show this help.
+
+Example:
+  sbv2-bridge jobs retry job-123`;
+    }
+    throw new Error(`Unknown jobs command: ${command}`);
+  }
+
+  throw new Error("Expected command group: jobs, datasets, training, models, or evaluation");
+}
+
 function parsePositiveInteger(value: string | undefined, name: string): number {
   const parsed = Number(value);
   if (!Number.isInteger(parsed) || parsed <= 0) {
@@ -267,6 +673,7 @@ function parseEvaluationDecision(value: string | undefined): Sbv2EvaluationDecis
 function parseArgs(argv: string[]): ParsedCommand {
   const options: CliOptions = { json: false, fail: false, sliceOptions: {}, trainingSettings: {} };
   const positional: string[] = [];
+  let helpRequested = false;
 
   for (let index = 0; index < argv.length; index += 1) {
     const arg = argv[index];
@@ -275,7 +682,7 @@ function parseArgs(argv: string[]): ParsedCommand {
     if (arg === "--") {
       continue;
     } else if (arg === "--help" || arg === "-h") {
-      positional.push("help");
+      helpRequested = true;
     } else if (arg === "--json") {
       options.json = true;
     } else if (arg === "--fail") {
@@ -441,7 +848,11 @@ function parseArgs(argv: string[]): ParsedCommand {
   }
 
   if (positional[0] === "help") {
-    return { group: "help", command: "help", args: [], options };
+    return { group: "help", command: "help", args: [], options, helpRequested };
+  }
+
+  if (positional.length === 0 && helpRequested) {
+    return { group: "help", command: "help", args: [], options, helpRequested };
   }
 
   if (
@@ -459,6 +870,7 @@ function parseArgs(argv: string[]): ParsedCommand {
     command: positional[1] ?? "help",
     args: positional.slice(2),
     options,
+    helpRequested,
   };
 }
 
@@ -580,6 +992,11 @@ export async function runCli(argv: string[], io: CliIO = {}): Promise<number> {
   try {
     const parsed = parseArgs(argv);
     const { options } = parsed;
+
+    if (parsed.helpRequested && parsed.command !== "help") {
+      printCommandHelp(stdout, parsed.group, parsed.command);
+      return 0;
+    }
 
     if (parsed.command === "help") {
       printHelp(stdout);
