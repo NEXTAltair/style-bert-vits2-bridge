@@ -872,6 +872,34 @@ describe("Style-Bert-VITS2 speech provider", () => {
     expect(result.metadata).toMatchObject({ textPreparation: "url_sanitize" });
   });
 
+  it("keeps Markdown GitHub link labels when inline links include titles", async () => {
+    const mockFetch = vi
+      .fn()
+      .mockResolvedValueOnce(openApiTextLimit(400))
+      .mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.resolve(valentinaModelsInfo),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        arrayBuffer: () => Promise.resolve(wavBytes.buffer),
+      });
+    vi.stubGlobal("fetch", mockFetch);
+
+    const provider = buildSbv2SpeechProvider();
+    const result = await provider.synthesize({
+      text: 'Please see [the PR](https://github.com/org/repo/pull/65 "hidden title") now.',
+      providerConfig: { baseUrl: "http://localhost:5000" },
+    });
+
+    const voiceUrl = new URL(mockFetch.mock.calls[2][0]);
+    const spokenText = voiceUrl.searchParams.get("text");
+    expect(spokenText).toBe("Please see the PR now.");
+    expect(spokenText).not.toContain("hidden title");
+    expect(spokenText).not.toContain("https://github.com");
+    expect(result.metadata).toMatchObject({ textPreparation: "url_sanitize" });
+  });
+
   it("keeps meaningful Markdown GitHub link labels on link-only list items", async () => {
     const mockFetch = vi
       .fn()
@@ -934,6 +962,70 @@ describe("Style-Bert-VITS2 speech provider", () => {
     expect(spokenText).not.toContain("[1]:");
     expect(spokenText).not.toContain("[pr]:");
     expect(result.metadata).toMatchObject({ textPreparation: "url_sanitize" });
+  });
+
+  it("drops Markdown reference-style GitHub link definitions with titles", async () => {
+    const mockFetch = vi
+      .fn()
+      .mockResolvedValueOnce(openApiTextLimit(400))
+      .mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.resolve(valentinaModelsInfo),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        arrayBuffer: () => Promise.resolve(wavBytes.buffer),
+      });
+    vi.stubGlobal("fetch", mockFetch);
+
+    const provider = buildSbv2SpeechProvider();
+    const result = await provider.synthesize({
+      text: [
+        "対応しました。",
+        '[1]: https://github.com/org/repo/issues/71 "fix"',
+        "[pr]: https://github.com/org/repo/pull/65 'details'",
+      ].join("\n"),
+      providerConfig: { baseUrl: "http://localhost:5000" },
+    });
+
+    const voiceUrl = new URL(mockFetch.mock.calls[2][0]);
+    const spokenText = voiceUrl.searchParams.get("text");
+    expect(spokenText).toBe("対応しました。");
+    expect(spokenText).not.toContain("[1]:");
+    expect(spokenText).not.toContain("fix");
+    expect(spokenText).not.toContain("details");
+    expect(result.metadata).toMatchObject({ textPreparation: "url_sanitize" });
+  });
+
+  it("drops Markdown heading markers left by URL-only GitHub headings", async () => {
+    const mockFetch = vi
+      .fn()
+      .mockResolvedValueOnce(openApiTextLimit(400))
+      .mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.resolve(valentinaModelsInfo),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        arrayBuffer: () => Promise.resolve(wavBytes.buffer),
+      });
+    vi.stubGlobal("fetch", mockFetch);
+
+    const provider = buildSbv2SpeechProvider();
+    const result = await provider.synthesize({
+      text: [
+        "### https://github.com/org/repo/issues/71",
+        "### [issue](https://github.com/org/repo/issues/72)",
+      ].join("\n"),
+      providerConfig: { baseUrl: "http://localhost:5000", defaultLanguage: "EN" },
+    });
+
+    const voiceUrl = new URL(mockFetch.mock.calls[2][0]);
+    const spokenText = voiceUrl.searchParams.get("text");
+    expect(spokenText).toBe("The GitHub issue was updated.");
+    expect(spokenText).not.toContain("###");
+    expect(spokenText).not.toContain("https://github.com");
+    expect(result.metadata).toMatchObject({ textPreparation: "metadata_status_rewrite" });
   });
 
   it("drops URL-only list markers from final response speech text", async () => {

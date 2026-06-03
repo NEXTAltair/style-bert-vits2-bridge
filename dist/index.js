@@ -73,7 +73,8 @@ const COMMAND_STATUS_SCRIPT_PATH = "(?:[a-z0-9:_-]+/[a-z0-9:_./-]+|[a-z0-9:_/-]*
 const COMMAND_STATUS_ARGUMENT = `(?:(?:-{1,2}[a-z][a-z0-9-]*)|(?:[a-z0-9:_./-]+\\s+-{1,2}[a-z][a-z0-9-]*)|(?:${COMMAND_STATUS_SCRIPT_PATH})|(?:(?:${COMMAND_STATUS_SUBCOMMANDS})\\b))`;
 const COMMAND_STATUS_COMMAND = `${COMMAND_STATUS_TOOLS}\\s+(?:(?:${COMMAND_STATUS_SUBCOMMANDS})\\b|(?:${COMMAND_STATUS_SCRIPT_PATH}))`;
 const GITHUB_ISSUE_OR_PR_URL = "https?:\\/\\/github\\.com\\/[^\\/\\s)>`]+\\/[^\\/\\s)>`]+\\/(issues|pull|pulls)\\/\\d+\\b(?:\\/[^?#\\s)>`]*)?(?:\\?[^#\\s)>`]*)?(?:#[^\\s)>`]+)?";
-const GITHUB_ISSUE_OR_PR_MARKDOWN_LINK = `\\[([^\\]\\n]*)\\]\\(\\s*${GITHUB_ISSUE_OR_PR_URL}\\s*\\)`;
+const MARKDOWN_LINK_TITLE = `(?:"[^"\\n]*"|'[^'\\n]*'|\\([^\\)\\n]*\\))`;
+const GITHUB_ISSUE_OR_PR_MARKDOWN_LINK = `\\[([^\\]\\n]*)\\]\\(\\s*${GITHUB_ISSUE_OR_PR_URL}(?:\\s+${MARKDOWN_LINK_TITLE})?\\s*\\)`;
 function trimToUndefined(value) {
     return typeof value === "string" && value.trim() ? value.trim() : undefined;
 }
@@ -159,6 +160,8 @@ function cleanupSpeechLineAfterUrlRemoval(value) {
         .replace(/`+\s*`+/g, "")
         .replace(/\s+([。、，,.!?！？:;])/g, "$1")
         .replace(/[ \t]{2,}/g, " ")
+        .replace(/^#{1,6}\s+/, "")
+        .replace(/^#{1,6}\s*$/, "")
         .replace(/^(?:[-*+]|\d+[.)])\s+/, "")
         .replace(/^(?:[-*+]|\d+[.)])\s*$/, "")
         .replace(/^[<>`]+$/, "")
@@ -169,7 +172,7 @@ function looksLikeGithubMetadataLabelRemainder(value) {
     return /^(?:(?:[-*+]|\d+[.)])\s*)?(?:(?:created|opened|updated|closed|reopened|merged|commented|added|posted)\s+)?(?:github\s+)?(?:issue|pr|pull request)(?:(?:\s+#?\d+)|(?:\s*[:#-]\s*#?\d+))?(?:\s+(?:created|opened|updated|closed|reopened|merged|commented|added|posted))?\s*[:#-]?\s*[、。，,.!?！？:;]*\s*$/i.test(value);
 }
 function looksLikeMarkdownReferenceDefinitionRemainder(value) {
-    return /^\[[^\]\n]+\]:\s*$/.test(value.trim());
+    return new RegExp(`^\\[[^\\]\\n]+\\]:\\s*(?:${MARKDOWN_LINK_TITLE})?\\s*$`).test(value.trim());
 }
 function sanitizeGithubUrlsFromSpeechText(value, language) {
     const githubUrlPattern = new RegExp(GITHUB_ISSUE_OR_PR_URL, "gi");
