@@ -168,17 +168,27 @@ function looksLikeMetadataStatusText(value: string): boolean {
   const text = value.trim();
   if (!text) return false;
 
-  const githubIssueOrPrUrl = /https?:\/\/github\.com\/[^\s)]+\/(?:issues|pull|pulls)\/\d+\b/i;
-  if (!githubIssueOrPrUrl.test(text)) return false;
+  const githubIssueOrPrUrl = "https?:\\/\\/github\\.com\\/[^\\s)]+\\/(?:issues|pull|pulls)\\/\\d+\\b";
+  const githubIssueOrPrUrlPattern = new RegExp(githubIssueOrPrUrl, "i");
+  if (!githubIssueOrPrUrlPattern.test(text)) return false;
+
+  const metadataVerbs = "(?:created|opened|updated|closed|reopened|merged|commented|added|posted)";
+  const metadataSubjects = "(?:(?:github\\s+)?(?:issue|pr)|pull request)";
+  const labelFirstMetadataLine = new RegExp(
+    `^(?:[-*]\\s*)?${metadataSubjects}(?:\\s+${metadataVerbs})?\\s*[:#-]\\s*${githubIssueOrPrUrl}\\s*$`,
+    "i",
+  );
+  const verbFirstMetadataLine = new RegExp(
+    `^(?:[-*]\\s*)?${metadataVerbs}\\s+${metadataSubjects}\\s*[:#-]\\s*${githubIssueOrPrUrl}\\s*$`,
+    "i",
+  );
 
   const lines = text.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
-  const hasMetadataLabel = lines.some((line) =>
-    /^(?:[-*]\s*)?(?:issue|github issue|pr|github pr|pull request)\s*[:#-]/i.test(line),
-  );
-  const hasStatusPhrase = /\b(?:issue|pr|pull request)\b[^.!?。！？\n]{0,80}\b(?:created|opened|updated|closed|reopened|merged|commented|added|posted)\b/i.test(text);
   const looksMostlyLikeMetadata = lines.length <= 3 && text.length <= 500;
 
-  return looksMostlyLikeMetadata && (hasMetadataLabel || hasStatusPhrase);
+  return looksMostlyLikeMetadata && lines.every((line) =>
+    labelFirstMetadataLine.test(line) || verbFirstMetadataLine.test(line),
+  );
 }
 
 function prepareSpeechText(value: string, language: Sbv2ResolvedVoiceProfile["language"]): PreparedSpeechText {

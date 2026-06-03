@@ -478,6 +478,60 @@ describe("Style-Bert-VITS2 speech provider", () => {
     expect(result.metadata).toMatchObject({ textPreparation: "metadata_status_rewrite" });
   });
 
+  it("rewrites verb-first GitHub issue metadata status lines", async () => {
+    const mockFetch = vi
+      .fn()
+      .mockResolvedValueOnce(openApiTextLimit(400))
+      .mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.resolve(valentinaModelsInfo),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        arrayBuffer: () => Promise.resolve(wavBytes.buffer),
+      });
+    vi.stubGlobal("fetch", mockFetch);
+
+    const provider = buildSbv2SpeechProvider();
+    const result = await provider.synthesize({
+      text: "Created issue: https://github.com/NEXTAltair/style-bert-vits2-bridge/issues/64",
+      providerConfig: { baseUrl: "http://localhost:5000", defaultLanguage: "EN" },
+    });
+
+    const voiceUrl = new URL(mockFetch.mock.calls[2][0]);
+    expect(voiceUrl.searchParams.get("text")).toBe("The GitHub issue was updated.");
+    expect(result.metadata).toMatchObject({ textPreparation: "metadata_status_rewrite" });
+  });
+
+  it("does not rewrite mixed GitHub issue metadata and user-facing prose", async () => {
+    const mockFetch = vi
+      .fn()
+      .mockResolvedValueOnce(openApiTextLimit(400))
+      .mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.resolve(valentinaModelsInfo),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        arrayBuffer: () => Promise.resolve(wavBytes.buffer),
+      });
+    vi.stubGlobal("fetch", mockFetch);
+
+    const text = [
+      "Issue: https://github.com/NEXTAltair/style-bert-vits2-bridge/issues/64",
+      "Please review the repro steps below.",
+    ].join("\n");
+    const provider = buildSbv2SpeechProvider();
+    const result = await provider.synthesize({
+      text,
+      providerConfig: { baseUrl: "http://localhost:5000", defaultLanguage: "EN" },
+    });
+
+    const voiceUrl = new URL(mockFetch.mock.calls[2][0]);
+    expect(voiceUrl.searchParams.get("text")).toBe(text);
+    expect(result.metadata).not.toHaveProperty("textPreparation");
+  });
+
   it("defers SBV2 text limit checks for long metadata that will be rewritten", async () => {
     const mockFetch = vi
       .fn()
