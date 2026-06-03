@@ -183,7 +183,9 @@ function collectGithubMarkdownReferenceIds(value) {
 function replaceGithubMarkdownReferenceUsages(value, githubReferenceIds) {
     if (!githubReferenceIds.size)
         return value;
-    return value.replace(/\[([^\]\n]+)\]\[([^\]\n]+)\]/g, (match, label, id) => githubReferenceIds.has(id.toLowerCase()) ? label.trim() : match);
+    return value
+        .replace(/\[([^\]\n]+)\]\[\]/g, (match, label) => githubReferenceIds.has(label.toLowerCase()) ? label.trim() : match)
+        .replace(/\[([^\]\n]+)\]\[([^\]\n]+)\]/g, (match, label, id) => githubReferenceIds.has(id.toLowerCase()) ? label.trim() : match);
 }
 function sanitizeGithubUrlsFromSpeechText(value, language) {
     const githubUrlPattern = new RegExp(GITHUB_ISSUE_OR_PR_URL, "gi");

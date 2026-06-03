@@ -259,9 +259,13 @@ function collectGithubMarkdownReferenceIds(value: string): Set<string> {
 
 function replaceGithubMarkdownReferenceUsages(value: string, githubReferenceIds: Set<string>): string {
   if (!githubReferenceIds.size) return value;
-  return value.replace(/\[([^\]\n]+)\]\[([^\]\n]+)\]/g, (match, label: string, id: string) =>
-    githubReferenceIds.has(id.toLowerCase()) ? label.trim() : match,
-  );
+  return value
+    .replace(/\[([^\]\n]+)\]\[\]/g, (match, label: string) =>
+      githubReferenceIds.has(label.toLowerCase()) ? label.trim() : match,
+    )
+    .replace(/\[([^\]\n]+)\]\[([^\]\n]+)\]/g, (match, label: string, id: string) =>
+      githubReferenceIds.has(id.toLowerCase()) ? label.trim() : match,
+    );
 }
 
 function sanitizeGithubUrlsFromSpeechText(

@@ -1028,6 +1028,37 @@ describe("Style-Bert-VITS2 speech provider", () => {
     expect(result.metadata).toMatchObject({ textPreparation: "url_sanitize" });
   });
 
+  it("keeps collapsed Markdown reference-style GitHub link labels in prose", async () => {
+    const mockFetch = vi
+      .fn()
+      .mockResolvedValueOnce(openApiTextLimit(400))
+      .mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.resolve(valentinaModelsInfo),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        arrayBuffer: () => Promise.resolve(wavBytes.buffer),
+      });
+    vi.stubGlobal("fetch", mockFetch);
+
+    const provider = buildSbv2SpeechProvider();
+    const result = await provider.synthesize({
+      text: [
+        "Please see [the pull request][].",
+        "[the pull request]: https://github.com/org/repo/pull/65",
+      ].join("\n"),
+      providerConfig: { baseUrl: "http://localhost:5000" },
+    });
+
+    const voiceUrl = new URL(mockFetch.mock.calls[2][0]);
+    const spokenText = voiceUrl.searchParams.get("text");
+    expect(spokenText).toBe("Please see the pull request.");
+    expect(spokenText).not.toContain("[]");
+    expect(spokenText).not.toContain("https://github.com");
+    expect(result.metadata).toMatchObject({ textPreparation: "url_sanitize" });
+  });
+
   it("drops Markdown heading markers left by URL-only GitHub headings", async () => {
     const mockFetch = vi
       .fn()
