@@ -35,6 +35,31 @@ SBV2 loadable model: <resolved assets_root>/<modelName>
 
 確認なしに、既存 dataset、model assets、checkpoint、job artifact の上書きや削除、生成音声や素材の公開・共有・外部送信を行いません。
 
+## 長めの制作処理の委譲
+
+`datasets prepare`、`training run`、`models merge-run`、`models style-merge-run`、`evaluation run` は、ユーザーが同期実行を明示しない限り OpenClaw sub-agent / background task へ委譲します。
+
+親 session では plan、ユーザー確認、起動結果だけ扱い、実行中の poll loop は持ちません。実行中の監視は OpenClaw task ledger を使います。
+
+起動直後に親へ返す ID は OpenClaw `runId` / `childSessionKey`、または plugin runtime に渡した `sessionKey` と返却された `runId` です。`sbv2-bridge jobId` は起動時に必ず存在するものとして扱わず、完了後の job manifest ID として扱います。
+
+sub-agent へ渡す情報:
+
+- operation と full command / cwd
+- 入力 manifest、model、output model name、stage、`base-url`
+- ユーザー確認済み範囲
+- overwrite しない前提
+- 外部送信禁止
+- 完了後に読むべき CLI JSON、`summary.json`、`manifest.json`、`job.log`、`artifactPaths`
+
+親へすぐ返す情報:
+
+- OpenClaw `runId`
+- `childSessionKey` または plugin runtime に渡した `sessionKey`
+- operation、実行 command / cwd、入力 / 出力名
+- `openclaw tasks show <runId|childSessionKey|sessionKey>`
+- 完了時に sub-agent が bridge `jobId` と summary を返すこと
+
 ## 実行後確認
 
 処理完了後は、コマンド成功だけで採用判断をしません。次を確認します。
@@ -64,8 +89,9 @@ recipe では model A/B、出力 model 名、`styleA` / `styleB` / `outputStyle`
 
 ## 失敗時の切り分け
 
-1. `sbv2-bridge jobs status <jobId>` と `sbv2-bridge jobs log <jobId> --tail 80`
-2. `summary.json` / `recipe.json` / job manifest の first error
-3. 入力 manifest、model assets、選択 `.safetensors`、出力名衝突
-4. `config.json`、`style2id`、`style_vectors.npy`
-5. SBV2 scripts、pretrained directory、GPU/CPU、依存関係、`base-url`
+1. bridge `jobId` があれば `sbv2-bridge jobs status <jobId>` と `sbv2-bridge jobs log <jobId> --tail 80`
+2. bridge `jobId` が無ければ OpenClaw `runId`、実行 command、cwd、stdout/stderr、入力 manifest / model path
+3. `summary.json` / `recipe.json` / job manifest の first error
+4. 入力 manifest、model assets、選択 `.safetensors`、出力名衝突
+5. `config.json`、`style2id`、`style_vectors.npy`
+6. SBV2 scripts、pretrained directory、GPU/CPU、依存関係、`base-url`
