@@ -13,6 +13,7 @@ description: Style-Bert-VITS2 の制作系 CLI 操作を始める前後の確認
 - style 素材分類と `style_gen`
 - `training run`
 - `models merge-plan` / `models merge-run`
+- `models style-merge-plan` / `models style-merge-run`
 - `evaluation run`
 - `models promote` / `models rename-*`
 
@@ -54,6 +55,12 @@ SBV2 loadable model: <resolved assets_root>/<modelName>
 - `add-null`: model B を model A へ足す方向の2モデル合成です。
 
 未指定の merge 数値は `0.5` です。処理成功は artifact 生成の成功であり、意味のあるモデルかどうかは `recipe.json`、`/models/info`、sample 音声で確認します。
+
+## Style Merge 判断
+
+`models style-merge-plan` はモデル本体ではなく、既存の出力 model directory の `style_vectors.npy` と `config.json:data.style2id` を更新する操作です。
+
+recipe では model A/B、出力 model 名、`styleA` / `styleB` / `outputStyle` の対応表を確認します。`clear`、`soft`、`bright`、`alert` などの tone ラベルは、実際に `style2id` に存在する style 名として確認できる場合だけ使います。
 
 ## 失敗時の切り分け
 
