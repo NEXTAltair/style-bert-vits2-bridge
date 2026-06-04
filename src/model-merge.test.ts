@@ -15,41 +15,82 @@ function createSbv2Root(): string {
   return sbv2Root;
 }
 
-function writeModelAssets(sbv2Root: string, modelName: string, shape = [1], styleShape = [1, 2]): void {
+function writeModelAssets(
+  sbv2Root: string,
+  modelName: string,
+  shape = [1],
+  styleVectors: number[][] = [[0, 0]],
+  style2id: Record<string, number> = { Neutral: 0 },
+): void {
   const modelDir = path.join(sbv2Root, "model_assets", modelName);
   mkdirSync(modelDir, { recursive: true });
-  writeFileSync(path.join(modelDir, "config.json"), JSON.stringify(makeConfig(modelName)));
-  writeFileSync(path.join(modelDir, "style_vectors.npy"), makeNpy(styleShape));
+  writeFileSync(path.join(modelDir, "config.json"), JSON.stringify(makeConfig(modelName, style2id)));
+  writeFileSync(path.join(modelDir, "style_vectors.npy"), makeNpy(styleVectors));
   writeFileSync(path.join(modelDir, `${modelName}.safetensors`), makeSafetensors(shape));
 }
 
-function makeConfig(modelName: string): Record<string, unknown> {
+function makeConfig(modelName: string, style2id: Record<string, number> = { Neutral: 0 }): Record<string, unknown> {
   return {
     model_name: modelName,
     model: {},
     train: {},
     data: {
       n_speakers: 1,
-      num_styles: 1,
+      num_styles: Object.keys(style2id).length,
       spk2id: { [modelName]: 0 },
-      style2id: { Neutral: 0 },
+      style2id,
     },
   };
 }
 
-function makeNpy(shape: number[]): Buffer {
-  const shapeText = shape.length === 1 ? `${shape[0]},` : shape.join(", ");
+function makeNpy(rows: number[][]): Buffer {
+  const rowCount = rows.length;
+  const width = rows[0]?.length ?? 0;
+  const shapeText = `${rowCount}, ${width}`;
   const header = `{'descr': '<f4', 'fortran_order': False, 'shape': (${shapeText}), }`;
   const magicLength = 10;
   const padding = 16 - ((magicLength + header.length + 1) % 16);
   const paddedHeader = `${header}${" ".repeat(padding)}\n`;
-  const result = Buffer.alloc(magicLength + paddedHeader.length + shape.reduce((total, value) => total * value, 1) * 4);
+  const result = Buffer.alloc(magicLength + paddedHeader.length + rowCount * width * 4);
   result.write("\x93NUMPY", 0, "latin1");
   result[6] = 1;
   result[7] = 0;
   result.writeUInt16LE(paddedHeader.length, 8);
   result.write(paddedHeader, magicLength, "latin1");
+  for (const [rowIndex, row] of rows.entries()) {
+    for (const [columnIndex, value] of row.entries()) {
+      result.writeFloatLE(value, magicLength + paddedHeader.length + (rowIndex * width + columnIndex) * 4);
+    }
+  }
   return result;
+}
+
+function readNpyValues(filePath: string): number[][] {
+  const buffer = readFileSync(filePath);
+  const headerLength = buffer.readUInt16LE(8);
+  const headerEnd = 10 + headerLength;
+  const shapeMatch = buffer.toString("latin1", 10, headerEnd).match(/'shape'\s*:\s*\(([^)]*)\)/);
+  if (!shapeMatch) throw new Error("missing shape");
+  const [rows, width] = shapeMatch[1].split(",").map((part) => Number(part.trim())).filter((value) => !Number.isNaN(value));
+  const result: number[][] = [];
+  for (let row = 0; row < rows; row += 1) {
+    const values: number[] = [];
+    for (let column = 0; column < width; column += 1) {
+      values.push(buffer.readFloatLE(headerEnd + (row * width + column) * 4));
+    }
+    result.push(values);
+  }
+  return result;
+}
+
+function writeStyleRecipe(sbv2Root: string, styles: Array<Record<string, string>>): string {
+  const recipePath = path.join(sbv2Root, "styles.json");
+  writeFileSync(recipePath, `${JSON.stringify({ schemaVersion: 1, styles }, null, 2)}\n`);
+  return recipePath;
+}
+
+function roundRows(rows: number[][]): number[][] {
+  return rows.map((row) => row.map((value) => Math.round(value * 1000) / 1000));
 }
 
 function makeSafetensors(shape = [1]): Buffer {
@@ -183,6 +224,51 @@ describe("SBV2 model merge", () => {
     expect(plan.weights).toBeUndefined();
   });
 
+  it("plans a style recipe as part of model merge", async () => {
+    const sbv2Root = createSbv2Root();
+    writeModelAssets(sbv2Root, "model-a", [1], [[0, 0], [2, 2]], { Neutral: 0, Calm: 1 });
+    writeModelAssets(sbv2Root, "model-b", [1], [[10, 10], [20, 30]], { Neutral: 0, Happy: 1 });
+    const styleRecipePath = writeStyleRecipe(sbv2Root, [
+      { styleA: "Neutral", styleB: "Neutral", outputStyle: "Neutral" },
+      { styleA: "Calm", styleB: "Happy", outputStyle: "Happy" },
+    ]);
+
+    const plan = await createModelMergePlan({
+      ...commonWeightOptions(sbv2Root),
+      method: "usual",
+      styleRecipePath,
+    });
+
+    expect(plan.styleMergeApplied).toBe(true);
+    expect(plan.styleRecipePath).toBe(styleRecipePath);
+    expect(plan.outputStyle2id).toEqual({ Neutral: 0, Happy: 1 });
+    expect(plan.styleRows).toEqual([
+      expect.objectContaining({ index: 0, styleAIndex: 0, styleBIndex: 0, outputStyle: "Neutral" }),
+      expect.objectContaining({ index: 1, styleAIndex: 1, styleBIndex: 1, outputStyle: "Happy" }),
+    ]);
+  });
+
+  it("reports method-specific style recipe incompatibility", async () => {
+    const sbv2Root = createSbv2Root();
+    writeModelAssets(sbv2Root, "model-a");
+    writeModelAssets(sbv2Root, "model-b");
+    writeModelAssets(sbv2Root, "model-c");
+    const styleRecipePath = writeStyleRecipe(sbv2Root, [{ styleA: "Neutral", styleB: "Neutral", outputStyle: "Neutral" }]);
+
+    const plan = await createModelMergePlan({
+      sbv2Root,
+      method: "weighted-sum",
+      outputModelName: "merged",
+      modelA: "model-a",
+      modelB: "model-b",
+      modelC: "model-c",
+      styleRecipePath,
+    });
+
+    expect(plan.compatibility.compatible).toBe(false);
+    expect(plan.compatibility.errors.join("\n")).toContain("requires styleC for weighted-sum");
+  });
+
   it("rejects weighted-sum part weights and non-usual slerp", async () => {
     const sbv2Root = createSbv2Root();
     await expect(
@@ -239,8 +325,8 @@ describe("SBV2 model merge", () => {
 
   it("reports incompatible tensor and style vector shapes before running", async () => {
     const sbv2Root = createSbv2Root();
-    writeModelAssets(sbv2Root, "model-a", [1], [1, 2]);
-    writeModelAssets(sbv2Root, "model-b", [2], [1, 3]);
+    writeModelAssets(sbv2Root, "model-a", [1], [[0, 0]]);
+    writeModelAssets(sbv2Root, "model-b", [2], [[0, 0, 0]]);
 
     const plan = await createModelMergePlan({ ...commonWeightOptions(sbv2Root), method: "usual" });
 
@@ -264,7 +350,7 @@ describe("SBV2 model merge", () => {
         const outputDir = path.join(options.cwd, "model_assets", "merged");
         mkdirSync(outputDir, { recursive: true });
         writeFileSync(path.join(outputDir, "config.json"), JSON.stringify(makeConfig("merged")));
-        writeFileSync(path.join(outputDir, "style_vectors.npy"), makeNpy([1, 2]));
+        writeFileSync(path.join(outputDir, "style_vectors.npy"), makeNpy([[0, 0]]));
         writeFileSync(path.join(outputDir, "merged.safetensors"), makeSafetensors());
         writeFileSync(path.join(outputDir, "recipe.json"), JSON.stringify({ method: "usual" }));
         return { stdout: "merged" };
@@ -307,6 +393,83 @@ describe("SBV2 model merge", () => {
     expect(readFileSync(path.join(result.job.outputDir, "summary.json"), "utf8")).toContain('"outputModelName": "merged"');
   });
 
+  it("applies a usual style recipe inside the model merge job", async () => {
+    const sbv2Root = createSbv2Root();
+    const jobsRoot = tempRoot("sbv2-model-merge-jobs-");
+    writeModelAssets(sbv2Root, "model-a", [1], [[0, 0], [2, 2]], { Neutral: 0, Calm: 1 });
+    writeModelAssets(sbv2Root, "model-b", [1], [[10, 10], [20, 30]], { Neutral: 0, Happy: 1 });
+    const styleRecipePath = writeStyleRecipe(sbv2Root, [
+      { styleA: "Neutral", styleB: "Neutral", outputStyle: "Neutral" },
+      { styleA: "Calm", styleB: "Happy", outputStyle: "Happy" },
+    ]);
+
+    const result = await runModelMerge({
+      ...commonWeightOptions(sbv2Root),
+      method: "usual",
+      confirmOutputModelName: "merged",
+      jobsRoot,
+      styleRecipePath,
+      commandRunner: async (_executable, _args, options) => {
+        const outputDir = path.join(options.cwd, "model_assets", "merged");
+        mkdirSync(outputDir, { recursive: true });
+        writeFileSync(path.join(outputDir, "config.json"), JSON.stringify(makeConfig("merged")));
+        writeFileSync(path.join(outputDir, "style_vectors.npy"), makeNpy([[0, 0]]));
+        writeFileSync(path.join(outputDir, "merged.safetensors"), makeSafetensors());
+        writeFileSync(path.join(outputDir, "recipe.json"), JSON.stringify({ method: "usual" }));
+        return { stdout: "merged" };
+      },
+      now: () => new Date("2026-06-02T00:00:00.000Z"),
+      randomId: () => "stylerec",
+    });
+
+    expect(result.plan.styleMergeApplied).toBe(true);
+    expect(roundRows(readNpyValues(path.join(sbv2Root, "model_assets", "merged", "style_vectors.npy")))).toEqual([
+      [3, 3],
+      [7.4, 10.4],
+    ]);
+    const config = JSON.parse(readFileSync(path.join(sbv2Root, "model_assets", "merged", "config.json"), "utf8")) as {
+      data: { num_styles: number; style2id: Record<string, number> };
+    };
+    expect(config.data.num_styles).toBe(2);
+    expect(config.data.style2id).toEqual({ Neutral: 0, Happy: 1 });
+    expect(result.job.artifactPaths).toContain(path.join(sbv2Root, "model_assets", "merged", "style-merge-recipe.json"));
+  });
+
+  it("applies weighted-sum coefficients to style vectors", async () => {
+    const sbv2Root = createSbv2Root();
+    const jobsRoot = tempRoot("sbv2-model-merge-jobs-");
+    writeModelAssets(sbv2Root, "model-a", [1], [[1, 2]], { Neutral: 0 });
+    writeModelAssets(sbv2Root, "model-b", [1], [[10, 20]], { Neutral: 0 });
+    writeModelAssets(sbv2Root, "model-c", [1], [[3, 4]], { Neutral: 0 });
+    const styleRecipePath = writeStyleRecipe(sbv2Root, [
+      { styleA: "Neutral", styleB: "Neutral", styleC: "Neutral", outputStyle: "Neutral" },
+    ]);
+
+    await runModelMerge({
+      sbv2Root,
+      method: "weighted-sum",
+      outputModelName: "merged",
+      confirmOutputModelName: "merged",
+      modelA: "model-a",
+      modelB: "model-b",
+      modelC: "model-c",
+      coefficients: { modelACoeff: 1, modelBCoeff: -1, modelCCoeff: 0.5 },
+      styleRecipePath,
+      jobsRoot,
+      commandRunner: async (_executable, _args, options) => {
+        const outputDir = path.join(options.cwd, "model_assets", "merged");
+        mkdirSync(outputDir, { recursive: true });
+        writeFileSync(path.join(outputDir, "config.json"), JSON.stringify(makeConfig("merged")));
+        writeFileSync(path.join(outputDir, "style_vectors.npy"), makeNpy([[0, 0]]));
+        writeFileSync(path.join(outputDir, "merged.safetensors"), makeSafetensors());
+        writeFileSync(path.join(outputDir, "recipe.json"), JSON.stringify({ method: "weighted_sum" }));
+        return { stdout: "merged" };
+      },
+    });
+
+    expect(roundRows(readNpyValues(path.join(sbv2Root, "model_assets", "merged", "style_vectors.npy")))).toEqual([[-7.5, -16]]);
+  });
+
   it("keeps generated merge assets when refresh verification fails", async () => {
     const sbv2Root = createSbv2Root();
     const jobsRoot = tempRoot("sbv2-model-merge-jobs-");
@@ -331,7 +494,7 @@ describe("SBV2 model merge", () => {
           commandRunner: async (_executable, _args, options) => {
             mkdirSync(outputDir, { recursive: true });
             writeFileSync(path.join(outputDir, "config.json"), JSON.stringify(makeConfig("merged")));
-            writeFileSync(path.join(outputDir, "style_vectors.npy"), makeNpy([1, 2]));
+            writeFileSync(path.join(outputDir, "style_vectors.npy"), makeNpy([[0, 0]]));
             writeFileSync(path.join(outputDir, "merged.safetensors"), makeSafetensors());
             writeFileSync(path.join(outputDir, "recipe.json"), JSON.stringify({ method: "usual" }));
             return { stdout: `merged in ${options.cwd}` };
@@ -396,7 +559,7 @@ describe("SBV2 model merge", () => {
           commandRunner: async (_executable, _args, options) => {
             mkdirSync(outputDir, { recursive: true });
             writeFileSync(path.join(outputDir, "config.json"), JSON.stringify(makeConfig("merged")));
-            writeFileSync(path.join(outputDir, "style_vectors.npy"), makeNpy([1, 2]));
+            writeFileSync(path.join(outputDir, "style_vectors.npy"), makeNpy([[0, 0]]));
             writeFileSync(path.join(outputDir, "merged.safetensors"), makeSafetensors());
             writeFileSync(path.join(outputDir, "recipe.json"), JSON.stringify({ method: "usual" }));
             return { stdout: `merged in ${options.cwd}` };

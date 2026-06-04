@@ -12,6 +12,16 @@ export interface Sbv2WeightedSumCoefficients {
     modelBCoeff: number;
     modelCCoeff: number;
 }
+export interface Sbv2ModelMergeStyleRecipeStyle {
+    styleA: string;
+    styleB: string;
+    styleC?: string;
+    outputStyle: string;
+}
+export interface Sbv2ModelMergeStyleRecipe {
+    schemaVersion: 1;
+    styles: Sbv2ModelMergeStyleRecipeStyle[];
+}
 export interface Sbv2ModelMergeInput {
     modelName: string;
     modelDir: string;
@@ -19,6 +29,7 @@ export interface Sbv2ModelMergeInput {
     configJsonPath: string;
     styleVectorsPath: string;
     speakerCount: number;
+    style2id: Record<string, number>;
     styleVectorShape: number[];
     safetensorsTensors: Record<string, {
         dtype?: string;
@@ -35,6 +46,16 @@ export interface Sbv2ModelMergeCompatibilityReport {
     errors: string[];
     warnings: string[];
 }
+export interface Sbv2ModelMergeStyleRow {
+    index: number;
+    styleA: string;
+    styleAIndex: number;
+    styleB: string;
+    styleBIndex: number;
+    styleC?: string;
+    styleCIndex?: number;
+    outputStyle: string;
+}
 export interface Sbv2ModelMergePlan {
     schemaVersion: 1;
     method: Sbv2ModelMergeMethod;
@@ -50,6 +71,10 @@ export interface Sbv2ModelMergePlan {
     };
     weights?: Sbv2ModelMergeWeights;
     coefficients?: Sbv2WeightedSumCoefficients;
+    styleRecipePath?: string;
+    styleRows?: Sbv2ModelMergeStyleRow[];
+    outputStyle2id?: Record<string, number>;
+    styleMergeApplied: boolean;
     slerp: boolean;
     compatibility: Sbv2ModelMergeCompatibilityReport;
     command: Sbv2ModelMergeCommand;
@@ -67,6 +92,7 @@ export interface ModelMergePlanOptions {
     modelCFile?: string;
     weights?: Partial<Sbv2ModelMergeWeights>;
     coefficients?: Partial<Sbv2WeightedSumCoefficients>;
+    styleRecipePath?: string;
     slerp?: boolean;
 }
 export interface ModelMergeRunOptions extends ModelMergePlanOptions {
@@ -110,6 +136,7 @@ export interface Sbv2ModelMergeInputSummary {
     configJsonPath: string;
     styleVectorsPath: string;
     speakerCount: number;
+    style2id: Record<string, number>;
     styleVectorShape: number[];
 }
 export interface Sbv2ModelMergePlanSummary {
@@ -126,6 +153,10 @@ export interface Sbv2ModelMergePlanSummary {
     };
     weights?: Sbv2ModelMergeWeights;
     coefficients?: Sbv2WeightedSumCoefficients;
+    styleRecipePath?: string;
+    styleRows?: Sbv2ModelMergeStyleRow[];
+    outputStyle2id?: Record<string, number>;
+    styleMergeApplied: boolean;
     slerp: boolean;
     compatibility: Sbv2ModelMergeCompatibilityReport;
     expectedArtifacts: string[];

@@ -211,7 +211,7 @@ agent は次の操作を自動実行しません。実行する場合は、対�
 - model artifact、評価音声、入力音声の公開、共有、外部 upload、外部送信
 - SBV2 root 外や plugin state 外へ大きな artifact を移動する操作
 
-`datasets prepare`、`training run`、`models merge-run`、`models style-merge-run`、`evaluation run` は、ユーザーが同期実行を明示しない限り OpenClaw の sub-agent / background task へ委譲します。親 session は plan、ユーザー確認、起動結果だけを扱い、実行中に `jobs status` を繰り返す poll loop は持ちません。実行中の監視は OpenClaw task ledger を使い、完了後の制作記録は bridge job manifest を使います。
+`datasets prepare`、`training run`、`models merge-run`、`evaluation run` は、ユーザーが同期実行を明示しない限り OpenClaw の sub-agent / background task へ委譲します。親 session は plan、ユーザー確認、起動結果だけを扱い、実行中に `jobs status` を繰り返す poll loop は持ちません。実行中の監視は OpenClaw task ledger を使い、完了後の制作記録は bridge job manifest を使います。
 
 起動直後に親 session へ返す ID は OpenClaw `runId` と `childSessionKey`、または plugin runtime に渡した `sessionKey` と返却された `runId` です。agent tool 経由では `sessions_spawn` の `runId` / `childSessionKey` を、plugin runtime 経由では `api.runtime.subagent.run(...)` の `runId` と呼び出し時の `sessionKey` を記録します。`sbv2-bridge jobId` は起動時に必ず存在するものとして扱わず、完了後の job manifest ID として扱います。
 
@@ -291,6 +291,32 @@ sbv2-bridge models merge-plan \
 
 対応する method は `usual`、`add-diff`、`weighted-sum`、`add-null` です。`usual` / `add-diff` / `add-null` は声質、声の高さ、話し方、テンポの4 weight を指定します。`weighted-sum` は `--model-a-coeff`、`--model-b-coeff`、`--model-c-coeff` を指定します。
 
+モデル本体と複数 style を一貫してマージしたい場合は、`--style-recipe` で style 対応表を渡します。style vector の混合比は SBV2 GUI と同じく、`usual` / `add-diff` / `add-null` では `--speech-style-weight`、`weighted-sum` では A/B/C 係数を使います。style 対応表は method や weight を持たず、実在する style 名の対応だけを持ちます。
+
+```json
+{
+  "schemaVersion": 1,
+  "styles": [
+    { "styleA": "Neutral", "styleB": "Happy", "outputStyle": "Happy" }
+  ]
+}
+```
+
+`add-diff` と `weighted-sum` では各行に `styleC` も指定します。
+
+```bash
+sbv2-bridge models merge-plan \
+  --method usual \
+  --model-a voice_a \
+  --model-b voice_b \
+  --output-model-name voice_mix \
+  --speech-style-weight 0.6 \
+  --style-recipe ./styles.json \
+  --json
+```
+
+生成時 `/voice style_weight` は、既に存在する style を音声合成時にどの強さで適用するかの値です。model merge の `--speech-style-weight` や `--style-recipe` による style vector の混合比とは別物です。感情 style の効きが弱い場合は、まず生成時 `style_weight` と sample 音声を確認し、モデルマージ比率の再作成はその後に検討します。
+
 各モデルディレクトリに `.safetensors` が1つだけある場合は自動選択します。複数ある場合は `--model-a-file model_a.safetensors` のように、モデルディレクトリ直下のファイル名を明示します。
 
 実行時は出力名の明示確認が必要です。
@@ -310,7 +336,7 @@ sbv2-bridge models merge-run \
   --json
 ```
 
-`models merge-run` は `model-merge` job、`summary.json`、`recipe.json`、生成された `config.json` / `style_vectors.npy` / `.safetensors` を記録します。job manifest の `inputSummary` には入力 model、選択された `.safetensors`、weight / coefficient、出力 path、recipe path、refresh 結果を入れるため、OpenClaw 側の wrapper は CLI JSON、job manifest、summary から履歴表示や通知用 payload を組み立てられます。
+`models merge-run` は `model-merge` job、`summary.json`、`recipe.json`、生成された `config.json` / `style_vectors.npy` / `.safetensors` を記録します。`--style-recipe` 指定時は同じ job 内で `style_vectors.npy` と `config.json:data.style2id` を更新し、`style-merge-recipe.json` も記録します。job manifest の `inputSummary` には入力 model、選択された `.safetensors`、weight / coefficient、style recipe、出力 path、recipe path、refresh 結果を入れるため、OpenClaw 側の wrapper は CLI JSON、job manifest、summary から履歴表示や通知用 payload を組み立てられます。
 
 `--base-url` を渡すと SBV2 `/models/refresh` 後に `/models/info` で出力モデルが見えるか確認します。merge artifact の生成後に refresh 確認だけが失敗した場合、job は failed になりますが、生成済みの `model_assets/<outputName>` は削除せず、manifest / summary に `outputAssetsRetained: true` と refresh 結果を記録します。既存の出力モデル名や入力モデル名と同じ出力名は拒否し、上書きはしません。
 
