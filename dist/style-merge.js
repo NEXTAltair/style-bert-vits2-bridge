@@ -28,6 +28,9 @@ export async function createStyleMergePlan(options) {
     if (!(await isDirectory(outputDir))) {
         errors.push(`output model assets directory was not found: ${outputDir}`);
     }
+    if (recipe.outputModelName === recipe.modelA || recipe.outputModelName === recipe.modelB) {
+        errors.push("outputModelName must not be the same as modelA or modelB");
+    }
     if (!(await isNonEmptyFile(path.join(outputDir, `${recipe.outputModelName}.safetensors`)))) {
         warnings.push(`output model safetensors was not found at the conventional path: ${path.join(outputDir, `${recipe.outputModelName}.safetensors`)}`);
     }
@@ -94,7 +97,7 @@ export async function createStyleMergePlan(options) {
             errors,
             warnings,
         },
-        expectedArtifacts: [outputConfigJsonPath, outputStyleVectorsPath, path.join(outputDir, "recipe.json")],
+        expectedArtifacts: [outputConfigJsonPath, outputStyleVectorsPath, styleMergeRecipePath(outputDir)],
     };
 }
 export async function runStyleMerge(options) {
@@ -108,53 +111,88 @@ export async function runStyleMerge(options) {
     const now = options.now ?? (() => new Date());
     const randomId = options.randomId ?? randomUUID;
     const logLines = [`style merge started for ${plan.outputModelName}`];
+    let refreshForFailedJob;
     const outputVectors = await buildMergedStyleVectors(plan);
     const config = await readConfig(plan.modelA.configJsonPath);
     updateConfigForOutput(config, plan.outputModelName, plan.outputStyle2id);
-    await mkdir(plan.outputDir, { recursive: true });
-    await writeNpyFloat32(plan.outputStyleVectorsPath, outputVectors, [plan.styleRows.length, plan.modelA.styleVectorShape[1]]);
-    await writeFile(plan.outputConfigJsonPath, `${JSON.stringify(config, null, 2)}\n`, "utf8");
-    await writeFile(path.join(plan.outputDir, "recipe.json"), `${JSON.stringify(buildOutputRecipe(plan), null, 2)}\n`, "utf8");
-    logLines.push(`wrote style_vectors.npy and config.json for ${plan.outputModelName}`);
-    const summary = {
+    const buildSummary = () => ({
         schemaVersion: 1,
         outputModelName: plan.outputModelName,
         outputDir: plan.outputDir,
-        recipePath: path.join(plan.outputDir, "recipe.json"),
+        recipePath: styleMergeRecipePath(plan.outputDir),
         plan,
         styleWeight: plan.styleWeight,
         outputStyle2id: plan.outputStyle2id,
+        ...(refreshForFailedJob ? { refresh: refreshForFailedJob } : {}),
         nextSteps: [
             "Run /models/refresh or rerun with --base-url to verify registration.",
             "Generate evaluation samples for each real output style before using the model.",
         ],
-    };
-    if (options.baseUrl) {
-        const client = new Sbv2Client({ baseUrl: options.baseUrl });
-        const modelsInfo = await client.refreshModels();
-        const found = modelInfoContains(modelsInfo, plan.outputModelName);
-        summary.refresh = {
-            baseUrl: options.baseUrl,
-            refreshed: true,
-            foundInModelsInfo: found,
-            modelsInfoCount: modelsInfo.length,
+    });
+    const fail = async (error) => {
+        const message = error instanceof Error ? error.message : String(error);
+        const summary = { ...buildSummary(), state: "failed", firstError: message };
+        const summaryArtifactPath = path.join(plan.outputDir, "style-merge-summary.json");
+        await writeFile(summaryArtifactPath, `${JSON.stringify(summary, null, 2)}\n`, "utf8");
+        const job = await createJobManifest({
+            jobsRoot: options.jobsRoot,
+            operation: "model-style-merge",
+            state: "failed",
+            inputSummary: buildStyleMergeInputSummary(plan, {
+                refresh: refreshForFailedJob,
+                outputAssetsRetained: true,
+            }),
+            artifactPaths: [plan.outputConfigJsonPath, plan.outputStyleVectorsPath, styleMergeRecipePath(plan.outputDir), summaryArtifactPath],
+            firstError: message,
+            retryable: false,
+            progressSummary: `Style merge failed for ${plan.outputModelName}.`,
+            logLines: [...logLines, message],
+            now,
+            randomId,
+        });
+        const jobSummaryPath = path.join(job.outputDir, "summary.json");
+        await writeFile(jobSummaryPath, `${JSON.stringify(summary, null, 2)}\n`, "utf8");
+        const updatedJob = {
+            ...job,
+            artifactPaths: [...job.artifactPaths, jobSummaryPath],
         };
-        logLines.push(`refreshed SBV2 models from ${options.baseUrl}`);
-        if (!found) {
-            throw new Error(`Style merged model "${plan.outputModelName}" was not found in /models/info after refresh`);
+        await writeFile(path.join(job.outputDir, "manifest.json"), `${JSON.stringify(updatedJob, null, 2)}\n`, "utf8");
+        throw error;
+    };
+    try {
+        await mkdir(plan.outputDir, { recursive: true });
+        await writeNpyFloat32(plan.outputStyleVectorsPath, outputVectors, [plan.styleRows.length, plan.modelA.styleVectorShape[1]]);
+        await writeFile(plan.outputConfigJsonPath, `${JSON.stringify(config, null, 2)}\n`, "utf8");
+        await writeFile(styleMergeRecipePath(plan.outputDir), `${JSON.stringify(buildOutputRecipe(plan), null, 2)}\n`, "utf8");
+        logLines.push(`wrote style_vectors.npy and config.json for ${plan.outputModelName}`);
+        if (options.baseUrl) {
+            const client = new Sbv2Client({ baseUrl: options.baseUrl });
+            const modelsInfo = await client.refreshModels();
+            const found = modelInfoContains(modelsInfo, plan.outputModelName);
+            refreshForFailedJob = {
+                baseUrl: options.baseUrl,
+                refreshed: true,
+                foundInModelsInfo: found,
+                modelsInfoCount: modelsInfo.length,
+            };
+            logLines.push(`refreshed SBV2 models from ${options.baseUrl}`);
+            if (!found) {
+                throw new Error(`Style merged model "${plan.outputModelName}" was not found in /models/info after refresh`);
+            }
         }
     }
+    catch (error) {
+        return fail(error);
+    }
+    const summary = buildSummary();
     const job = await createJobManifest({
         jobsRoot: options.jobsRoot,
         operation: "model-style-merge",
-        inputSummary: {
-            outputModelName: plan.outputModelName,
-            modelA: plan.modelA.modelName,
-            modelB: plan.modelB.modelName,
-            styleWeight: plan.styleWeight,
-            styleCount: plan.styleRows.length,
-        },
-        artifactPaths: [plan.outputConfigJsonPath, plan.outputStyleVectorsPath, path.join(plan.outputDir, "recipe.json")],
+        inputSummary: buildStyleMergeInputSummary(plan, {
+            refresh: summary.refresh,
+            outputAssetsRetained: true,
+        }),
+        artifactPaths: [plan.outputConfigJsonPath, plan.outputStyleVectorsPath, styleMergeRecipePath(plan.outputDir)],
         progressSummary: `Style merge completed for ${plan.outputModelName}.`,
         logLines: [...logLines, `style merge succeeded for ${plan.outputModelName}`],
         now,
@@ -209,6 +247,9 @@ async function inspectStyleMergeInput(assetsRoot, modelName, label) {
     if (!npy || npy.shape.length !== 2 || npy.shape[0] < 1) {
         throw new Error(`${label} style_vectors.npy must be a 2D NumPy file: ${styleVectorsPath}`);
     }
+    if (!isSupportedFloatDescriptor(npy.descr)) {
+        throw new Error(`${label} style_vectors.npy dtype must be float32 or float64: ${styleVectorsPath}`);
+    }
     if (npy.shape[0] !== numStyles) {
         throw new Error(`${label} style_vectors.npy row count ${npy.shape[0]} does not match config.json data.num_styles ${numStyles}: ${styleVectorsPath}`);
     }
@@ -241,6 +282,8 @@ function readNpyNumeric2d(buffer) {
     const header = parseNpy(buffer);
     if (!header || header.shape.length !== 2)
         throw new Error("style_vectors.npy must be a valid 2D NumPy file");
+    if (!isSupportedFloatDescriptor(header.descr))
+        throw new Error(`Unsupported NumPy dtype: ${header.descr}`);
     const count = header.shape.reduce((total, value) => total * value, 1);
     const expectedBytes = count * header.bytesPerElement;
     if (buffer.length < header.dataOffset + expectedBytes)
@@ -316,6 +359,7 @@ function updateConfigForOutput(config, outputModelName, style2id) {
     data.style2id = style2id;
     if (data.n_speakers === 1) {
         data.spk2id = { [outputModelName]: 0 };
+        data.id2spk = { "0": outputModelName };
     }
 }
 function buildOutputRecipe(plan) {
@@ -333,6 +377,21 @@ function buildOutputRecipe(plan) {
             outputStyle: row.outputStyle,
         })),
     };
+}
+function buildStyleMergeInputSummary(plan, extra) {
+    return {
+        outputModelName: plan.outputModelName,
+        outputDir: plan.outputDir,
+        modelA: plan.modelA.modelName,
+        modelB: plan.modelB.modelName,
+        styleWeight: plan.styleWeight,
+        styleCount: plan.styleRows.length,
+        outputAssetsRetained: extra.outputAssetsRetained,
+        ...(extra.refresh ? { refresh: extra.refresh } : {}),
+    };
+}
+function styleMergeRecipePath(outputDir) {
+    return path.join(outputDir, "style-merge-recipe.json");
 }
 async function readConfig(filePath) {
     const parsed = JSON.parse(await readFile(filePath, "utf8"));
@@ -367,6 +426,9 @@ function normalizeStyleWeight(value) {
         throw new Error("styleWeight must be between 0 and 1");
     }
     return number;
+}
+function isSupportedFloatDescriptor(descr) {
+    return /^[<>=|]f[48]$/.test(descr);
 }
 async function readSbv2PathConfig(sbv2Root) {
     const pathsPath = path.join(sbv2Root, "configs", "paths.yml");

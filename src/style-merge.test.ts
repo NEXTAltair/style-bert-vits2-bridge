@@ -1,8 +1,10 @@
 import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 import { createStyleMergePlan, runStyleMerge } from "./style-merge.js";
+
+const originalFetch = globalThis.fetch;
 
 function tempRoot(prefix: string): string {
   return mkdtempSync(path.join(tmpdir(), prefix));
@@ -33,6 +35,7 @@ function writeModelAssets(
         n_speakers: 1,
         num_styles: Object.keys(styles).length,
         spk2id: { [modelName]: 0 },
+        id2spk: { "0": modelName },
         style2id: styles,
       },
     })}\n`,
@@ -57,13 +60,18 @@ function writeRecipe(
 }
 
 function makeNpy(rows: number[][]): Buffer {
+  return makeNpyWithDescriptor(rows, "<f4");
+}
+
+function makeNpyWithDescriptor(rows: number[][], descriptor: string): Buffer {
   const rowCount = rows.length;
   const width = rows[0]?.length ?? 0;
-  const header = `{'descr': '<f4', 'fortran_order': False, 'shape': (${rowCount}, ${width}), }`;
+  const header = `{'descr': '${descriptor}', 'fortran_order': False, 'shape': (${rowCount}, ${width}), }`;
+  const bytesPerElement = Number(descriptor.match(/(\d+)$/)?.[1] ?? 4);
   const magicLength = 10;
   const padding = 16 - ((magicLength + header.length + 1) % 16);
   const paddedHeader = `${header}${" ".repeat(padding)}\n`;
-  const result = Buffer.alloc(magicLength + paddedHeader.length + rowCount * width * 4);
+  const result = Buffer.alloc(magicLength + paddedHeader.length + rowCount * width * bytesPerElement);
   result.write("\x93NUMPY", 0, "latin1");
   result[6] = 1;
   result[7] = 0;
@@ -71,7 +79,14 @@ function makeNpy(rows: number[][]): Buffer {
   result.write(paddedHeader, magicLength, "latin1");
   for (const [rowIndex, row] of rows.entries()) {
     for (const [columnIndex, value] of row.entries()) {
-      result.writeFloatLE(value, magicLength + paddedHeader.length + (rowIndex * width + columnIndex) * 4);
+      const offset = magicLength + paddedHeader.length + (rowIndex * width + columnIndex) * bytesPerElement;
+      if (descriptor.endsWith("8")) {
+        result.writeDoubleLE(value, offset);
+      } else if (descriptor.includes("i")) {
+        result.writeInt32LE(value, offset);
+      } else {
+        result.writeFloatLE(value, offset);
+      }
     }
   }
   return result;
@@ -106,6 +121,10 @@ function makeSafetensors(): Buffer {
 }
 
 describe("SBV2 style merge", () => {
+  afterEach(() => {
+    globalThis.fetch = originalFetch;
+  });
+
   it("plans GUI-compatible A/B style vector rows", async () => {
     const sbv2Root = createSbv2Root();
     writeModelAssets(sbv2Root, "base", { Neutral: 0, Calm: 1 }, [[0, 0], [2, 2]]);
@@ -138,6 +157,7 @@ describe("SBV2 style merge", () => {
     writeModelAssets(sbv2Root, "base", { Neutral: 0, Calm: 1 }, [[0, 0], [2, 2]]);
     writeModelAssets(sbv2Root, "donor", { Neutral: 0, Happy: 1 }, [[10, 10], [20, 30]]);
     writeModelAssets(sbv2Root, "merged", { Neutral: 0 }, [[0, 0]]);
+    writeFileSync(path.join(sbv2Root, "model_assets", "merged", "recipe.json"), "model merge recipe\n");
     const recipePath = writeRecipe(sbv2Root, {
       outputModelName: "merged",
       modelA: "base",
@@ -165,12 +185,15 @@ describe("SBV2 style merge", () => {
     ]);
     const config = JSON.parse(readFileSync(path.join(sbv2Root, "model_assets", "merged", "config.json"), "utf8")) as {
       model_name: string;
-      data: { num_styles: number; style2id: Record<string, number>; spk2id: Record<string, number> };
+      data: { num_styles: number; style2id: Record<string, number>; spk2id: Record<string, number>; id2spk: Record<string, string> };
     };
     expect(config.model_name).toBe("merged");
     expect(config.data.num_styles).toBe(2);
     expect(config.data.style2id).toEqual({ Neutral: 0, Happy: 1 });
     expect(config.data.spk2id).toEqual({ merged: 0 });
+    expect(config.data.id2spk).toEqual({ "0": "merged" });
+    expect(readFileSync(path.join(sbv2Root, "model_assets", "merged", "recipe.json"), "utf8")).toBe("model merge recipe\n");
+    expect(readFileSync(path.join(sbv2Root, "model_assets", "merged", "style-merge-recipe.json"), "utf8")).toContain('"operation": "style-merge"');
     expect(readFileSync(path.join(result.job.outputDir, "summary.json"), "utf8")).toContain('"outputModelName": "merged"');
   });
 
@@ -194,5 +217,77 @@ describe("SBV2 style merge", () => {
     expect(plan.compatibility.compatible).toBe(false);
     expect(plan.compatibility.errors.join("\n")).toContain('style "Happy" was not found in model B');
     expect(plan.compatibility.errors.join("\n")).toContain("duplicate output style name: Neutral");
+  });
+
+  it("rejects output models that alias inputs", async () => {
+    const sbv2Root = createSbv2Root();
+    writeModelAssets(sbv2Root, "base", { Neutral: 0 }, [[0, 0]]);
+    writeModelAssets(sbv2Root, "donor", { Neutral: 0 }, [[10, 10]]);
+    const recipePath = writeRecipe(sbv2Root, {
+      outputModelName: "base",
+      modelA: "base",
+      modelB: "donor",
+      styles: [{ styleA: "Neutral", styleB: "Neutral", outputStyle: "Neutral" }],
+    });
+
+    const plan = await createStyleMergePlan({ sbv2Root, recipePath });
+
+    expect(plan.compatibility.compatible).toBe(false);
+    expect(plan.compatibility.errors).toContain("outputModelName must not be the same as modelA or modelB");
+  });
+
+  it("rejects non-float style vector dtypes", async () => {
+    const sbv2Root = createSbv2Root();
+    writeModelAssets(sbv2Root, "base", { Neutral: 0 }, [[0, 0]]);
+    writeModelAssets(sbv2Root, "donor", { Neutral: 0 }, [[10, 10]]);
+    writeModelAssets(sbv2Root, "merged", { Neutral: 0 }, [[0, 0]]);
+    writeFileSync(path.join(sbv2Root, "model_assets", "base", "style_vectors.npy"), makeNpyWithDescriptor([[1, 2]], "<i4"));
+    const recipePath = writeRecipe(sbv2Root, {
+      outputModelName: "merged",
+      modelA: "base",
+      modelB: "donor",
+      styles: [{ styleA: "Neutral", styleB: "Neutral", outputStyle: "Neutral" }],
+    });
+
+    await expect(createStyleMergePlan({ sbv2Root, recipePath })).rejects.toThrow("dtype must be float32 or float64");
+  });
+
+  it("records failed jobs when refresh misses the style-merged model", async () => {
+    const sbv2Root = createSbv2Root();
+    const jobsRoot = tempRoot("sbv2-style-merge-jobs-");
+    writeModelAssets(sbv2Root, "base", { Neutral: 0 }, [[0, 0]]);
+    writeModelAssets(sbv2Root, "donor", { Neutral: 0 }, [[10, 10]]);
+    writeModelAssets(sbv2Root, "merged", { Neutral: 0 }, [[0, 0]]);
+    const recipePath = writeRecipe(sbv2Root, {
+      outputModelName: "merged",
+      modelA: "base",
+      modelB: "donor",
+      styles: [{ styleA: "Neutral", styleB: "Neutral", outputStyle: "Neutral" }],
+    });
+    globalThis.fetch = async () =>
+      new Response(JSON.stringify({ models: [{ model_name: "other" }] }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      });
+
+    await expect(
+      runStyleMerge({
+        sbv2Root,
+        jobsRoot,
+        recipePath,
+        confirmOutputModelName: "merged",
+        baseUrl: "http://localhost:5000",
+        now: () => new Date("2026-06-04T00:00:00.000Z"),
+        randomId: () => "refreshfail",
+      }),
+    ).rejects.toThrow('Style merged model "merged" was not found');
+
+    const manifest = JSON.parse(readFileSync(path.join(jobsRoot, "sbv2-job-20260604000000-refreshf", "manifest.json"), "utf8")) as {
+      state: string;
+      inputSummary: { outputAssetsRetained?: boolean; refresh?: { foundInModelsInfo?: boolean } };
+    };
+    expect(manifest.state).toBe("failed");
+    expect(manifest.inputSummary.outputAssetsRetained).toBe(true);
+    expect(manifest.inputSummary.refresh).toMatchObject({ foundInModelsInfo: false });
   });
 });
