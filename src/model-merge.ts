@@ -141,6 +141,7 @@ interface ParsedConfigSummary {
 }
 
 const MAX_SAFETENSORS_HEADER_BYTES = 100 * 1024 * 1024;
+const DEFAULT_MERGE_PARAMETER = 0.5;
 
 export function parseModelMergeMethod(value: string): Sbv2ModelMergeMethod {
   const normalized = value.replace(/_/g, "-");
@@ -178,13 +179,15 @@ export async function createModelMergePlan(options: ModelMergePlanOptions): Prom
     outputDir,
     inputModels,
   });
+  const weights = normalizeWeights(options);
+  const coefficients = normalizeCoefficients(options);
   const command = buildMergeCommand({
     sbv2Root,
     method: options.method,
     outputModelName: options.outputModelName,
     inputModels,
-    weights: normalizeWeights(options),
-    coefficients: normalizeCoefficients(options),
+    weights,
+    coefficients,
     slerp: Boolean(options.slerp),
   });
 
@@ -197,8 +200,8 @@ export async function createModelMergePlan(options: ModelMergePlanOptions): Prom
     outputDir,
     outputSafetensorsPath,
     inputModels,
-    ...(commandPayloadUsesWeights(options.method) ? { weights: normalizeWeights(options) } : {}),
-    ...(options.method === "weighted-sum" ? { coefficients: normalizeCoefficients(options) } : {}),
+    ...(weights ? { weights } : {}),
+    ...(coefficients ? { coefficients } : {}),
     slerp: options.method === "usual" ? Boolean(options.slerp) : false,
     compatibility,
     command,
@@ -638,20 +641,24 @@ function validateMethodParameters(options: ModelMergePlanOptions): void {
 function normalizeWeights(options: ModelMergePlanOptions): Sbv2ModelMergeWeights | undefined {
   if (!commandPayloadUsesWeights(options.method)) return undefined;
   return {
-    voiceWeight: requireWeight(options.weights?.voiceWeight, "--voice-weight"),
-    voicePitchWeight: requireWeight(options.weights?.voicePitchWeight, "--voice-pitch-weight"),
-    speechStyleWeight: requireWeight(options.weights?.speechStyleWeight, "--speech-style-weight"),
-    tempoWeight: requireWeight(options.weights?.tempoWeight, "--tempo-weight"),
+    voiceWeight: normalizeWeight(options.weights?.voiceWeight, "--voice-weight"),
+    voicePitchWeight: normalizeWeight(options.weights?.voicePitchWeight, "--voice-pitch-weight"),
+    speechStyleWeight: normalizeWeight(options.weights?.speechStyleWeight, "--speech-style-weight"),
+    tempoWeight: normalizeWeight(options.weights?.tempoWeight, "--tempo-weight"),
   };
 }
 
 function normalizeCoefficients(options: ModelMergePlanOptions): Sbv2WeightedSumCoefficients | undefined {
   if (options.method !== "weighted-sum") return undefined;
   return {
-    modelACoeff: requireFinite(options.coefficients?.modelACoeff, "--model-a-coeff"),
-    modelBCoeff: requireFinite(options.coefficients?.modelBCoeff, "--model-b-coeff"),
-    modelCCoeff: requireFinite(options.coefficients?.modelCCoeff, "--model-c-coeff"),
+    modelACoeff: normalizeFinite(options.coefficients?.modelACoeff, "--model-a-coeff"),
+    modelBCoeff: normalizeFinite(options.coefficients?.modelBCoeff, "--model-b-coeff"),
+    modelCCoeff: normalizeFinite(options.coefficients?.modelCCoeff, "--model-c-coeff"),
   };
+}
+
+function normalizeFinite(value: number | undefined, name: string): number {
+  return value === undefined ? DEFAULT_MERGE_PARAMETER : requireFinite(value, name);
 }
 
 function requireFinite(value: number | undefined, name: string): number {
@@ -659,8 +666,8 @@ function requireFinite(value: number | undefined, name: string): number {
   return value;
 }
 
-function requireWeight(value: number | undefined, name: string): number {
-  const number = requireFinite(value, name);
+function normalizeWeight(value: number | undefined, name: string): number {
+  const number = normalizeFinite(value, name);
   if (number < 0 || number > 1) throw new Error(`${name} must be between 0 and 1`);
   return number;
 }

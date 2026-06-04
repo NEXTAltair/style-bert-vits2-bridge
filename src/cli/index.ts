@@ -381,17 +381,17 @@ Optional file selectors:
   --model-c-file <name>    Model C top-level safetensors filename.
 
 Weights for usual/add-diff/add-null:
-  --voice-weight <n>       Voice quality weight.
-  --voice-pitch-weight <n> Voice pitch weight.
+  --voice-weight <n>       Voice quality weight. Default 0.5.
+  --voice-pitch-weight <n> Voice pitch weight. Default 0.5.
   --speech-style-weight <n>
-                            Speech style weight.
-  --tempo-weight <n>       Tempo weight.
+                            Speech style weight. Default 0.5.
+  --tempo-weight <n>       Tempo weight. Default 0.5.
   --slerp                  Use spherical interpolation for usual merge.
 
 Coefficients for weighted-sum:
-  --model-a-coeff <n>      Model A coefficient.
-  --model-b-coeff <n>      Model B coefficient.
-  --model-c-coeff <n>      Model C coefficient.
+  --model-a-coeff <n>      Model A coefficient. Default 0.5.
+  --model-b-coeff <n>      Model B coefficient. Default 0.5.
+  --model-c-coeff <n>      Model C coefficient. Default 0.5.
 
 Options:
   --sbv2-root <path>       SBV2 repository root.
@@ -424,17 +424,17 @@ Optional file selectors:
   --model-c-file <name>    Model C top-level safetensors filename.
 
 Weights for usual/add-diff/add-null:
-  --voice-weight <n>       Voice quality weight.
-  --voice-pitch-weight <n> Voice pitch weight.
+  --voice-weight <n>       Voice quality weight. Default 0.5.
+  --voice-pitch-weight <n> Voice pitch weight. Default 0.5.
   --speech-style-weight <n>
-                            Speech style weight.
-  --tempo-weight <n>       Tempo weight.
+                            Speech style weight. Default 0.5.
+  --tempo-weight <n>       Tempo weight. Default 0.5.
   --slerp                  Use spherical interpolation for usual merge.
 
 Coefficients for weighted-sum:
-  --model-a-coeff <n>      Model A coefficient.
-  --model-b-coeff <n>      Model B coefficient.
-  --model-c-coeff <n>      Model C coefficient.
+  --model-a-coeff <n>      Model A coefficient. Default 0.5.
+  --model-b-coeff <n>      Model B coefficient. Default 0.5.
+  --model-c-coeff <n>      Model C coefficient. Default 0.5.
 
 Options:
   --jobs-dir <path>        Job manifest/log root.

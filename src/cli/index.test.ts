@@ -60,6 +60,20 @@ function makeSafetensors(): Buffer {
   return result;
 }
 
+function createMergeCliRoot(modelNames: string[]): string {
+  const sbv2Root = mkdtempSync(path.join(tmpdir(), "sbv2-cli-merge-root-"));
+  mkdirSync(path.join(sbv2Root, "configs"), { recursive: true });
+  writeFileSync(path.join(sbv2Root, "configs", "paths.yml"), "assets_root: model_assets\n");
+  for (const modelName of modelNames) {
+    const modelDir = path.join(sbv2Root, "model_assets", modelName);
+    mkdirSync(modelDir, { recursive: true });
+    writeFileSync(path.join(modelDir, "config.json"), JSON.stringify(makeModelConfig(modelName)));
+    writeFileSync(path.join(modelDir, "style_vectors.npy"), makeNpy([1, 2]));
+    writeFileSync(path.join(modelDir, `${modelName}.safetensors`), makeSafetensors());
+  }
+  return sbv2Root;
+}
+
 function makeWav(samples = 3200, value = 1000): Buffer {
   const dataBytes = samples * 2;
   const buffer = Buffer.alloc(44 + dataBytes);
@@ -122,6 +136,8 @@ describe("sbv2-bridge CLI", () => {
     expect(stdout.output()).toContain("--model-b <name>");
     expect(stdout.output()).toContain("--output-model-name <name>");
     expect(stdout.output()).toContain("--model-c <name>");
+    expect(stdout.output()).toContain("Voice quality weight. Default 0.5.");
+    expect(stdout.output()).toContain("Model A coefficient. Default 0.5.");
     expect(stdout.output()).toContain("--json");
     expect(stdout.output()).not.toContain("datasets ingest");
   });
@@ -150,6 +166,8 @@ describe("sbv2-bridge CLI", () => {
     expect(stdout.output()).toContain("Usage: sbv2-bridge models merge-run [options]");
     expect(stdout.output()).toContain("--confirm-output-model-name <name>");
     expect(stdout.output()).toContain("--base-url <url>");
+    expect(stdout.output()).toContain("Tempo weight. Default 0.5.");
+    expect(stdout.output()).toContain("Model C coefficient. Default 0.5.");
   });
 
   it("prints rename help with data and confirmation options", async () => {
@@ -359,16 +377,7 @@ describe("sbv2-bridge CLI", () => {
   });
 
   it("prints a weighted-sum model merge plan as JSON", async () => {
-    const sbv2Root = mkdtempSync(path.join(tmpdir(), "sbv2-cli-merge-root-"));
-    mkdirSync(path.join(sbv2Root, "configs"), { recursive: true });
-    writeFileSync(path.join(sbv2Root, "configs", "paths.yml"), "assets_root: model_assets\n");
-    for (const modelName of ["model-a", "model-b", "model-c"]) {
-      const modelDir = path.join(sbv2Root, "model_assets", modelName);
-      mkdirSync(modelDir, { recursive: true });
-      writeFileSync(path.join(modelDir, "config.json"), JSON.stringify(makeModelConfig(modelName)));
-      writeFileSync(path.join(modelDir, "style_vectors.npy"), makeNpy([1, 2]));
-      writeFileSync(path.join(modelDir, `${modelName}.safetensors`), makeSafetensors());
-    }
+    const sbv2Root = createMergeCliRoot(["model-a", "model-b", "model-c"]);
 
     const stdout = createWriter();
     const stderr = createWriter();
@@ -405,6 +414,77 @@ describe("sbv2-bridge CLI", () => {
     const parsed = JSON.parse(stdout.output()) as { plan: { method: string; coefficients: Record<string, number> } };
     expect(parsed.plan.method).toBe("weighted-sum");
     expect(parsed.plan.coefficients).toEqual({ modelACoeff: 1, modelBCoeff: -1, modelCCoeff: 0 });
+  });
+
+  it("prints default usual merge weights as JSON when omitted", async () => {
+    const sbv2Root = createMergeCliRoot(["model-a", "model-b"]);
+    const stdout = createWriter();
+    const stderr = createWriter();
+
+    await expect(
+      runCli(
+        [
+          "models",
+          "merge-plan",
+          "--sbv2-root",
+          sbv2Root,
+          "--method",
+          "usual",
+          "--output-model-name",
+          "merged",
+          "--model-a",
+          "model-a",
+          "--model-b",
+          "model-b",
+          "--json",
+        ],
+        { stdout: stdout.stream, stderr: stderr.stream },
+      ),
+    ).resolves.toBe(0);
+    expect(stderr.output()).toBe("");
+
+    const parsed = JSON.parse(stdout.output()) as { plan: { weights: Record<string, number>; coefficients?: unknown } };
+    expect(parsed.plan.weights).toEqual({
+      voiceWeight: 0.5,
+      voicePitchWeight: 0.5,
+      speechStyleWeight: 0.5,
+      tempoWeight: 0.5,
+    });
+    expect(parsed.plan.coefficients).toBeUndefined();
+  });
+
+  it("prints default weighted-sum coefficients as JSON when omitted", async () => {
+    const sbv2Root = createMergeCliRoot(["model-a", "model-b", "model-c"]);
+    const stdout = createWriter();
+    const stderr = createWriter();
+
+    await expect(
+      runCli(
+        [
+          "models",
+          "merge-plan",
+          "--sbv2-root",
+          sbv2Root,
+          "--method",
+          "weighted-sum",
+          "--output-model-name",
+          "merged",
+          "--model-a",
+          "model-a",
+          "--model-b",
+          "model-b",
+          "--model-c",
+          "model-c",
+          "--json",
+        ],
+        { stdout: stdout.stream, stderr: stderr.stream },
+      ),
+    ).resolves.toBe(0);
+    expect(stderr.output()).toBe("");
+
+    const parsed = JSON.parse(stdout.output()) as { plan: { coefficients: Record<string, number>; weights?: unknown } };
+    expect(parsed.plan.coefficients).toEqual({ modelACoeff: 0.5, modelBCoeff: 0.5, modelCCoeff: 0.5 });
+    expect(parsed.plan.weights).toBeUndefined();
   });
 
   it("prints model merge run path roles as JSON", async () => {

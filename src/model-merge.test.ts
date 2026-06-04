@@ -107,6 +107,27 @@ describe("SBV2 model merge", () => {
     expect(plan.command.args[3]).toContain("merge_models_usual");
   });
 
+  it("defaults usual merge weights to an even 0.5 blend", async () => {
+    const sbv2Root = createSbv2Root();
+    writeModelAssets(sbv2Root, "model-a");
+    writeModelAssets(sbv2Root, "model-b");
+
+    const plan = await createModelMergePlan({
+      sbv2Root,
+      method: "usual",
+      outputModelName: "merged",
+      modelA: "model-a",
+      modelB: "model-b",
+    });
+
+    expect(plan.weights).toEqual({
+      voiceWeight: 0.5,
+      voicePitchWeight: 0.5,
+      speechStyleWeight: 0.5,
+      tempoWeight: 0.5,
+    });
+  });
+
   it("requires model C for add-diff and exposes the part weights", async () => {
     const sbv2Root = createSbv2Root();
     writeModelAssets(sbv2Root, "model-a");
@@ -140,6 +161,25 @@ describe("SBV2 model merge", () => {
     });
 
     expect(plan.coefficients).toEqual({ modelACoeff: 1, modelBCoeff: -1, modelCCoeff: 0 });
+    expect(plan.weights).toBeUndefined();
+  });
+
+  it("defaults weighted-sum coefficients to 0.5", async () => {
+    const sbv2Root = createSbv2Root();
+    writeModelAssets(sbv2Root, "model-a");
+    writeModelAssets(sbv2Root, "model-b");
+    writeModelAssets(sbv2Root, "model-c");
+
+    const plan = await createModelMergePlan({
+      sbv2Root,
+      method: "weighted-sum",
+      outputModelName: "merged",
+      modelA: "model-a",
+      modelB: "model-b",
+      modelC: "model-c",
+    });
+
+    expect(plan.coefficients).toEqual({ modelACoeff: 0.5, modelBCoeff: 0.5, modelCCoeff: 0.5 });
     expect(plan.weights).toBeUndefined();
   });
 
