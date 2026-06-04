@@ -323,6 +323,10 @@ function normalizeOverrides(overrides) {
     const { voiceId: _voiceId, voice: _voice, ...rest } = overrides ?? {};
     return { voiceId: selectedVoiceId, ...selectedVoice, ...rest };
 }
+function withoutLowLevelInferenceOverrides(overrides) {
+    const { sdpRatio: _sdpRatio, sdp_ratio: _sdpRatioSnake, noise: _noise, noisew: _noisew, noise_w: _noiseWSnake, ...safeOverrides } = overrides ?? {};
+    return safeOverrides;
+}
 function sanitizeBaseUrl(value) {
     try {
         const url = new URL(value);
@@ -357,14 +361,11 @@ function readVoiceContext(config, overrides) {
         styleWeight: asNumber(overrides?.styleWeight) ??
             asNumber(config.defaultStyleWeight) ??
             asNumber(config.styleWeight),
-        sdpRatio: asNumber(overrides?.sdpRatio) ??
-            asNumber(config.defaultSdpRatio) ??
+        sdpRatio: asNumber(config.defaultSdpRatio) ??
             asNumber(config.sdpRatio),
-        noise: asNumber(overrides?.noise) ??
-            asNumber(config.defaultNoise) ??
+        noise: asNumber(config.defaultNoise) ??
             asNumber(config.noise),
-        noisew: asNumber(overrides?.noisew) ??
-            asNumber(config.defaultNoisew) ??
+        noisew: asNumber(config.defaultNoisew) ??
             asNumber(config.noisew),
         length: asNumber(overrides?.length) ??
             asNumber(config.defaultLength) ??
@@ -443,7 +444,9 @@ export function buildSbv2SpeechProvider(options = {}) {
         },
         parseDirectiveToken: (ctx) => {
             const parsed = parseVoiceDirectiveToken(ctx);
-            return parsed ? { handled: true, overrides: { ...ctx.currentOverrides, ...parsed } } : undefined;
+            return parsed
+                ? { handled: true, overrides: { ...withoutLowLevelInferenceOverrides(ctx.currentOverrides), ...parsed } }
+                : undefined;
         },
         resolveTalkConfig: ({ baseTtsConfig, talkProviderConfig }) => ({
             ...baseTtsConfig,
@@ -466,9 +469,6 @@ export function buildSbv2SpeechProvider(options = {}) {
             const length = asNumber(params.length) ?? rateWpmToLength(params.rateWpm) ?? rateWpmToLength(params.rate_wpm) ?? rateWpmToLength(params.rate);
             const style = trimToUndefined(params.style);
             const styleWeight = asNumber(params.styleWeight) ?? asNumber(params.style_weight);
-            const sdpRatio = asNumber(params.sdpRatio) ?? asNumber(params.sdp_ratio);
-            const noise = asNumber(params.noise);
-            const noisew = asNumber(params.noisew) ?? asNumber(params.noise_w);
             const assistText = trimToUndefined(params.assistText) ?? trimToUndefined(params.assist_text);
             const assistTextWeight = asNumber(params.assistTextWeight) ?? asNumber(params.assist_text_weight);
             const language = trimToUndefined(params.language);
@@ -490,12 +490,6 @@ export function buildSbv2SpeechProvider(options = {}) {
                 overrides.style = style;
             if (styleWeight !== undefined)
                 overrides.styleWeight = styleWeight;
-            if (sdpRatio !== undefined)
-                overrides.sdpRatio = sdpRatio;
-            if (noise !== undefined)
-                overrides.noise = noise;
-            if (noisew !== undefined)
-                overrides.noisew = noisew;
             if (assistText)
                 overrides.assistText = assistText;
             if (assistTextWeight !== undefined)

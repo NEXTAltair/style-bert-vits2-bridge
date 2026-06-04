@@ -78,7 +78,7 @@ Policy mapping は次を基本とする。
 - `model`, `model_name`, `model_id` は `allowModelId` 相当。
 - `style`, `style_weight`, `speed`, `length`, `assist_text`, `assist_text_weight` は `allowVoiceSettings` 相当。
 
-低レベル knob の `sdp_ratio`, `noise`, `noisew`, `auto_split`, `split_interval` は directive からは受け付けない。必要になった場合は別 issue で whitelist、range、policy mapping を決めてから追加する。
+低レベル knob の `sdp_ratio`, `noise`, `noisew`, `auto_split`, `split_interval` は OpenClaw agent が扱う per-request override からは受け付けない。`sdp_ratio`, `noise`, `noisew` が必要な場合は operator が provider config の既定値として固定する。`auto_split` と `split_interval` は bridge provider config では扱わない。agent surface に必要になった場合は別 issue で whitelist、range、policy mapping を決めてから追加する。
 
 ## Rationale
 

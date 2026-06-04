@@ -61,7 +61,7 @@ describe("resolveVoiceProfile", () => {
     });
   });
 
-  it("lets per-request overrides beat provider config defaults", async () => {
+  it("lets per-request overrides beat provider config defaults except low-level inference knobs", async () => {
     await expect(
       resolveVoiceProfile({
         client: client(),
@@ -69,6 +69,9 @@ describe("resolveVoiceProfile", () => {
           defaultModelName: "custom-model",
           defaultSpeakerName: "custom-speaker",
           defaultStyle: "Neutral",
+          defaultSdpRatio: 0.15,
+          defaultNoise: 0.45,
+          defaultNoisew: 0.55,
         },
         providerOverrides: {
           modelName: "valentina01_bright",
@@ -86,9 +89,9 @@ describe("resolveVoiceProfile", () => {
       speakerName: "valentina01_bright",
       style: "00_Neutral",
       styleWeight: 0.7,
-      sdpRatio: 0.1,
-      noise: 0.35,
-      noisew: 0.45,
+      sdpRatio: 0.15,
+      noise: 0.45,
+      noisew: 0.55,
       assistText: "bright",
     });
   });
@@ -317,7 +320,7 @@ describe("voice resolver helpers", () => {
         value: "0.45",
         policy: { allowVoiceSettings: true },
       }),
-    ).toEqual({ noise: 0.45 });
+    ).toBeUndefined();
 
     expect(
       parseVoiceDirectiveToken({

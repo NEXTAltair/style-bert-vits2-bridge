@@ -69,9 +69,6 @@ function readOverrides(overrides) {
         speakerId: asNumber(overrides.speakerId),
         style: trimToUndefined(overrides.style),
         styleWeight: asNumber(overrides.styleWeight),
-        sdpRatio: asNumber(overrides.sdpRatio),
-        noise: asNumber(overrides.noise),
-        noisew: asNumber(overrides.noisew),
         length: asNumber(overrides.length) ?? speedToLength(overrides.speed),
         language: asLanguage(overrides.language),
         assistText: trimToUndefined(overrides.assistText),
@@ -231,13 +228,6 @@ export function parseVoiceDirectiveToken(ctx) {
             return allowVoiceSettings ? { style: value } : undefined;
         case "style_weight":
             return allowVoiceSettings ? { styleWeight: asNumber(value) } : undefined;
-        case "sdp_ratio":
-            return allowVoiceSettings ? { sdpRatio: asNumber(value) } : undefined;
-        case "noise":
-            return allowVoiceSettings ? { noise: asNumber(value) } : undefined;
-        case "noisew":
-        case "noise_w":
-            return allowVoiceSettings ? { noisew: asNumber(value) } : undefined;
         case "length":
             return allowVoiceSettings ? { length: asNumber(value) } : undefined;
         case "speed":
