@@ -160,8 +160,8 @@ export async function createStyleMergePlan(options: StyleMergePlanOptions): Prom
       errors.push(`duplicate output style name: ${outputStyle}`);
       continue;
     }
-    const styleAIndex = modelA.style2id[style.styleA];
-    const styleBIndex = modelB.style2id[style.styleB];
+    const styleAIndex = readStyleIndex(modelA.style2id, style.styleA);
+    const styleBIndex = readStyleIndex(modelB.style2id, style.styleB);
     if (styleAIndex === undefined) {
       errors.push(`style "${style.styleA}" was not found in model A (${modelA.modelName})`);
     }
@@ -333,6 +333,9 @@ function parseStyleMergeRecipe(value: unknown): Sbv2StyleMergeRecipe {
   if (!Array.isArray(value.styles) || value.styles.length === 0) {
     throw new Error("style merge recipe styles must be a non-empty array");
   }
+  if (Object.prototype.hasOwnProperty.call(value, "styleWeight") && typeof value.styleWeight !== "number") {
+    throw new Error("style merge recipe styleWeight must be a number when provided");
+  }
   return {
     schemaVersion: 1,
     outputModelName: value.outputModelName,
@@ -362,12 +365,16 @@ async function inspectStyleMergeInput(assetsRoot: string, modelName: string, lab
   if (!isZeroBasedPermutation(Object.values(style2id), numStyles)) {
     throw new Error(`${label} config.json data.style2id values must be a zero-based permutation: ${configJsonPath}`);
   }
-  const npy = parseNpy(await readFile(styleVectorsPath));
+  const styleVectorsBuffer = await readFile(styleVectorsPath);
+  const npy = parseNpy(styleVectorsBuffer);
   if (!npy || npy.shape.length !== 2 || npy.shape[0] < 1) {
     throw new Error(`${label} style_vectors.npy must be a 2D NumPy file: ${styleVectorsPath}`);
   }
   if (!isSupportedFloatDescriptor(npy.descr)) {
     throw new Error(`${label} style_vectors.npy dtype must be float32 or float64: ${styleVectorsPath}`);
+  }
+  if (bufferDataIsTruncated(styleVectorsBuffer, npy)) {
+    throw new Error(`${label} style_vectors.npy data is truncated: ${styleVectorsPath}`);
   }
   if (npy.shape[0] !== numStyles) {
     throw new Error(`${label} style_vectors.npy row count ${npy.shape[0]} does not match config.json data.num_styles ${numStyles}: ${styleVectorsPath}`);
@@ -418,6 +425,15 @@ function readNpyNumeric2d(buffer: Buffer): { shape: number[]; values: Float32Arr
     }
   }
   return { shape: header.shape, values };
+}
+
+function readStyleIndex(style2id: Record<string, number>, styleName: string): number | undefined {
+  return Object.prototype.hasOwnProperty.call(style2id, styleName) ? style2id[styleName] : undefined;
+}
+
+function bufferDataIsTruncated(buffer: Buffer, header: ParsedNpy): boolean {
+  const expectedBytes = header.shape.reduce((total, value) => total * value, 1) * header.bytesPerElement;
+  return buffer.length < header.dataOffset + expectedBytes;
 }
 
 function parseNpy(buffer: Buffer): ParsedNpy | undefined {

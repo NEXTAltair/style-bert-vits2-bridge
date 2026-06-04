@@ -226,6 +226,45 @@ describe("SBV2 style merge", () => {
     expect(plan.compatibility.errors.join("\n")).toContain("duplicate output style name: Neutral");
   });
 
+  it("treats prototype property names as missing styles", async () => {
+    const sbv2Root = createSbv2Root();
+    writeModelAssets(sbv2Root, "base", { Neutral: 0 }, [[0, 0]]);
+    writeModelAssets(sbv2Root, "donor", { Neutral: 0 }, [[10, 10]]);
+    writeModelAssets(sbv2Root, "merged", { Neutral: 0 }, [[0, 0]]);
+    const recipePath = writeRecipe(sbv2Root, {
+      outputModelName: "merged",
+      modelA: "base",
+      modelB: "donor",
+      styles: [{ styleA: "toString", styleB: "Neutral", outputStyle: "Neutral" }],
+    });
+
+    const plan = await createStyleMergePlan({ sbv2Root, recipePath });
+
+    expect(plan.compatibility.compatible).toBe(false);
+    expect(plan.compatibility.errors.join("\n")).toContain('style "toString" was not found in model A');
+  });
+
+  it("rejects non-numeric styleWeight recipe values", async () => {
+    const sbv2Root = createSbv2Root();
+    writeModelAssets(sbv2Root, "base", { Neutral: 0 }, [[0, 0]]);
+    writeModelAssets(sbv2Root, "donor", { Neutral: 0 }, [[10, 10]]);
+    writeModelAssets(sbv2Root, "merged", { Neutral: 0 }, [[0, 0]]);
+    const recipePath = path.join(sbv2Root, "style-merge.json");
+    writeFileSync(
+      recipePath,
+      `${JSON.stringify({
+        schemaVersion: 1,
+        outputModelName: "merged",
+        modelA: "base",
+        modelB: "donor",
+        styleWeight: "0.8",
+        styles: [{ styleA: "Neutral", styleB: "Neutral", outputStyle: "Neutral" }],
+      })}\n`,
+    );
+
+    await expect(createStyleMergePlan({ sbv2Root, recipePath })).rejects.toThrow("styleWeight must be a number");
+  });
+
   it("rejects output models that alias inputs", async () => {
     const sbv2Root = createSbv2Root();
     writeModelAssets(sbv2Root, "base", { Neutral: 0 }, [[0, 0]]);
@@ -257,6 +296,23 @@ describe("SBV2 style merge", () => {
     });
 
     await expect(createStyleMergePlan({ sbv2Root, recipePath })).rejects.toThrow("dtype must be float32 or float64");
+  });
+
+  it("rejects truncated style vector payloads while planning", async () => {
+    const sbv2Root = createSbv2Root();
+    writeModelAssets(sbv2Root, "base", { Neutral: 0 }, [[0, 0]]);
+    writeModelAssets(sbv2Root, "donor", { Neutral: 0 }, [[10, 10]]);
+    writeModelAssets(sbv2Root, "merged", { Neutral: 0 }, [[0, 0]]);
+    const complete = makeNpy([[1, 2]]);
+    writeFileSync(path.join(sbv2Root, "model_assets", "base", "style_vectors.npy"), complete.subarray(0, complete.length - 4));
+    const recipePath = writeRecipe(sbv2Root, {
+      outputModelName: "merged",
+      modelA: "base",
+      modelB: "donor",
+      styles: [{ styleA: "Neutral", styleB: "Neutral", outputStyle: "Neutral" }],
+    });
+
+    await expect(createStyleMergePlan({ sbv2Root, recipePath })).rejects.toThrow("style_vectors.npy data is truncated");
   });
 
   it("rejects native-endian style vector descriptors instead of guessing host endian", async () => {
