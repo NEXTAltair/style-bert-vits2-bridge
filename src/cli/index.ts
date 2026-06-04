@@ -33,7 +33,6 @@ import {
   summarizeModelMergeRun,
   type Sbv2ModelMergeMethod,
 } from "../model-merge.js";
-import { createStyleMergePlan, runStyleMerge } from "../style-merge.js";
 import { createModelRenamePlan, runModelRename } from "../model-rename.js";
 import {
   cancelJob,
@@ -68,7 +67,7 @@ interface CliOptions {
   language?: Sbv2DatasetLanguage;
   useJpExtra?: boolean;
   manifestPath?: string;
-  recipePath?: string;
+  styleRecipePath?: string;
   testSetPath?: string;
   evaluationPath?: string;
   caseId?: string;
@@ -144,9 +143,6 @@ Commands:
   models candidates      List promotable SBV2 model artifact candidates.
   models merge-plan      Print an agent-safe SBV2 model merge plan without running it.
   models merge-run       Run a planned SBV2 model merge and write a job.
-  models style-merge-plan
-                          Print an SBV2 style vector merge plan without changing files.
-  models style-merge-run Run an SBV2 style vector merge and write a job.
   models rename-plan     Print a safe SBV2 model rename plan without changing files.
   models rename-run      Rename an SBV2 model directory and write a job.
   models promote         Promote model artifacts into SBV2 model_assets.
@@ -172,7 +168,7 @@ Options:
   --source <path>          Source audio file or directory for dataset ingest.
                             For models promote, source model artifact directory.
   --manifest <path>        Dataset manifest path for datasets prepare/training.
-  --recipe <path>          Style merge recipe JSON path.
+  --style-recipe <path>    Optional style mapping JSON for model merge.
   --slice-min-sec <n>      Minimum seconds of a slice for datasets prepare. Default 2.
   --slice-max-sec <n>      Maximum seconds of a slice for datasets prepare. Default 12.
   --slice-min-silence-dur-ms <n>
@@ -400,6 +396,11 @@ Optional file selectors:
   --model-b-file <name>    Model B top-level safetensors filename.
   --model-c-file <name>    Model C top-level safetensors filename.
 
+Optional style mapping:
+  --style-recipe <path>    JSON style mapping applied after model file merge.
+                            Uses --speech-style-weight for usual/add-diff/add-null,
+                            or A/B/C coefficients for weighted-sum.
+
 Weights for usual/add-diff/add-null:
   --voice-weight <n>       Voice quality weight for the B contribution, or B-C diff in add-diff. Default 0.5.
   --voice-pitch-weight <n> Pitch weight for the B contribution, or B-C diff in add-diff. Default 0.5.
@@ -422,7 +423,7 @@ Options:
 
 Examples:
   Smoke:      sbv2-bridge models merge-plan --method usual --model-a base --model-b donor --output-model-name smoke_mix --json
-  Experiment: sbv2-bridge models merge-plan --method usual --model-a base --model-b donor --output-model-name soft_mix --voice-weight 0.35 --voice-pitch-weight 0.5 --speech-style-weight 0.65 --tempo-weight 0.5 --json
+  Experiment: sbv2-bridge models merge-plan --method usual --model-a base --model-b donor --output-model-name soft_mix --voice-weight 0.35 --voice-pitch-weight 0.5 --speech-style-weight 0.65 --tempo-weight 0.5 --style-recipe ./styles.json --json
   Candidate:  sbv2-bridge models merge-plan --method weighted-sum --model-a base --model-b donor --model-c reference --output-model-name candidate_mix --model-a-coeff 0.5 --model-b-coeff 0.5 --model-c-coeff 0.0 --json`;
     }
     if (command === "merge-run") {
@@ -457,6 +458,11 @@ Optional file selectors:
   --model-b-file <name>    Model B top-level safetensors filename.
   --model-c-file <name>    Model C top-level safetensors filename.
 
+Optional style mapping:
+  --style-recipe <path>    JSON style mapping applied after model file merge.
+                            Uses --speech-style-weight for usual/add-diff/add-null,
+                            or A/B/C coefficients for weighted-sum.
+
 Weights for usual/add-diff/add-null:
   --voice-weight <n>       Voice quality weight for the B contribution, or B-C diff in add-diff. Default 0.5.
   --voice-pitch-weight <n> Pitch weight for the B contribution, or B-C diff in add-diff. Default 0.5.
@@ -481,61 +487,8 @@ Options:
 
 Examples:
   Smoke:      sbv2-bridge models merge-run --method usual --model-a base --model-b donor --output-model-name smoke_mix --confirm-output-model-name smoke_mix --json
-  Experiment: sbv2-bridge models merge-run --method usual --model-a base --model-b donor --output-model-name soft_mix --confirm-output-model-name soft_mix --voice-weight 0.35 --voice-pitch-weight 0.5 --speech-style-weight 0.65 --tempo-weight 0.5 --json
+  Experiment: sbv2-bridge models merge-run --method usual --model-a base --model-b donor --output-model-name soft_mix --confirm-output-model-name soft_mix --voice-weight 0.35 --voice-pitch-weight 0.5 --speech-style-weight 0.65 --tempo-weight 0.5 --style-recipe ./styles.json --json
   Candidate:  sbv2-bridge models merge-run --method weighted-sum --model-a base --model-b donor --model-c reference --output-model-name candidate_mix --confirm-output-model-name candidate_mix --model-a-coeff 0.5 --model-b-coeff 0.5 --model-c-coeff 0.0 --base-url http://127.0.0.1:5000 --json`;
-    }
-    if (command === "style-merge-plan") {
-      return `Usage: sbv2-bridge models style-merge-plan [options]
-
-Print an SBV2 style vector merge plan without changing files.
-
-Style merge is separate from model file merge. It updates style_vectors.npy and
-config.json style2id for an existing output model directory created by model merge.
-
-Required:
-  --recipe <path>          Style merge recipe JSON.
-
-Recipe shape:
-  {
-    "schemaVersion": 1,
-    "outputModelName": "merged_model",
-    "modelA": "base",
-    "modelB": "donor",
-    "styles": [
-      { "styleA": "Neutral", "styleB": "Happy", "outputStyle": "Happy" }
-    ]
-  }
-
-Options:
-  --sbv2-root <path>       SBV2 repository root.
-  --json                   Print machine-readable JSON.
-  -h, --help               Show this help.
-
-Example:
-  sbv2-bridge models style-merge-plan --recipe ./style-merge.json --json`;
-    }
-    if (command === "style-merge-run") {
-      return `Usage: sbv2-bridge models style-merge-run [options]
-
-Run an SBV2 style vector merge and write a job.
-
-Style merge does not modify .safetensors. It writes style_vectors.npy and
-config.json style2id for an existing output model directory.
-
-Required:
-  --recipe <path>          Style merge recipe JSON.
-  --confirm-output-model-name <name>
-                            Required exact output model name confirmation.
-
-Options:
-  --jobs-dir <path>        Job manifest/log root.
-  --sbv2-root <path>       SBV2 repository root.
-  --base-url <url>         SBV2 API base URL for refresh and /models/info checks.
-  --json                   Print machine-readable JSON.
-  -h, --help               Show this help.
-
-Example:
-  sbv2-bridge models style-merge-run --recipe ./style-merge.json --confirm-output-model-name merged_model --json`;
     }
     if (command === "promote") {
       return `Usage: sbv2-bridge models promote [options]
@@ -931,8 +884,8 @@ function parseArgs(argv: string[]): ParsedCommand {
     } else if (arg === "--manifest" && next) {
       options.manifestPath = next;
       index += 1;
-    } else if (arg === "--recipe" && next) {
-      options.recipePath = next;
+    } else if (arg === "--style-recipe" && next) {
+      options.styleRecipePath = next;
       index += 1;
     } else if (arg === "--slice-min-sec" && next) {
       options.sliceOptions.minSec = parsePositiveFiniteNumber(next, "--slice-min-sec");
@@ -1097,6 +1050,7 @@ function buildModelMergeOptions(options: CliOptions) {
       modelBCoeff: options.modelBCoeff,
       modelCCoeff: options.modelCCoeff,
     },
+    styleRecipePath: options.styleRecipePath,
     slerp: options.slerp,
   };
 }
@@ -1170,27 +1124,6 @@ function modelMergePlanPathRoles(plan: { outputDir: string }): Sbv2PathRoles {
   return {
     sbv2LoadableModel: plan.outputDir,
     recipe: path.join(plan.outputDir, "recipe.json"),
-  };
-}
-
-function styleMergePlanPathRoles(plan: { outputDir: string; outputConfigJsonPath: string }): Sbv2PathRoles {
-  return {
-    sbv2LoadableModel: plan.outputDir,
-    summary: plan.outputConfigJsonPath,
-  };
-}
-
-function styleMergePathRoles(result: {
-  plan: { outputDir: string };
-  job: Sbv2JobManifest;
-  summary: { recipePath: string };
-}): Sbv2PathRoles {
-  return {
-    bridgeState: result.job.outputDir,
-    sbv2LoadableModel: result.plan.outputDir,
-    recipe: result.summary.recipePath,
-    summary: path.join(result.job.outputDir, "summary.json"),
-    jobLog: result.job.logPath,
   };
 }
 
@@ -1429,51 +1362,6 @@ export async function runCli(argv: string[], io: CliIO = {}): Promise<number> {
           writeLine(stdout, `summary: ${result.job.outputDir}/summary.json`);
           writeLine(stdout, `job: ${result.job.jobId}`);
           writeLine(stdout, `log: ${result.job.logPath}`);
-        }
-        return 0;
-      }
-      if (parsed.command === "style-merge-plan") {
-        const result = await createStyleMergePlan({
-          sbv2Root: options.sbv2Root,
-          recipePath: requireString(options.recipePath, "--recipe"),
-        });
-        const pathRoles = styleMergePlanPathRoles(result);
-        if (options.json) {
-          printJson(stdout, { ok: true, plan: result, pathRoles });
-        } else {
-          writeLine(stdout, `style merge plan ${result.outputModelName}`);
-          writeLine(stdout, `model A: ${result.modelA.modelName}`);
-          writeLine(stdout, `model B: ${result.modelB.modelName}`);
-          writeLine(stdout, `output: ${result.outputDir}`);
-          writeLine(stdout, `styles: ${result.styleRows.length}`);
-          writeLine(stdout, `compatible: ${result.compatibility.compatible ? "yes" : "no"}`);
-          for (const row of result.styleRows) writeLine(stdout, `style: ${row.styleA} + ${row.styleB} -> ${row.outputStyle}`);
-          for (const warning of result.compatibility.warnings) writeLine(stdout, `warning: ${warning}`);
-          for (const error of result.compatibility.errors) writeLine(stdout, `error: ${error}`);
-        }
-        return result.compatibility.compatible ? 0 : 1;
-      }
-      if (parsed.command === "style-merge-run") {
-        const result = await runStyleMerge({
-          sbv2Root: options.sbv2Root,
-          jobsRoot: options.jobsRoot,
-          recipePath: requireString(options.recipePath, "--recipe"),
-          confirmOutputModelName: requireString(options.confirmOutputModelName, "--confirm-output-model-name"),
-          baseUrl: options.baseUrl,
-        });
-        const pathRoles = styleMergePathRoles(result);
-        if (options.json) {
-          printJson(stdout, { ok: true, plan: result.plan, summary: result.summary, job: result.job, pathRoles });
-        } else {
-          writeLine(stdout, `style merged ${result.summary.outputModelName}`);
-          writeLine(stdout, `output: ${result.summary.outputDir}`);
-          writeLine(stdout, `styles: ${Object.keys(result.summary.outputStyle2id).length}`);
-          if (result.summary.refresh) {
-            writeLine(stdout, `refresh: ${result.summary.refresh.foundInModelsInfo ? "found" : "missing"}`);
-          }
-          writeLine(stdout, `summary: ${result.job.outputDir}/summary.json`);
-          writeLine(stdout, `job: ${result.job.jobId}`);
-          writeLine(stdout, `job log: ${result.job.logPath}`);
         }
         return 0;
       }

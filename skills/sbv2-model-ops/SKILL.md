@@ -13,7 +13,6 @@ description: Style-Bert-VITS2 の制作系 CLI 操作を始める前後の確認
 - style 素材分類と `style_gen`
 - `training run`
 - `models merge-plan` / `models merge-run`
-- `models style-merge-plan` / `models style-merge-run`
 - `evaluation run`
 - `models promote` / `models rename-*`
 
@@ -37,7 +36,7 @@ SBV2 loadable model: <resolved assets_root>/<modelName>
 
 ## 長めの制作処理の委譲
 
-`datasets prepare`、`training run`、`models merge-run`、`models style-merge-run`、`evaluation run` は、ユーザーが同期実行を明示しない限り OpenClaw sub-agent / background task へ委譲します。
+`datasets prepare`、`training run`、`models merge-run`、`evaluation run` は、ユーザーが同期実行を明示しない限り OpenClaw sub-agent / background task へ委譲します。
 
 親 session では plan、ユーザー確認、起動結果だけ扱い、実行中の poll loop は持ちません。実行中の監視は OpenClaw task ledger を使います。
 
@@ -72,7 +71,7 @@ sub-agent へ渡す情報:
 
 ## Merge 判断
 
-`models merge-plan` で入力 model、選択 `.safetensors`、出力名、互換性、weight / coefficient を先に確認します。
+`models merge-plan` で入力 model、選択 `.safetensors`、出力名、互換性、weight / coefficient、必要なら `--style-recipe` を先に確認します。
 
 - `usual`: 2モデルの通常ブレンド。声質、pitch、style、tempo の各 weight を調整します。
 - `add-diff`: model B と model C の差分を model A に適用します。
@@ -83,9 +82,22 @@ sub-agent へ渡す情報:
 
 ## Style Merge 判断
 
-`models style-merge-plan` はモデル本体ではなく、既存の出力 model directory の `style_vectors.npy` と `config.json:data.style2id` を更新する操作です。
+独立した `models style-merge-*` は使いません。複数 style を持つ派生モデルを作る時は、`models merge-plan/run --style-recipe <path>` を使い、モデル本体と `style_vectors.npy` / `config.json:data.style2id` を同じ merge operation の中で一貫して作ります。
 
-recipe では model A/B、出力 model 名、`styleA` / `styleB` / `outputStyle` の対応表を確認します。`clear`、`soft`、`bright`、`alert` などの tone ラベルは、実際に `style2id` に存在する style 名として確認できる場合だけ使います。
+`--style-recipe` は style 対応表だけを持ちます。method、model A/B/C、weight / coefficient は `models merge-*` の引数を正とします。
+
+```json
+{
+  "schemaVersion": 1,
+  "styles": [
+    { "styleA": "Neutral", "styleB": "Happy", "outputStyle": "Happy" }
+  ]
+}
+```
+
+`usual` / `add-null` では `styleA` / `styleB` / `outputStyle`、`add-diff` / `weighted-sum` では `styleA` / `styleB` / `styleC` / `outputStyle` を使います。style vector の混合比は、`usual` / `add-diff` / `add-null` では `--speech-style-weight`、`weighted-sum` では A/B/C 係数です。
+
+`clear`、`soft`、`bright`、`alert` などの tone ラベルは、実際に `style2id` に存在する style 名として確認できる場合だけ使います。感情 style の効きが弱い時に最初に調整するのは生成時 `/voice style_weight` です。model merge の `--speech-style-weight` はモデルと style vector を作り直す時の混合比であり、既存 style の再生時の強さではありません。
 
 ## 失敗時の切り分け
 

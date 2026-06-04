@@ -37,6 +37,8 @@ SBV2 は `model_assets/` 内のディレクトリ名でモデルを指定しま�
 
 スタイルは「どの声が良いか」を決める項目ではありません。選択済みの model / speaker を保ったまま、明るい、落ち着いた、注意喚起などの表情を切り替える項目です。
 
+`style_weight` は音声生成時に既存 style をどの強さで使うかの値です。`models merge-*` の `--speech-style-weight` や `--style-recipe` による style vector の混合比とは別物です。感情 style の効きが弱い時は、まず生成時 `style_weight` と sample 音声を確認し、モデルマージ比率を変えて作り直す判断はその後に行います。
+
 ### style の実体
 
 SBV2 の style は `style_vectors.npy` の行と `config.json` の `data.style2id` の対応で決まります。カスタムモデルでは、raw 音声を `Data/<model>/raw/<style名>/*.wav` のように分類してから style vector を生成します。

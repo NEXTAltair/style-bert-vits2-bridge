@@ -8,6 +8,7 @@ import { Sbv2Client } from "./sbv2-client.js";
 import { listModelCandidates } from "./model-registry.js";
 const MAX_SAFETENSORS_HEADER_BYTES = 100 * 1024 * 1024;
 const DEFAULT_MERGE_PARAMETER = 0.5;
+const TONE_LABELS = new Set(["clear", "soft", "bright", "alert"]);
 export function parseModelMergeMethod(value) {
     const normalized = value.replace(/_/g, "-");
     if (normalized === "usual" || normalized === "add-diff" || normalized === "weighted-sum" || normalized === "add-null") {
@@ -37,11 +38,24 @@ export async function createModelMergePlan(options) {
             }
             : {}),
     };
+    const styleRecipePath = options.styleRecipePath ? resolveUserPath(options.styleRecipePath) : undefined;
+    const styleRecipe = styleRecipePath
+        ? parseModelMergeStyleRecipe(JSON.parse(await readFile(styleRecipePath, "utf8")))
+        : undefined;
+    const stylePlan = styleRecipe
+        ? buildStyleMergePlan({
+            method: options.method,
+            inputModels,
+            styleRecipe,
+        })
+        : undefined;
     const compatibility = await checkCompatibility({
         assetsRoot,
         outputModelName: options.outputModelName,
         outputDir,
         inputModels,
+        styleErrors: stylePlan?.errors ?? [],
+        styleWarnings: stylePlan?.warnings ?? [],
     });
     const weights = normalizeWeights(options);
     const coefficients = normalizeCoefficients(options);
@@ -65,6 +79,9 @@ export async function createModelMergePlan(options) {
         inputModels,
         ...(weights ? { weights } : {}),
         ...(coefficients ? { coefficients } : {}),
+        ...(styleRecipePath ? { styleRecipePath } : {}),
+        ...(stylePlan ? { styleRows: stylePlan.styleRows, outputStyle2id: stylePlan.outputStyle2id } : {}),
+        styleMergeApplied: Boolean(stylePlan),
         slerp: options.method === "usual" ? Boolean(options.slerp) : false,
         compatibility,
         command,
@@ -73,6 +90,7 @@ export async function createModelMergePlan(options) {
             path.join(outputDir, "style_vectors.npy"),
             outputSafetensorsPath,
             path.join(outputDir, "recipe.json"),
+            ...(styleRecipePath ? [path.join(outputDir, "style-merge-recipe.json")] : []),
         ],
     };
 }
@@ -145,6 +163,10 @@ export async function runModelMerge(options) {
     try {
         await mkdir(path.dirname(plan.outputDir), { recursive: true });
         await runAndLogMergeCommand(runner, plan.command, logLines);
+        if (plan.styleMergeApplied) {
+            await applyMergedStyles(plan);
+            logLines.push(`applied style recipe to ${plan.outputModelName}`);
+        }
         const [candidate] = await listModelCandidates({
             sbv2Root: plan.sbv2Root,
             modelName: plan.outputModelName,
@@ -232,6 +254,10 @@ function buildModelMergeInputSummary(plan, options = {}) {
         },
         ...(plan.weights ? { weights: plan.weights } : {}),
         ...(plan.coefficients ? { coefficients: plan.coefficients } : {}),
+        ...(plan.styleRecipePath ? { styleRecipePath: plan.styleRecipePath } : {}),
+        ...(plan.styleRows ? { styleRows: plan.styleRows } : {}),
+        ...(plan.outputStyle2id ? { outputStyle2id: plan.outputStyle2id } : {}),
+        styleMergeApplied: plan.styleMergeApplied,
         slerp: plan.slerp,
         compatibility: plan.compatibility,
         expectedArtifacts: plan.expectedArtifacts,
@@ -254,6 +280,10 @@ export function summarizeModelMergePlan(plan) {
         },
         ...(plan.weights ? { weights: plan.weights } : {}),
         ...(plan.coefficients ? { coefficients: plan.coefficients } : {}),
+        ...(plan.styleRecipePath ? { styleRecipePath: plan.styleRecipePath } : {}),
+        ...(plan.styleRows ? { styleRows: plan.styleRows } : {}),
+        ...(plan.outputStyle2id ? { outputStyle2id: plan.outputStyle2id } : {}),
+        styleMergeApplied: plan.styleMergeApplied,
         slerp: plan.slerp,
         compatibility: plan.compatibility,
         expectedArtifacts: plan.expectedArtifacts,
@@ -275,6 +305,7 @@ function summarizeMergeInput(input) {
         configJsonPath: input.configJsonPath,
         styleVectorsPath: input.styleVectorsPath,
         speakerCount: input.speakerCount,
+        style2id: input.style2id,
         styleVectorShape: input.styleVectorShape,
     };
 }
@@ -307,6 +338,7 @@ async function inspectMergeInput(options) {
     if (config.styleCount !== undefined && styleVectorShape[0] !== config.styleCount) {
         throw new Error(`${options.label} style_vectors.npy row count does not match config.json data.num_styles`);
     }
+    validateStyle2idPermutation(config.style2id, styleVectorShape[0], `${options.label} config.json data.style2id`);
     return {
         modelName: options.modelName,
         modelDir,
@@ -314,6 +346,7 @@ async function inspectMergeInput(options) {
         configJsonPath,
         styleVectorsPath,
         speakerCount: config.speakerCount,
+        style2id: config.style2id,
         styleVectorShape,
         safetensorsTensors,
     };
@@ -376,7 +409,208 @@ async function checkCompatibility(args) {
     }
     const tensorErrors = compareSafetensorsTensorMaps(inputs);
     errors.push(...tensorErrors);
+    errors.push(...(args.styleErrors ?? []));
+    warnings.push(...(args.styleWarnings ?? []));
     return { compatible: errors.length === 0, errors, warnings };
+}
+function parseModelMergeStyleRecipe(value) {
+    if (!isRecord(value) || value.schemaVersion !== 1) {
+        throw new Error("style recipe schemaVersion must be 1");
+    }
+    if (!Array.isArray(value.styles) || value.styles.length === 0) {
+        throw new Error("style recipe styles must be a non-empty array");
+    }
+    return {
+        schemaVersion: 1,
+        styles: value.styles.map((entry, index) => {
+            if (!isRecord(entry) || typeof entry.styleA !== "string" || typeof entry.styleB !== "string" || typeof entry.outputStyle !== "string") {
+                throw new Error(`styles[${index}] requires styleA, styleB, and outputStyle`);
+            }
+            if (Object.prototype.hasOwnProperty.call(entry, "styleC") && typeof entry.styleC !== "string") {
+                throw new Error(`styles[${index}].styleC must be a string when provided`);
+            }
+            return {
+                styleA: entry.styleA,
+                styleB: entry.styleB,
+                ...(typeof entry.styleC === "string" ? { styleC: entry.styleC } : {}),
+                outputStyle: entry.outputStyle,
+            };
+        }),
+    };
+}
+function buildStyleMergePlan(args) {
+    const errors = [];
+    const warnings = [];
+    const outputStyle2id = createStringNumberRecord();
+    const styleRows = [];
+    const needsStyleC = methodNeedsModelC(args.method);
+    for (const [index, style] of args.styleRecipe.styles.entries()) {
+        const outputStyle = style.outputStyle.trim();
+        if (!outputStyle) {
+            errors.push(`styles[${index}].outputStyle must be a non-empty string`);
+            continue;
+        }
+        if (Object.prototype.hasOwnProperty.call(outputStyle2id, outputStyle)) {
+            errors.push(`duplicate output style name: ${outputStyle}`);
+            continue;
+        }
+        if (needsStyleC && !style.styleC) {
+            errors.push(`styles[${index}] requires styleC for ${args.method}`);
+        }
+        if (!needsStyleC && style.styleC) {
+            errors.push(`styles[${index}].styleC is only valid for add-diff and weighted-sum`);
+        }
+        const styleAIndex = readStyleIndex(args.inputModels.a.style2id, style.styleA);
+        const styleBIndex = readStyleIndex(args.inputModels.b.style2id, style.styleB);
+        const styleCIndex = style.styleC && args.inputModels.c ? readStyleIndex(args.inputModels.c.style2id, style.styleC) : undefined;
+        if (styleAIndex === undefined)
+            errors.push(`style "${style.styleA}" was not found in model A (${args.inputModels.a.modelName})`);
+        if (styleBIndex === undefined)
+            errors.push(`style "${style.styleB}" was not found in model B (${args.inputModels.b.modelName})`);
+        if (needsStyleC && style.styleC && styleCIndex === undefined) {
+            errors.push(`style "${style.styleC}" was not found in model C (${args.inputModels.c?.modelName ?? "missing"})`);
+        }
+        for (const [label, value] of [
+            ["styleA", style.styleA],
+            ["styleB", style.styleB],
+            ...(style.styleC ? [["styleC", style.styleC]] : []),
+            ["outputStyle", outputStyle],
+        ]) {
+            if (TONE_LABELS.has(value.toLowerCase())) {
+                warnings.push(`${label} "${value}" looks like an agent tone label; verify it is an actual SBV2 style name`);
+            }
+        }
+        outputStyle2id[outputStyle] = index;
+        if (styleAIndex !== undefined && styleBIndex !== undefined && (!needsStyleC || (style.styleC && styleCIndex !== undefined))) {
+            styleRows.push({
+                index,
+                styleA: style.styleA,
+                styleAIndex,
+                styleB: style.styleB,
+                styleBIndex,
+                ...(style.styleC ? { styleC: style.styleC } : {}),
+                ...(styleCIndex !== undefined ? { styleCIndex } : {}),
+                outputStyle,
+            });
+        }
+    }
+    return { styleRows, outputStyle2id, errors, warnings };
+}
+async function applyMergedStyles(plan) {
+    if (!plan.styleRows || !plan.outputStyle2id)
+        return;
+    const outputVectors = await buildMergedStyleVectors(plan);
+    const outputConfigPath = path.join(plan.outputDir, "config.json");
+    const config = await readConfig(outputConfigPath);
+    updateConfigForOutput(config, plan.outputModelName, plan.outputStyle2id);
+    await writeNpyFloat32(path.join(plan.outputDir, "style_vectors.npy"), outputVectors, [plan.styleRows.length, plan.inputModels.a.styleVectorShape[1]]);
+    await writeFile(outputConfigPath, `${JSON.stringify(config, null, 2)}\n`, "utf8");
+    await writeFile(path.join(plan.outputDir, "style-merge-recipe.json"), `${JSON.stringify(buildOutputStyleRecipe(plan), null, 2)}\n`, "utf8");
+}
+async function buildMergedStyleVectors(plan) {
+    if (!plan.styleRows)
+        return new Float32Array();
+    const a = readNpyNumeric2d(await readFile(plan.inputModels.a.styleVectorsPath));
+    const b = readNpyNumeric2d(await readFile(plan.inputModels.b.styleVectorsPath));
+    const c = plan.inputModels.c ? readNpyNumeric2d(await readFile(plan.inputModels.c.styleVectorsPath)) : undefined;
+    const width = plan.inputModels.a.styleVectorShape[1];
+    const output = new Float32Array(plan.styleRows.length * width);
+    for (const row of plan.styleRows) {
+        const aOffset = row.styleAIndex * width;
+        const bOffset = row.styleBIndex * width;
+        const cOffset = row.styleCIndex !== undefined ? row.styleCIndex * width : undefined;
+        const outOffset = row.index * width;
+        for (let index = 0; index < width; index += 1) {
+            const valueA = a.values[aOffset + index];
+            const valueB = b.values[bOffset + index];
+            const valueC = c && cOffset !== undefined ? c.values[cOffset + index] : 0;
+            output[outOffset + index] = mergeStyleValue(plan, valueA, valueB, valueC);
+        }
+    }
+    return output;
+}
+function mergeStyleValue(plan, valueA, valueB, valueC) {
+    if (plan.method === "weighted-sum") {
+        const coefficients = requireValue(plan.coefficients, "weighted-sum coefficients");
+        return coefficients.modelACoeff * valueA + coefficients.modelBCoeff * valueB + coefficients.modelCCoeff * valueC;
+    }
+    const weight = requireValue(plan.weights, "merge weights").speechStyleWeight;
+    if (plan.method === "add-diff")
+        return valueA + weight * (valueB - valueC);
+    if (plan.method === "add-null")
+        return valueA + weight * valueB;
+    return valueA * (1 - weight) + valueB * weight;
+}
+function readNpyNumeric2d(buffer) {
+    const header = parseNpy(buffer);
+    if (!header || header.shape.length !== 2)
+        throw new Error("style_vectors.npy must be a valid 2D NumPy file");
+    if (!isSupportedFloatDescriptor(header.descr))
+        throw new Error(`Unsupported NumPy dtype: ${header.descr}`);
+    const count = header.shape.reduce((total, value) => total * value, 1);
+    const expectedBytes = count * header.bytesPerElement;
+    if (buffer.length < header.dataOffset + expectedBytes)
+        throw new Error("style_vectors.npy data is truncated");
+    const values = new Float32Array(count);
+    for (let index = 0; index < count; index += 1) {
+        const offset = header.dataOffset + index * header.bytesPerElement;
+        if (header.bytesPerElement === 4) {
+            values[index] = header.littleEndian ? buffer.readFloatLE(offset) : buffer.readFloatBE(offset);
+        }
+        else if (header.bytesPerElement === 8) {
+            values[index] = header.littleEndian ? buffer.readDoubleLE(offset) : buffer.readDoubleBE(offset);
+        }
+        else {
+            throw new Error(`Unsupported NumPy dtype: ${header.descr}`);
+        }
+    }
+    return { shape: header.shape, values };
+}
+function readStyleIndex(style2id, styleName) {
+    return Object.prototype.hasOwnProperty.call(style2id, styleName) ? style2id[styleName] : undefined;
+}
+async function writeNpyFloat32(filePath, values, shape) {
+    const header = `{'descr': '<f4', 'fortran_order': False, 'shape': (${shape[0]}, ${shape[1]}), }`;
+    const magicLength = 10;
+    const padding = 16 - ((magicLength + header.length + 1) % 16);
+    const paddedHeader = `${header}${" ".repeat(padding)}\n`;
+    const result = Buffer.alloc(magicLength + paddedHeader.length + values.length * 4);
+    result.write("\x93NUMPY", 0, "latin1");
+    result[6] = 1;
+    result[7] = 0;
+    result.writeUInt16LE(paddedHeader.length, 8);
+    result.write(paddedHeader, magicLength, "latin1");
+    for (let index = 0; index < values.length; index += 1) {
+        result.writeFloatLE(values[index], magicLength + paddedHeader.length + index * 4);
+    }
+    await writeFile(filePath, result);
+}
+function updateConfigForOutput(config, outputModelName, style2id) {
+    const data = config.data;
+    if (!isRecord(data))
+        throw new Error("config.json is missing data object");
+    config.model_name = outputModelName;
+    data.num_styles = Object.keys(style2id).length;
+    data.style2id = style2id;
+}
+function buildOutputStyleRecipe(plan) {
+    return {
+        schemaVersion: 1,
+        operation: "model-merge-style-recipe",
+        method: plan.method,
+        modelA: plan.inputModels.a.modelName,
+        modelB: plan.inputModels.b.modelName,
+        ...(plan.inputModels.c ? { modelC: plan.inputModels.c.modelName } : {}),
+        outputModelName: plan.outputModelName,
+        ...(plan.weights ? { speechStyleWeight: plan.weights.speechStyleWeight } : {}),
+        ...(plan.coefficients ? { coefficients: plan.coefficients } : {}),
+        styles: (plan.styleRows ?? []).map((row) => ({
+            styleA: row.styleA,
+            styleB: row.styleB,
+            ...(row.styleC ? { styleC: row.styleC } : {}),
+            outputStyle: row.outputStyle,
+        })),
+    };
 }
 function compareSafetensorsTensorMaps(inputs) {
     const [first, ...rest] = inputs;
@@ -573,19 +807,27 @@ async function readConfigSummary(configJsonPath) {
     const nSpeakers = data.n_speakers;
     const speakerCount = typeof nSpeakers === "number" && Number.isInteger(nSpeakers) && nSpeakers > 0 ? nSpeakers : Object.keys(spk2id).length;
     const numStyles = data.num_styles;
+    const style2id = readStyle2id(parsed, configJsonPath);
     return {
         speakerCount,
         ...(typeof numStyles === "number" && Number.isInteger(numStyles) && numStyles > 0 ? { styleCount: numStyles } : {}),
+        style2id,
     };
 }
 async function readNpyShape(filePath) {
     await requireNonEmptyFile(filePath, "style_vectors.npy");
-    const header = parseNpyHeader(await readFile(filePath));
+    const buffer = await readFile(filePath);
+    const header = parseNpy(buffer);
     if (!header || header.shape.length < 2)
         throw new Error(`style_vectors.npy is not a valid 2D NumPy file: ${filePath}`);
+    if (!isSupportedFloatDescriptor(header.descr))
+        throw new Error(`style_vectors.npy dtype must be float32 or float64: ${filePath}`);
+    const expectedBytes = header.shape.reduce((total, value) => total * value, 1) * header.bytesPerElement;
+    if (buffer.length < header.dataOffset + expectedBytes)
+        throw new Error(`style_vectors.npy data is truncated: ${filePath}`);
     return header.shape;
 }
-function parseNpyHeader(buffer) {
+function parseNpy(buffer) {
     if (buffer.length < 10 || buffer.toString("latin1", 0, 6) !== "\x93NUMPY")
         return undefined;
     const major = buffer[6];
@@ -597,15 +839,57 @@ function parseNpyHeader(buffer) {
     const headerEnd = headerStart + headerLength;
     if (buffer.length < headerEnd)
         return undefined;
-    const match = buffer.toString("latin1", headerStart, headerEnd).match(/'shape'\s*:\s*\(([^)]*)\)/);
-    if (!match)
+    const text = buffer.toString("latin1", headerStart, headerEnd);
+    const descr = text.match(/'descr'\s*:\s*'([^']+)'/)?.[1];
+    const fortranOrder = text.match(/'fortran_order'\s*:\s*(True|False)/)?.[1];
+    const shapeText = text.match(/'shape'\s*:\s*\(([^)]*)\)/)?.[1];
+    if (!descr || fortranOrder !== "False" || !shapeText)
         return undefined;
-    const shape = match[1]
+    const bytesPerElement = Number(descr.match(/(\d+)$/)?.[1]);
+    if (!Number.isInteger(bytesPerElement) || bytesPerElement <= 0)
+        return undefined;
+    const littleEndian = descr.startsWith("<") || descr.startsWith("|");
+    const shape = shapeText
         .split(",")
         .map((part) => part.trim())
         .filter(Boolean)
         .map(Number);
-    return shape.length && shape.every((part) => Number.isInteger(part) && part >= 0) ? { shape } : undefined;
+    return shape.length && shape.every((part) => Number.isInteger(part) && part >= 0)
+        ? { shape, dataOffset: headerEnd, descr, bytesPerElement, littleEndian }
+        : undefined;
+}
+async function readConfig(filePath) {
+    const parsed = JSON.parse(await readFile(filePath, "utf8"));
+    if (!isRecord(parsed))
+        throw new Error(`config.json root must be an object: ${filePath}`);
+    return parsed;
+}
+function readStyle2id(config, filePath) {
+    const data = config.data;
+    if (!isRecord(data) || !isRecord(data.style2id) || !Object.keys(data.style2id).length) {
+        throw new Error(`config.json data.style2id must be a non-empty object: ${filePath}`);
+    }
+    const result = createStringNumberRecord();
+    for (const [key, value] of Object.entries(data.style2id)) {
+        if (typeof value !== "number" || !Number.isSafeInteger(value) || value < 0) {
+            throw new Error(`config.json data.style2id values must be non-negative safe integers: ${filePath}`);
+        }
+        result[key] = value;
+    }
+    return result;
+}
+function validateStyle2idPermutation(style2id, size, label) {
+    const values = Object.values(style2id);
+    if (values.length !== size) {
+        throw new Error(`${label} size must match style_vectors.npy row count`);
+    }
+    const sorted = [...values].sort((left, right) => left - right);
+    if (!sorted.every((value, index) => value === index)) {
+        throw new Error(`${label} values must be a zero-based permutation matching style_vectors.npy rows`);
+    }
+}
+function isSupportedFloatDescriptor(descr) {
+    return /^<f[48]$/.test(descr);
 }
 async function readSafetensorsTensorMap(filePath) {
     const fileStat = await requireNonEmptyFile(filePath, "safetensors file");
@@ -683,6 +967,7 @@ function collectMergeArtifacts(plan, candidate) {
         candidate.styleVectorsPath,
         ...candidate.safetensors.map((file) => file.path),
         path.join(plan.outputDir, "recipe.json"),
+        ...(plan.styleMergeApplied ? [path.join(plan.outputDir, "style-merge-recipe.json")] : []),
     ];
 }
 async function cleanupOutputDir(outputDir, logLines) {
@@ -745,4 +1030,7 @@ function isNodeError(value) {
 }
 function isRecord(value) {
     return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+function createStringNumberRecord() {
+    return Object.create(null);
 }

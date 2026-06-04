@@ -34,6 +34,12 @@ OpenClaw agent からの利用は、CLI と job 基盤が安定した後に agen
 
 Plugin-distributed skill は、操作手順、声や style の選択、安全確認の判断補助を担当する。Skill だけで危険操作や長時間処理を直接実行する surface にはしない。
 
+モデルマージでは、SBV2 本体と同じく safetensors のマージと style vector のマージを同じ merge operation の中で扱う。CLI surface は `models merge-plan` / `models merge-run` を正本とし、style vector の対応表が必要な場合は `--style-recipe` を追加する。
+
+`--style-recipe` は style 名の対応表だけを持ち、method、入力 model、weight、coefficient は `models merge-*` の既存引数を正とする。`usual`、`add-diff`、`add-null` の style vector 混合比は `--speech-style-weight`、`weighted-sum` は A/B/C 係数に従う。独立した `models style-merge-*` surface と独立 `styleWeight` recipe は採用しない。
+
+生成時 `/voice style_weight` は既存 style を音声合成時に適用する強さであり、model merge の `--speech-style-weight` や `--style-recipe` による style vector 混合比とは別の surface として扱う。
+
 制作機能の権限レベルは次の分類を基本にする。
 
 - `read-only`: status、models、datasets、jobs の一覧や詳細取得。
@@ -84,6 +90,7 @@ CLI から始めることで、SBV2 の実 CLI、出力ファイル、dataset la
 - TTS provider の責務を再生に限定したまま、制作機能を拡張できる。
 - SBV2 の実仕様を確認しながら CLI contract を育てられる。
 - 後続の agent tool は、安定した CLI と job manifest を schema 付きで包める。
+- model merge と style vector merge の重みが SBV2 本体仕様と一致し、agent が独立 style weight を誤って調整しにくくなる。
 - 長時間処理、GPU 使用、上書き、外部影響操作を permission class と確認 gate で扱える。
 - Job manifest により、進捗、ログ、成果物、失敗理由、再実行可能性を追跡できる。
 
@@ -92,5 +99,6 @@ CLI から始めることで、SBV2 の実 CLI、出力ファイル、dataset la
 - 最初の段階では OpenClaw UI から直接操作できない。
 - CLI contract と agent tool contract の二層を保守する必要がある。
 - `src/cli` と package entrypoint / bin 定義は後続 issue で追加設計が必要になる。
+- style vector だけを後から独立編集する workflow は bridge の通常 CLI から外れ、必要な場合は model merge の `--style-recipe` 付き再実行または SBV2 GUI で扱う。
 - OpenClaw plugin SDK に制作 capability が追加される場合、agent tool 接続方針を見直す可能性がある。
 - SBV2 本体の CLI/API 変更に追従するため、wrapper 側の互換性確認が必要になる。
