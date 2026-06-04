@@ -221,6 +221,7 @@ function isSbv2JobManifest(value) {
             value.operation === "dataset-prepare" ||
             value.operation === "training-run" ||
             value.operation === "model-merge" ||
+            value.operation === "model-style-merge" ||
             value.operation === "model-rename" ||
             value.operation === "model-promote" ||
             value.operation === "model-evaluate") &&

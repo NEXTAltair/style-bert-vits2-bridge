@@ -177,6 +177,23 @@ describe("sbv2-bridge CLI", () => {
     expect(stdout.output()).toContain("Candidate:  sbv2-bridge models merge-run");
   });
 
+  it("prints style-merge help without model merge parameters", async () => {
+    const stdout = createWriter();
+    const stderr = createWriter();
+
+    await expect(runCli(["models", "style-merge-plan", "--help"], { stdout: stdout.stream, stderr: stderr.stream })).resolves.toBe(
+      0,
+    );
+
+    expect(stderr.output()).toBe("");
+    expect(stdout.output()).toContain("Usage: sbv2-bridge models style-merge-plan [options]");
+    expect(stdout.output()).toContain("--recipe <path>");
+    expect(stdout.output()).toContain("Style merge is separate from model file merge.");
+    expect(stdout.output()).toContain('"styleA": "Neutral"');
+    expect(stdout.output()).not.toContain("--voice-weight");
+    expect(stdout.output()).not.toContain("--model-c");
+  });
+
   it("prints rename help with data and confirmation options", async () => {
     const stdout = createWriter();
     const stderr = createWriter();
@@ -492,6 +509,48 @@ describe("sbv2-bridge CLI", () => {
     const parsed = JSON.parse(stdout.output()) as { plan: { coefficients: Record<string, number>; weights?: unknown } };
     expect(parsed.plan.coefficients).toEqual({ modelACoeff: 0.5, modelBCoeff: 0.5, modelCCoeff: 0.5 });
     expect(parsed.plan.weights).toBeUndefined();
+  });
+
+  it("prints a style merge plan as JSON from a recipe", async () => {
+    const sbv2Root = createMergeCliRoot(["model-a", "model-b", "merged"]);
+    const recipePath = path.join(sbv2Root, "style-merge.json");
+    writeFileSync(
+      recipePath,
+      `${JSON.stringify({
+        schemaVersion: 1,
+        outputModelName: "merged",
+        modelA: "model-a",
+        modelB: "model-b",
+        styles: [{ styleA: "Neutral", styleB: "Neutral", outputStyle: "Neutral" }],
+      })}\n`,
+    );
+    const stdout = createWriter();
+    const stderr = createWriter();
+
+    await expect(
+      runCli(
+        [
+          "models",
+          "style-merge-plan",
+          "--sbv2-root",
+          sbv2Root,
+          "--recipe",
+          recipePath,
+          "--json",
+        ],
+        { stdout: stdout.stream, stderr: stderr.stream },
+      ),
+    ).resolves.toBe(0);
+    expect(stderr.output()).toBe("");
+
+    const parsed = JSON.parse(stdout.output()) as {
+      plan: { outputModelName: string; styleWeight: number; outputStyle2id: Record<string, number> };
+      pathRoles: { sbv2LoadableModel: string };
+    };
+    expect(parsed.plan.outputModelName).toBe("merged");
+    expect(parsed.plan.styleWeight).toBe(0.5);
+    expect(parsed.plan.outputStyle2id).toEqual({ Neutral: 0 });
+    expect(parsed.pathRoles.sbv2LoadableModel).toBe(path.join(sbv2Root, "model_assets", "merged"));
   });
 
   it("prints model merge run path roles as JSON", async () => {

@@ -77,6 +77,21 @@ describe("SBV2 jobs", () => {
     await expect(readJobManifest(job.jobId, { jobsRoot })).resolves.toEqual(job);
   });
 
+  it("reads and lists style merge job manifests", async () => {
+    const jobsRoot = tempJobsRoot();
+    const job = await createJobManifest({
+      jobsRoot,
+      operation: "model-style-merge",
+      inputSummary: { outputModelName: "merged" },
+      progressSummary: "Style merge completed.",
+      now: () => new Date("2026-06-01T00:00:00.000Z"),
+      randomId: () => "stylejob",
+    });
+
+    await expect(readJobManifest(job.jobId, { jobsRoot })).resolves.toEqual(job);
+    await expect(listJobManifests({ jobsRoot })).resolves.toEqual([job]);
+  });
+
   it("lists jobs newest first", async () => {
     const jobsRoot = tempJobsRoot();
     const older = await createDummyJob({
