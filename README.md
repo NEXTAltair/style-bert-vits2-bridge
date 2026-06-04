@@ -211,6 +211,12 @@ agent は次の操作を自動実行しません。実行する場合は、対�
 - model artifact、評価音声、入力音声の公開、共有、外部 upload、外部送信
 - SBV2 root 外や plugin state 外へ大きな artifact を移動する操作
 
+`datasets prepare`、`training run`、`models merge-run`、`models style-merge-run`、`evaluation run` は、ユーザーが同期実行を明示しない限り OpenClaw の sub-agent / background task へ委譲します。親 session は plan、ユーザー確認、起動結果だけを扱い、実行中に `jobs status` を繰り返す poll loop は持ちません。実行中の監視は OpenClaw task ledger を使い、完了後の制作記録は bridge job manifest を使います。
+
+起動直後に親 session へ返す ID は OpenClaw `runId` と `childSessionKey`、または plugin runtime に渡した `sessionKey` と返却された `runId` です。agent tool 経由では `sessions_spawn` の `runId` / `childSessionKey` を、plugin runtime 経由では `api.runtime.subagent.run(...)` の `runId` と呼び出し時の `sessionKey` を記録します。`sbv2-bridge jobId` は起動時に必ず存在するものとして扱わず、完了後の job manifest ID として扱います。
+
+起動直後の報告には、operation、実行 command / cwd、入力 manifest / model / output model name、手動確認コマンド `openclaw tasks show <runId|childSessionKey|sessionKey>`、完了時に sub-agent が bridge `jobId` と summary を返すことを含めます。完了後、sub-agent は CLI JSON、`summary.json`、`manifest.json`、`job.log`、`artifactPaths` を読んで短く報告します。
+
 artifact と log の既定保存先:
 
 - job manifest / status / log: `~/.openclaw/state/style-bert-vits2-bridge/jobs`
@@ -221,7 +227,7 @@ artifact と log の既定保存先:
 
 SBV2 dataset output と model assets は既定例です。実際の path は SBV2 の `configs/paths.yml`、次に `configs/default_paths.yml`、最後に SBV2 既定値から解決されます。CLI JSON の `pathRoles.sbv2Dataset` と `pathRoles.sbv2LoadableModel`、または非 JSON 出力の `SBV2 dataset:` / `SBV2 loadable model:` を正として扱ってください。bridge state は ingest copy、manifest、job log、summary 用であり、SBV2 FastAPI の `/models/info` / `/voice` は bridge state から model をロードしません。
 
-失敗時は、まず `sbv2-bridge jobs status <jobId>` と `sbv2-bridge jobs log <jobId> --tail 80` を確認します。次に job の `summary.json`、入力 manifest、CLI の `pathRoles`、既存出力との衝突、SBV2 script や pretrained directory の有無、GPU/依存関係の状態を切り分けます。
+失敗時は、bridge `jobId` が生成済みなら `sbv2-bridge jobs status <jobId>` と `sbv2-bridge jobs log <jobId> --tail 80` を確認します。bridge `jobId` が無い場合は OpenClaw `runId`、実行 command、cwd、stdout/stderr、入力 manifest / model path、次に見るべき path を返します。次に job の `summary.json`、入力 manifest、CLI の `pathRoles`、既存出力との衝突、SBV2 script や pretrained directory の有無、GPU/依存関係の状態を切り分けます。
 
 ## モデル作成用データセット
 
