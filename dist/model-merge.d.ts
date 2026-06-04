@@ -103,6 +103,50 @@ export interface Sbv2ModelMergeSummary {
     };
     nextSteps: string[];
 }
+export interface Sbv2ModelMergeInputSummary {
+    modelName: string;
+    modelDir: string;
+    safetensorsPath: string;
+    configJsonPath: string;
+    styleVectorsPath: string;
+    speakerCount: number;
+    styleVectorShape: number[];
+}
+export interface Sbv2ModelMergePlanSummary {
+    schemaVersion: 1;
+    method: Sbv2ModelMergeMethod;
+    outputModelName: string;
+    outputDir: string;
+    outputSafetensorsPath: string;
+    recipePath: string;
+    inputModels: {
+        a: Sbv2ModelMergeInputSummary;
+        b: Sbv2ModelMergeInputSummary;
+        c?: Sbv2ModelMergeInputSummary;
+    };
+    weights?: Sbv2ModelMergeWeights;
+    coefficients?: Sbv2WeightedSumCoefficients;
+    slerp: boolean;
+    compatibility: Sbv2ModelMergeCompatibilityReport;
+    expectedArtifacts: string[];
+}
+export interface Sbv2ModelMergeCandidateSummary {
+    candidateId: string;
+    modelName: string;
+    sourceDir: string;
+    targetDir: string;
+    configJsonPath: string;
+    styleVectorsPath: string;
+    safetensorsPaths: string[];
+    promotable: boolean;
+    errors: string[];
+    warnings: string[];
+}
+export interface Sbv2ModelMergeRunSummary extends Sbv2ModelMergePlanSummary {
+    candidate: Sbv2ModelMergeCandidateSummary;
+    refresh?: Sbv2ModelMergeSummary["refresh"];
+    nextSteps: string[];
+}
 export interface ModelMergeRunResult {
     plan: Sbv2ModelMergePlan;
     candidate: Sbv2ModelCandidate;
@@ -112,3 +156,5 @@ export interface ModelMergeRunResult {
 export declare function parseModelMergeMethod(value: string): Sbv2ModelMergeMethod;
 export declare function createModelMergePlan(options: ModelMergePlanOptions): Promise<Sbv2ModelMergePlan>;
 export declare function runModelMerge(options: ModelMergeRunOptions): Promise<ModelMergeRunResult>;
+export declare function summarizeModelMergePlan(plan: Sbv2ModelMergePlan): Sbv2ModelMergePlanSummary;
+export declare function summarizeModelMergeRun(result: ModelMergeRunResult): Sbv2ModelMergeRunSummary;

@@ -239,6 +239,34 @@ function buildModelMergeInputSummary(plan, options = {}) {
         ...(options.outputAssetsRetained !== undefined ? { outputAssetsRetained: options.outputAssetsRetained } : {}),
     };
 }
+export function summarizeModelMergePlan(plan) {
+    return {
+        schemaVersion: plan.schemaVersion,
+        method: plan.method,
+        outputModelName: plan.outputModelName,
+        outputDir: plan.outputDir,
+        outputSafetensorsPath: plan.outputSafetensorsPath,
+        recipePath: mergeRecipePath(plan),
+        inputModels: {
+            a: summarizeMergeInput(plan.inputModels.a),
+            b: summarizeMergeInput(plan.inputModels.b),
+            ...(plan.inputModels.c ? { c: summarizeMergeInput(plan.inputModels.c) } : {}),
+        },
+        ...(plan.weights ? { weights: plan.weights } : {}),
+        ...(plan.coefficients ? { coefficients: plan.coefficients } : {}),
+        slerp: plan.slerp,
+        compatibility: plan.compatibility,
+        expectedArtifacts: plan.expectedArtifacts,
+    };
+}
+export function summarizeModelMergeRun(result) {
+    return {
+        ...summarizeModelMergePlan(result.plan),
+        candidate: summarizeModelMergeCandidate(result.candidate),
+        ...(result.summary.refresh ? { refresh: result.summary.refresh } : {}),
+        nextSteps: result.summary.nextSteps,
+    };
+}
 function summarizeMergeInput(input) {
     return {
         modelName: input.modelName,
@@ -248,6 +276,20 @@ function summarizeMergeInput(input) {
         styleVectorsPath: input.styleVectorsPath,
         speakerCount: input.speakerCount,
         styleVectorShape: input.styleVectorShape,
+    };
+}
+function summarizeModelMergeCandidate(candidate) {
+    return {
+        candidateId: candidate.candidateId,
+        modelName: candidate.modelName,
+        sourceDir: candidate.sourceDir,
+        targetDir: candidate.targetDir,
+        configJsonPath: candidate.configJsonPath,
+        styleVectorsPath: candidate.styleVectorsPath,
+        safetensorsPaths: candidate.safetensors.map((file) => file.path),
+        promotable: candidate.promotable,
+        errors: candidate.errors,
+        warnings: candidate.warnings,
     };
 }
 function mergeRecipePath(plan) {
