@@ -137,7 +137,7 @@ describe("sbv2-bridge CLI", () => {
     expect(stdout.output()).toContain("--output-model-name <name>");
     expect(stdout.output()).toContain("--model-c <name>");
     expect(stdout.output()).toContain("usual                   Blend two models by part weights.");
-    expect(stdout.output()).toContain("Voice quality balance between model A and B. Default 0.5.");
+    expect(stdout.output()).toContain("Voice quality weight for the B contribution, or B-C diff in add-diff. Default 0.5.");
     expect(stdout.output()).toContain("Model A contribution coefficient. Default 0.5.");
     expect(stdout.output()).toContain("Defaults keep omitted values at a visible half-strength blend.");
     expect(stdout.output()).toContain("Smoke:      sbv2-bridge models merge-plan");
@@ -171,7 +171,7 @@ describe("sbv2-bridge CLI", () => {
     expect(stdout.output()).toContain("Usage: sbv2-bridge models merge-run [options]");
     expect(stdout.output()).toContain("--confirm-output-model-name <name>");
     expect(stdout.output()).toContain("--base-url <url>");
-    expect(stdout.output()).toContain("Speaking tempo balance between model A and B. Default 0.5.");
+    expect(stdout.output()).toContain("Speaking tempo weight for B, or B-C diff in add-diff. Default 0.5.");
     expect(stdout.output()).toContain("Model C contribution coefficient. Default 0.5.");
     expect(stdout.output()).toContain("/models/info registration, config.json style2id, style_vectors.npy");
     expect(stdout.output()).toContain("Candidate:  sbv2-bridge models merge-run");

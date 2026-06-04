@@ -391,11 +391,11 @@ Optional file selectors:
   --model-c-file <name>    Model C top-level safetensors filename.
 
 Weights for usual/add-diff/add-null:
-  --voice-weight <n>       Voice quality balance between model A and B. Default 0.5.
-  --voice-pitch-weight <n> Pitch balance between model A and B. Default 0.5.
+  --voice-weight <n>       Voice quality weight for the B contribution, or B-C diff in add-diff. Default 0.5.
+  --voice-pitch-weight <n> Pitch weight for the B contribution, or B-C diff in add-diff. Default 0.5.
   --speech-style-weight <n>
-                            Speaking style balance between model A and B. Default 0.5.
-  --tempo-weight <n>       Speaking tempo balance between model A and B. Default 0.5.
+                            Speaking style weight for B, or B-C diff in add-diff. Default 0.5.
+  --tempo-weight <n>       Speaking tempo weight for B, or B-C diff in add-diff. Default 0.5.
   --slerp                  Use spherical interpolation for usual merge when exploring smoother blends.
 
 Coefficients for weighted-sum:
@@ -447,11 +447,11 @@ Optional file selectors:
   --model-c-file <name>    Model C top-level safetensors filename.
 
 Weights for usual/add-diff/add-null:
-  --voice-weight <n>       Voice quality balance between model A and B. Default 0.5.
-  --voice-pitch-weight <n> Pitch balance between model A and B. Default 0.5.
+  --voice-weight <n>       Voice quality weight for the B contribution, or B-C diff in add-diff. Default 0.5.
+  --voice-pitch-weight <n> Pitch weight for the B contribution, or B-C diff in add-diff. Default 0.5.
   --speech-style-weight <n>
-                            Speaking style balance between model A and B. Default 0.5.
-  --tempo-weight <n>       Speaking tempo balance between model A and B. Default 0.5.
+                            Speaking style weight for B, or B-C diff in add-diff. Default 0.5.
+  --tempo-weight <n>       Speaking tempo weight for B, or B-C diff in add-diff. Default 0.5.
   --slerp                  Use spherical interpolation for usual merge when exploring smoother blends.
 
 Coefficients for weighted-sum:
