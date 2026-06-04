@@ -25,7 +25,7 @@ SBV2 の制作処理を開始します。
 入力: <source / manifest / model / candidate>
 出力名: <modelName または outputModelName>
 処理: <ingest/prepare/style/training/merge/evaluation/promote/rename と stage>
-設定: <epochs / batch size / merge parameters / base-url>
+設定: <stage / merge parameters / base-url / confirmation scope>
 bridge state: <workspace または job output/log>
 SBV2 dataset: <resolved dataset_root>/<modelName>
 SBV2 loadable model: <resolved assets_root>/<modelName>

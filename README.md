@@ -250,7 +250,7 @@ sbv2-bridge datasets prepare \
   --json
 ```
 
-`datasets prepare` は SBV2 root で `uv run python slice.py ...` と `uv run python transcribe.py ...` を呼び、resolved `dataset_root/<modelName>/raw` と resolved `dataset_root/<modelName>/esd.list` を作成します。slice は SBV2 既定と同じ `min_sec=2`、`max_sec=12`、`min_silence_dur_ms=700`、`num_processes=3` を使います。短い台詞素材などで slice 感度を変える場合は `--slice-min-sec`、`--slice-max-sec`、`--slice-min-silence-dur-ms`、`--slice-num-processes` を指定できます。文字起こしは `litagin/anime-whisper`、batch size 16、初期プロンプト空文字を既定にします。
+`datasets prepare` は SBV2 root で `uv run python slice.py ...` と `uv run python transcribe.py ...` を呼び、resolved `dataset_root/<modelName>/raw` と resolved `dataset_root/<modelName>/esd.list` を作成します。slice は SBV2 既定と同じ `min_sec=2`、`max_sec=12`、`min_silence_dur_ms=700`、`num_processes=3` を使います。文字起こしは `litagin/anime-whisper`、batch size 16、初期プロンプト空文字を既定にします。slice / transcription の詳細 option は通常 CLI と OpenClaw agent surface では公開しません。
 
 サブディレクトリごとに音声を置いた場合、その相対構造は SBV2 の `raw/` に渡されるため、style ごとの素材分けに使えます。既存の resolved `dataset_root/<modelName>/raw`、resolved `dataset_root/<modelName>/esd.list`、resolved `assets_root/<modelName>` がある場合は上書きせず失敗します。
 
