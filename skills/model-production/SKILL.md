@@ -52,6 +52,12 @@ job log: <jobs path>
 
 ユーザー確認なしに、既存の resolved `dataset_root/<modelName>`、resolved `assets_root/<modelName>`、checkpoint、job artifact を上書きまたは削除しないでください。生成モデル、評価音声、入力音声の公開、共有、外部 upload、外部送信も行いません。
 
+## 長めの処理の委譲
+
+`datasets prepare`、`training run`、`evaluation run` は、ユーザーが同期実行を明示しない限り OpenClaw sub-agent / background task へ委譲します。親 session は plan、ユーザー確認、起動結果だけ扱い、実行中の poll loop は持ちません。
+
+起動直後に親へ返す ID は OpenClaw `runId` / `childSessionKey`、または plugin runtime に渡した `sessionKey` と返却された `runId` です。`sbv2-bridge jobId` は起動時に必ず存在するものとして扱わず、完了後の job manifest ID として扱います。詳しい委譲ルールと失敗時の切り分けは `sbv2-model-ops` skill に従ってください。
+
 ## Dataset ingest
 
 まず音声素材を bridge workspace に取り込みます。
@@ -90,7 +96,7 @@ sbv2-bridge datasets prepare \
   --json
 ```
 
-既存の resolved `dataset_root/<modelName>/raw`、resolved `dataset_root/<modelName>/esd.list`、resolved `assets_root/<modelName>` がある場合は上書きせず失敗します。失敗したら `jobs status` と `jobs log` を確認してください。
+既存の resolved `dataset_root/<modelName>/raw`、resolved `dataset_root/<modelName>/esd.list`、resolved `assets_root/<modelName>` がある場合は上書きせず失敗します。失敗時は下の Job 確認に従って、OpenClaw task と bridge job manifest のどちらを確認できる状態かを切り分けてください。
 
 ## Training
 
@@ -102,7 +108,7 @@ sbv2-bridge training plan \
   --json
 ```
 
-問題なければ学習を開始します。
+問題なければ学習を開始します。ユーザーが同期実行を明示しない限り、このコマンドは OpenClaw sub-agent / background task に委譲してください。
 
 ```bash
 sbv2-bridge training run \
@@ -114,14 +120,20 @@ stage を限定する場合は `--stage resample --stage preprocess-text` のよ
 
 ## Job 確認
 
-長時間処理中または失敗時は、job status と log を確認します。
+長時間処理の実行中は OpenClaw task ledger を確認します。
+
+```bash
+openclaw tasks show <runId|childSessionKey|sessionKey>
+```
+
+完了後、bridge `jobId` が生成されていれば job status と log を確認します。
 
 ```bash
 sbv2-bridge jobs status <jobId>
 sbv2-bridge jobs log <jobId> --tail 80
 ```
 
-次に `summary.json`、dataset manifest、CLI の `pathRoles`、既存出力との衝突、SBV2 script や pretrained directory、GPU/依存関係を確認します。
+bridge `jobId` が無い失敗では、OpenClaw `runId`、実行 command、cwd、stdout/stderr、入力 manifest / model path を確認します。次に `summary.json`、dataset manifest、CLI の `pathRoles`、既存出力との衝突、SBV2 script や pretrained directory、GPU/依存関係を確認します。
 
 ## Promotion
 
@@ -148,7 +160,7 @@ sbv2-bridge models promote \
 
 ## Evaluation
 
-昇格後モデルは、固定テスト文セットで sample WAV と評価 manifest を作ります。
+昇格後モデルは、固定テスト文セットで sample WAV と評価 manifest を作ります。ユーザーが同期実行を明示しない限り、このコマンドは OpenClaw sub-agent / background task に委譲してください。
 
 ```bash
 sbv2-bridge evaluation run \
