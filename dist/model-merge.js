@@ -7,6 +7,7 @@ import { createJobManifest } from "./jobs.js";
 import { Sbv2Client } from "./sbv2-client.js";
 import { listModelCandidates } from "./model-registry.js";
 const MAX_SAFETENSORS_HEADER_BYTES = 100 * 1024 * 1024;
+const DEFAULT_MERGE_PARAMETER = 0.5;
 export function parseModelMergeMethod(value) {
     const normalized = value.replace(/_/g, "-");
     if (normalized === "usual" || normalized === "add-diff" || normalized === "weighted-sum" || normalized === "add-null") {
@@ -42,13 +43,15 @@ export async function createModelMergePlan(options) {
         outputDir,
         inputModels,
     });
+    const weights = normalizeWeights(options);
+    const coefficients = normalizeCoefficients(options);
     const command = buildMergeCommand({
         sbv2Root,
         method: options.method,
         outputModelName: options.outputModelName,
         inputModels,
-        weights: normalizeWeights(options),
-        coefficients: normalizeCoefficients(options),
+        weights,
+        coefficients,
         slerp: Boolean(options.slerp),
     });
     return {
@@ -60,8 +63,8 @@ export async function createModelMergePlan(options) {
         outputDir,
         outputSafetensorsPath,
         inputModels,
-        ...(commandPayloadUsesWeights(options.method) ? { weights: normalizeWeights(options) } : {}),
-        ...(options.method === "weighted-sum" ? { coefficients: normalizeCoefficients(options) } : {}),
+        ...(weights ? { weights } : {}),
+        ...(coefficients ? { coefficients } : {}),
         slerp: options.method === "usual" ? Boolean(options.slerp) : false,
         compatibility,
         command,
@@ -457,28 +460,31 @@ function normalizeWeights(options) {
     if (!commandPayloadUsesWeights(options.method))
         return undefined;
     return {
-        voiceWeight: requireWeight(options.weights?.voiceWeight, "--voice-weight"),
-        voicePitchWeight: requireWeight(options.weights?.voicePitchWeight, "--voice-pitch-weight"),
-        speechStyleWeight: requireWeight(options.weights?.speechStyleWeight, "--speech-style-weight"),
-        tempoWeight: requireWeight(options.weights?.tempoWeight, "--tempo-weight"),
+        voiceWeight: normalizeWeight(options.weights?.voiceWeight, "--voice-weight"),
+        voicePitchWeight: normalizeWeight(options.weights?.voicePitchWeight, "--voice-pitch-weight"),
+        speechStyleWeight: normalizeWeight(options.weights?.speechStyleWeight, "--speech-style-weight"),
+        tempoWeight: normalizeWeight(options.weights?.tempoWeight, "--tempo-weight"),
     };
 }
 function normalizeCoefficients(options) {
     if (options.method !== "weighted-sum")
         return undefined;
     return {
-        modelACoeff: requireFinite(options.coefficients?.modelACoeff, "--model-a-coeff"),
-        modelBCoeff: requireFinite(options.coefficients?.modelBCoeff, "--model-b-coeff"),
-        modelCCoeff: requireFinite(options.coefficients?.modelCCoeff, "--model-c-coeff"),
+        modelACoeff: normalizeFinite(options.coefficients?.modelACoeff, "--model-a-coeff"),
+        modelBCoeff: normalizeFinite(options.coefficients?.modelBCoeff, "--model-b-coeff"),
+        modelCCoeff: normalizeFinite(options.coefficients?.modelCCoeff, "--model-c-coeff"),
     };
+}
+function normalizeFinite(value, name) {
+    return value === undefined ? DEFAULT_MERGE_PARAMETER : requireFinite(value, name);
 }
 function requireFinite(value, name) {
     if (typeof value !== "number" || !Number.isFinite(value))
         throw new Error(`${name} must be a finite number`);
     return value;
 }
-function requireWeight(value, name) {
-    const number = requireFinite(value, name);
+function normalizeWeight(value, name) {
+    const number = normalizeFinite(value, name);
     if (number < 0 || number > 1)
         throw new Error(`${name} must be between 0 and 1`);
     return number;
