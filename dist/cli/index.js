@@ -6,7 +6,7 @@ import { DEFAULT_SLICE_MAX_SEC, DEFAULT_SLICE_MIN_SEC, ingestDataset, prepareDat
 import { createTrainingPlan, parseTrainingStage, runTraining, } from "../training.js";
 import { evaluateModelCandidate, readEvaluationManifest, updateEvaluationNote, } from "../evaluation.js";
 import { listModelCandidates, promoteModel } from "../model-registry.js";
-import { createModelMergePlan, parseModelMergeMethod, runModelMerge, } from "../model-merge.js";
+import { createModelMergePlan, parseModelMergeMethod, runModelMerge, summarizeModelMergePlan, summarizeModelMergeRun, } from "../model-merge.js";
 import { createStyleMergePlan, runStyleMerge } from "../style-merge.js";
 import { createModelRenamePlan, runModelRename } from "../model-rename.js";
 import { cancelJob, createDummyJob, listJobManifests, readJobManifest, resumeJob, retryJob, tailJobLog, } from "../jobs.js";
@@ -121,6 +121,7 @@ Options:
   --message <text>         Dummy job log message.
   --tail <lines>           Print the last N log lines.
   --json                   Print machine-readable JSON.
+  --json-summary           Print compact machine-readable JSON for model merge commands.
   -h, --help               Show this help.`);
 }
 function printCommandHelp(stdout, group, command) {
@@ -301,6 +302,7 @@ Coefficients for weighted-sum:
 Options:
   --sbv2-root <path>       SBV2 repository root.
   --json                   Print machine-readable JSON.
+  --json-summary           Print compact JSON without safetensors tensor maps.
   -h, --help               Show this help.
 
 Examples:
@@ -359,6 +361,7 @@ Options:
   --sbv2-root <path>       SBV2 repository root.
   --base-url <url>         SBV2 API base URL for refresh and /models/info checks.
   --json                   Print machine-readable JSON.
+  --json-summary           Print compact JSON without safetensors tensor maps.
   -h, --help               Show this help.
 
 Examples:
@@ -695,7 +698,7 @@ function parseEvaluationDecision(value) {
     throw new Error("--decision must be one of: adopt, hold, reject");
 }
 function parseArgs(argv) {
-    const options = { json: false, fail: false, sliceOptions: {}, trainingSettings: {} };
+    const options = { json: false, jsonSummary: false, fail: false, sliceOptions: {}, trainingSettings: {} };
     const positional = [];
     let helpRequested = false;
     for (let index = 0; index < argv.length; index += 1) {
@@ -709,6 +712,9 @@ function parseArgs(argv) {
         }
         else if (arg === "--json") {
             options.json = true;
+        }
+        else if (arg === "--json-summary") {
+            options.jsonSummary = true;
         }
         else if (arg === "--fail") {
             options.fail = true;
@@ -1068,6 +1074,12 @@ function modelMergePathRoles(result) {
         jobLog: result.job.logPath,
     };
 }
+function modelMergePlanPathRoles(plan) {
+    return {
+        sbv2LoadableModel: plan.outputDir,
+        recipe: path.join(plan.outputDir, "recipe.json"),
+    };
+}
 function styleMergePlanPathRoles(plan) {
     return {
         sbv2LoadableModel: plan.outputDir,
@@ -1247,7 +1259,10 @@ export async function runCli(argv, io = {}) {
             }
             if (parsed.command === "merge-plan") {
                 const result = await createModelMergePlan(buildModelMergeOptions(options));
-                if (options.json) {
+                if (options.jsonSummary) {
+                    printJson(stdout, { ok: true, summary: summarizeModelMergePlan(result), pathRoles: modelMergePlanPathRoles(result) });
+                }
+                else if (options.json) {
                     printJson(stdout, { ok: true, plan: result });
                 }
                 else {
@@ -1271,7 +1286,22 @@ export async function runCli(argv, io = {}) {
                     baseUrl: options.baseUrl,
                 });
                 const pathRoles = modelMergePathRoles(result);
-                if (options.json) {
+                if (options.jsonSummary) {
+                    printJson(stdout, {
+                        ok: true,
+                        summary: summarizeModelMergeRun(result),
+                        job: {
+                            jobId: result.job.jobId,
+                            state: result.job.state,
+                            outputDir: result.job.outputDir,
+                            logPath: result.job.logPath,
+                            artifactPaths: result.job.artifactPaths,
+                            inputSummary: result.job.inputSummary,
+                        },
+                        pathRoles,
+                    });
+                }
+                else if (options.json) {
                     printJson(stdout, {
                         ok: true,
                         plan: result.plan,

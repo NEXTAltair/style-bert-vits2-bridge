@@ -29,6 +29,8 @@ import {
   createModelMergePlan,
   parseModelMergeMethod,
   runModelMerge,
+  summarizeModelMergePlan,
+  summarizeModelMergeRun,
   type Sbv2ModelMergeMethod,
 } from "../model-merge.js";
 import { createStyleMergePlan, runStyleMerge } from "../style-merge.js";
@@ -54,6 +56,7 @@ interface CliOptions {
   datasetsRoot?: string;
   sbv2Root?: string;
   json: boolean;
+  jsonSummary: boolean;
   fail: boolean;
   message?: string;
   tailLines?: number;
@@ -228,6 +231,7 @@ Options:
   --message <text>         Dummy job log message.
   --tail <lines>           Print the last N log lines.
   --json                   Print machine-readable JSON.
+  --json-summary           Print compact machine-readable JSON for model merge commands.
   -h, --help               Show this help.`,
   );
 }
@@ -413,6 +417,7 @@ Coefficients for weighted-sum:
 Options:
   --sbv2-root <path>       SBV2 repository root.
   --json                   Print machine-readable JSON.
+  --json-summary           Print compact JSON without safetensors tensor maps.
   -h, --help               Show this help.
 
 Examples:
@@ -471,6 +476,7 @@ Options:
   --sbv2-root <path>       SBV2 repository root.
   --base-url <url>         SBV2 API base URL for refresh and /models/info checks.
   --json                   Print machine-readable JSON.
+  --json-summary           Print compact JSON without safetensors tensor maps.
   -h, --help               Show this help.
 
 Examples:
@@ -818,7 +824,7 @@ function parseEvaluationDecision(value: string | undefined): Sbv2EvaluationDecis
 }
 
 function parseArgs(argv: string[]): ParsedCommand {
-  const options: CliOptions = { json: false, fail: false, sliceOptions: {}, trainingSettings: {} };
+  const options: CliOptions = { json: false, jsonSummary: false, fail: false, sliceOptions: {}, trainingSettings: {} };
   const positional: string[] = [];
   let helpRequested = false;
 
@@ -832,6 +838,8 @@ function parseArgs(argv: string[]): ParsedCommand {
       helpRequested = true;
     } else if (arg === "--json") {
       options.json = true;
+    } else if (arg === "--json-summary") {
+      options.jsonSummary = true;
     } else if (arg === "--fail") {
       options.fail = true;
     } else if (arg === "--jobs-dir" && next) {
@@ -1158,6 +1166,13 @@ function modelMergePathRoles(result: {
   };
 }
 
+function modelMergePlanPathRoles(plan: { outputDir: string }): Sbv2PathRoles {
+  return {
+    sbv2LoadableModel: plan.outputDir,
+    recipe: path.join(plan.outputDir, "recipe.json"),
+  };
+}
+
 function styleMergePlanPathRoles(plan: { outputDir: string; outputConfigJsonPath: string }): Sbv2PathRoles {
   return {
     sbv2LoadableModel: plan.outputDir,
@@ -1358,7 +1373,9 @@ export async function runCli(argv: string[], io: CliIO = {}): Promise<number> {
       }
       if (parsed.command === "merge-plan") {
         const result = await createModelMergePlan(buildModelMergeOptions(options));
-        if (options.json) {
+        if (options.jsonSummary) {
+          printJson(stdout, { ok: true, summary: summarizeModelMergePlan(result), pathRoles: modelMergePlanPathRoles(result) });
+        } else if (options.json) {
           printJson(stdout, { ok: true, plan: result });
         } else {
           writeLine(stdout, `model merge plan ${result.outputModelName}`);
@@ -1379,7 +1396,21 @@ export async function runCli(argv: string[], io: CliIO = {}): Promise<number> {
           baseUrl: options.baseUrl,
         });
         const pathRoles = modelMergePathRoles(result);
-        if (options.json) {
+        if (options.jsonSummary) {
+          printJson(stdout, {
+            ok: true,
+            summary: summarizeModelMergeRun(result),
+            job: {
+              jobId: result.job.jobId,
+              state: result.job.state,
+              outputDir: result.job.outputDir,
+              logPath: result.job.logPath,
+              artifactPaths: result.job.artifactPaths,
+              inputSummary: result.job.inputSummary,
+            },
+            pathRoles,
+          });
+        } else if (options.json) {
           printJson(stdout, {
             ok: true,
             plan: result.plan,

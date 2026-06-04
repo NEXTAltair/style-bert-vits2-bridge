@@ -144,6 +144,7 @@ describe("sbv2-bridge CLI", () => {
     expect(stdout.output()).toContain("Experiment: sbv2-bridge models merge-plan");
     expect(stdout.output()).toContain("Candidate:  sbv2-bridge models merge-plan");
     expect(stdout.output()).toContain("--json");
+    expect(stdout.output()).toContain("--json-summary");
     expect(stdout.output()).not.toContain("datasets ingest");
   });
 
@@ -175,6 +176,7 @@ describe("sbv2-bridge CLI", () => {
     expect(stdout.output()).toContain("Model C contribution coefficient. Default 0.5.");
     expect(stdout.output()).toContain("/models/info registration, config.json style2id, style_vectors.npy");
     expect(stdout.output()).toContain("Candidate:  sbv2-bridge models merge-run");
+    expect(stdout.output()).toContain("--json-summary");
   });
 
   it("prints style-merge help without model merge parameters", async () => {
@@ -435,9 +437,74 @@ describe("sbv2-bridge CLI", () => {
     ).resolves.toBe(0);
     expect(stderr.output()).toBe("");
 
-    const parsed = JSON.parse(stdout.output()) as { plan: { method: string; coefficients: Record<string, number> } };
+    const parsed = JSON.parse(stdout.output()) as {
+      plan: {
+        method: string;
+        coefficients: Record<string, number>;
+        inputModels: { a: { safetensorsTensors: Record<string, unknown> } };
+      };
+    };
     expect(parsed.plan.method).toBe("weighted-sum");
     expect(parsed.plan.coefficients).toEqual({ modelACoeff: 1, modelBCoeff: -1, modelCCoeff: 0 });
+    expect(parsed.plan.inputModels.a.safetensorsTensors).toHaveProperty("weight");
+  });
+
+  it("prints a compact model merge plan summary without tensor maps", async () => {
+    const sbv2Root = createMergeCliRoot(["model-a", "model-b"]);
+    const stdout = createWriter();
+    const stderr = createWriter();
+
+    await expect(
+      runCli(
+        [
+          "models",
+          "merge-plan",
+          "--sbv2-root",
+          sbv2Root,
+          "--method",
+          "usual",
+          "--output-model-name",
+          "merged",
+          "--model-a",
+          "model-a",
+          "--model-b",
+          "model-b",
+          "--json-summary",
+        ],
+        { stdout: stdout.stream, stderr: stderr.stream },
+      ),
+    ).resolves.toBe(0);
+    expect(stderr.output()).toBe("");
+    expect(stdout.output()).not.toContain("safetensorsTensors");
+
+    const parsed = JSON.parse(stdout.output()) as {
+      plan?: unknown;
+      summary: {
+        method: string;
+        inputModels: { a: { modelName: string; safetensorsPath: string }; b: { safetensorsPath: string } };
+        weights: Record<string, number>;
+        compatibility: { compatible: boolean };
+        expectedArtifacts: string[];
+      };
+      pathRoles: { sbv2LoadableModel: string; recipe: string };
+    };
+    expect(parsed.plan).toBeUndefined();
+    expect(parsed.summary.method).toBe("usual");
+    expect(parsed.summary.inputModels.a.modelName).toBe("model-a");
+    expect(parsed.summary.inputModels.a.safetensorsPath).toBe(path.join(sbv2Root, "model_assets", "model-a", "model-a.safetensors"));
+    expect(parsed.summary.inputModels.b.safetensorsPath).toBe(path.join(sbv2Root, "model_assets", "model-b", "model-b.safetensors"));
+    expect(parsed.summary.weights).toEqual({
+      voiceWeight: 0.5,
+      voicePitchWeight: 0.5,
+      speechStyleWeight: 0.5,
+      tempoWeight: 0.5,
+    });
+    expect(parsed.summary.compatibility.compatible).toBe(true);
+    expect(parsed.summary.expectedArtifacts).toContain(path.join(sbv2Root, "model_assets", "merged", "merged.safetensors"));
+    expect(parsed.pathRoles).toEqual({
+      sbv2LoadableModel: path.join(sbv2Root, "model_assets", "merged"),
+      recipe: path.join(sbv2Root, "model_assets", "merged", "recipe.json"),
+    });
   });
 
   it("prints default usual merge weights as JSON when omitted", async () => {
@@ -639,6 +706,124 @@ fs.writeFileSync(path.join(outputDir, "recipe.json"), JSON.stringify({ method: p
       };
       expect(parsed.summary.recipePath).toBe(path.join(sbv2Root, "model_assets", "merged", "recipe.json"));
       expect(parsed.job.inputSummary.recipePath).toBe(parsed.summary.recipePath);
+      expect(parsed.pathRoles).toEqual({
+        bridgeState: parsed.job.outputDir,
+        sbv2LoadableModel: path.join(sbv2Root, "model_assets", "merged"),
+        recipe: path.join(sbv2Root, "model_assets", "merged", "recipe.json"),
+        summary: path.join(parsed.job.outputDir, "summary.json"),
+        jobLog: parsed.job.logPath,
+      });
+    } finally {
+      process.env.PATH = previousPath;
+    }
+  });
+
+  it("prints a compact model merge run summary with job artifacts and no tensor maps", async () => {
+    const jobsRoot = tempJobsRoot();
+    const sbv2Root = mkdtempSync(path.join(tmpdir(), "sbv2-cli-merge-summary-root-"));
+    const binRoot = mkdtempSync(path.join(tmpdir(), "sbv2-cli-bin-"));
+    mkdirSync(path.join(sbv2Root, "configs"), { recursive: true });
+    writeFileSync(path.join(sbv2Root, "configs", "paths.yml"), "assets_root: model_assets\n");
+    for (const modelName of ["model-a", "model-b"]) {
+      const modelDir = path.join(sbv2Root, "model_assets", modelName);
+      mkdirSync(modelDir, { recursive: true });
+      writeFileSync(path.join(modelDir, "config.json"), JSON.stringify(makeModelConfig(modelName)));
+      writeFileSync(path.join(modelDir, "style_vectors.npy"), makeNpy([1, 2]));
+      writeFileSync(path.join(modelDir, `${modelName}.safetensors`), makeSafetensors());
+    }
+    const fakeUv = path.join(binRoot, "uv");
+    writeFileSync(
+      fakeUv,
+      `#!/usr/bin/env node
+const fs = require("node:fs");
+const path = require("node:path");
+const payload = JSON.parse(process.argv[process.argv.length - 1]);
+const outputDir = path.join(process.cwd(), "model_assets", payload.outputName);
+const modelADir = path.dirname(payload.modelPathA);
+fs.mkdirSync(outputDir, { recursive: true });
+const config = JSON.parse(fs.readFileSync(path.join(modelADir, "config.json"), "utf8"));
+config.model_name = payload.outputName;
+config.data.spk2id = { [payload.outputName]: 0 };
+fs.writeFileSync(path.join(outputDir, "config.json"), JSON.stringify(config));
+fs.copyFileSync(path.join(modelADir, "style_vectors.npy"), path.join(outputDir, "style_vectors.npy"));
+fs.copyFileSync(payload.modelPathA, path.join(outputDir, payload.outputName + ".safetensors"));
+fs.writeFileSync(path.join(outputDir, "recipe.json"), JSON.stringify({ method: payload.method }));
+`,
+    );
+    chmodSync(fakeUv, 0o755);
+
+    const previousPath = process.env.PATH;
+    process.env.PATH = `${binRoot}:${previousPath ?? ""}`;
+    try {
+      const stdout = createWriter();
+      const stderr = createWriter();
+      await expect(
+        runCli(
+          [
+            "models",
+            "merge-run",
+            "--jobs-dir",
+            jobsRoot,
+            "--sbv2-root",
+            sbv2Root,
+            "--method",
+            "usual",
+            "--output-model-name",
+            "merged",
+            "--confirm-output-model-name",
+            "merged",
+            "--model-a",
+            "model-a",
+            "--model-b",
+            "model-b",
+            "--json-summary",
+          ],
+          { stdout: stdout.stream, stderr: stderr.stream },
+        ),
+      ).resolves.toBe(0);
+      expect(stderr.output()).toBe("");
+      expect(stdout.output()).not.toContain("safetensorsTensors");
+
+      const parsed = JSON.parse(stdout.output()) as {
+        plan?: unknown;
+        candidate?: unknown;
+        summary: {
+          method: string;
+          inputModels: { a: { safetensorsPath: string } };
+          candidate: { modelName: string; safetensorsPaths: string[] };
+          expectedArtifacts: string[];
+        };
+        job: {
+          jobId: string;
+          state: string;
+          outputDir: string;
+          logPath: string;
+          artifactPaths: string[];
+          inputSummary: { recipePath?: string };
+        };
+        pathRoles: {
+          bridgeState?: string;
+          sbv2LoadableModel?: string;
+          recipe?: string;
+          summary?: string;
+          jobLog?: string;
+        };
+      };
+      expect(parsed.plan).toBeUndefined();
+      expect(parsed.candidate).toBeUndefined();
+      expect(parsed.summary.method).toBe("usual");
+      expect(parsed.summary.inputModels.a.safetensorsPath).toBe(
+        path.join(sbv2Root, "model_assets", "model-a", "model-a.safetensors"),
+      );
+      expect(parsed.summary.candidate).toMatchObject({
+        modelName: "merged",
+        safetensorsPaths: [path.join(sbv2Root, "model_assets", "merged", "merged.safetensors")],
+      });
+      expect(parsed.summary.expectedArtifacts).toContain(path.join(sbv2Root, "model_assets", "merged", "recipe.json"));
+      expect(parsed.job.jobId).toMatch(/^sbv2-job-/);
+      expect(parsed.job.state).toBe("succeeded");
+      expect(parsed.job.artifactPaths).toContain(path.join(sbv2Root, "model_assets", "merged", "recipe.json"));
+      expect(parsed.job.inputSummary.recipePath).toBe(path.join(sbv2Root, "model_assets", "merged", "recipe.json"));
       expect(parsed.pathRoles).toEqual({
         bridgeState: parsed.job.outputDir,
         sbv2LoadableModel: path.join(sbv2Root, "model_assets", "merged"),

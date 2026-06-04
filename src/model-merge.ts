@@ -124,6 +124,54 @@ export interface Sbv2ModelMergeSummary {
   nextSteps: string[];
 }
 
+export interface Sbv2ModelMergeInputSummary {
+  modelName: string;
+  modelDir: string;
+  safetensorsPath: string;
+  configJsonPath: string;
+  styleVectorsPath: string;
+  speakerCount: number;
+  styleVectorShape: number[];
+}
+
+export interface Sbv2ModelMergePlanSummary {
+  schemaVersion: 1;
+  method: Sbv2ModelMergeMethod;
+  outputModelName: string;
+  outputDir: string;
+  outputSafetensorsPath: string;
+  recipePath: string;
+  inputModels: {
+    a: Sbv2ModelMergeInputSummary;
+    b: Sbv2ModelMergeInputSummary;
+    c?: Sbv2ModelMergeInputSummary;
+  };
+  weights?: Sbv2ModelMergeWeights;
+  coefficients?: Sbv2WeightedSumCoefficients;
+  slerp: boolean;
+  compatibility: Sbv2ModelMergeCompatibilityReport;
+  expectedArtifacts: string[];
+}
+
+export interface Sbv2ModelMergeCandidateSummary {
+  candidateId: string;
+  modelName: string;
+  sourceDir: string;
+  targetDir: string;
+  configJsonPath: string;
+  styleVectorsPath: string;
+  safetensorsPaths: string[];
+  promotable: boolean;
+  errors: string[];
+  warnings: string[];
+}
+
+export interface Sbv2ModelMergeRunSummary extends Sbv2ModelMergePlanSummary {
+  candidate: Sbv2ModelMergeCandidateSummary;
+  refresh?: Sbv2ModelMergeSummary["refresh"];
+  nextSteps: string[];
+}
+
 export interface ModelMergeRunResult {
   plan: Sbv2ModelMergePlan;
   candidate: Sbv2ModelCandidate;
@@ -398,7 +446,37 @@ function buildModelMergeInputSummary(
   };
 }
 
-function summarizeMergeInput(input: Sbv2ModelMergeInput): Record<string, unknown> {
+export function summarizeModelMergePlan(plan: Sbv2ModelMergePlan): Sbv2ModelMergePlanSummary {
+  return {
+    schemaVersion: plan.schemaVersion,
+    method: plan.method,
+    outputModelName: plan.outputModelName,
+    outputDir: plan.outputDir,
+    outputSafetensorsPath: plan.outputSafetensorsPath,
+    recipePath: mergeRecipePath(plan),
+    inputModels: {
+      a: summarizeMergeInput(plan.inputModels.a),
+      b: summarizeMergeInput(plan.inputModels.b),
+      ...(plan.inputModels.c ? { c: summarizeMergeInput(plan.inputModels.c) } : {}),
+    },
+    ...(plan.weights ? { weights: plan.weights } : {}),
+    ...(plan.coefficients ? { coefficients: plan.coefficients } : {}),
+    slerp: plan.slerp,
+    compatibility: plan.compatibility,
+    expectedArtifacts: plan.expectedArtifacts,
+  };
+}
+
+export function summarizeModelMergeRun(result: ModelMergeRunResult): Sbv2ModelMergeRunSummary {
+  return {
+    ...summarizeModelMergePlan(result.plan),
+    candidate: summarizeModelMergeCandidate(result.candidate),
+    ...(result.summary.refresh ? { refresh: result.summary.refresh } : {}),
+    nextSteps: result.summary.nextSteps,
+  };
+}
+
+function summarizeMergeInput(input: Sbv2ModelMergeInput): Sbv2ModelMergeInputSummary {
   return {
     modelName: input.modelName,
     modelDir: input.modelDir,
@@ -407,6 +485,21 @@ function summarizeMergeInput(input: Sbv2ModelMergeInput): Record<string, unknown
     styleVectorsPath: input.styleVectorsPath,
     speakerCount: input.speakerCount,
     styleVectorShape: input.styleVectorShape,
+  };
+}
+
+function summarizeModelMergeCandidate(candidate: Sbv2ModelCandidate): Sbv2ModelMergeCandidateSummary {
+  return {
+    candidateId: candidate.candidateId,
+    modelName: candidate.modelName,
+    sourceDir: candidate.sourceDir,
+    targetDir: candidate.targetDir,
+    configJsonPath: candidate.configJsonPath,
+    styleVectorsPath: candidate.styleVectorsPath,
+    safetensorsPaths: candidate.safetensors.map((file) => file.path),
+    promotable: candidate.promotable,
+    errors: candidate.errors,
+    warnings: candidate.warnings,
   };
 }
 
