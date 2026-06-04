@@ -43,15 +43,16 @@ function makeConfig(modelName: string, style2id: Record<string, number> = { Neut
   };
 }
 
-function makeNpy(rows: number[][]): Buffer {
+function makeNpy(rows: number[][], descriptor = "<f4"): Buffer {
   const rowCount = rows.length;
   const width = rows[0]?.length ?? 0;
   const shapeText = `${rowCount}, ${width}`;
-  const header = `{'descr': '<f4', 'fortran_order': False, 'shape': (${shapeText}), }`;
+  const header = `{'descr': '${descriptor}', 'fortran_order': False, 'shape': (${shapeText}), }`;
+  const bytesPerElement = Number(descriptor.match(/(\d+)$/)?.[1] ?? 4);
   const magicLength = 10;
   const padding = 16 - ((magicLength + header.length + 1) % 16);
   const paddedHeader = `${header}${" ".repeat(padding)}\n`;
-  const result = Buffer.alloc(magicLength + paddedHeader.length + rowCount * width * 4);
+  const result = Buffer.alloc(magicLength + paddedHeader.length + rowCount * width * bytesPerElement);
   result.write("\x93NUMPY", 0, "latin1");
   result[6] = 1;
   result[7] = 0;
@@ -59,7 +60,14 @@ function makeNpy(rows: number[][]): Buffer {
   result.write(paddedHeader, magicLength, "latin1");
   for (const [rowIndex, row] of rows.entries()) {
     for (const [columnIndex, value] of row.entries()) {
-      result.writeFloatLE(value, magicLength + paddedHeader.length + (rowIndex * width + columnIndex) * 4);
+      const offset = magicLength + paddedHeader.length + (rowIndex * width + columnIndex) * bytesPerElement;
+      if (descriptor.endsWith("8")) {
+        result.writeDoubleLE(value, offset);
+      } else if (descriptor.includes("i")) {
+        result.writeInt32LE(value, offset);
+      } else {
+        result.writeFloatLE(value, offset);
+      }
     }
   }
   return result;
@@ -267,6 +275,46 @@ describe("SBV2 model merge", () => {
 
     expect(plan.compatibility.compatible).toBe(false);
     expect(plan.compatibility.errors.join("\n")).toContain("requires styleC for weighted-sum");
+  });
+
+  it("rejects out-of-range style ids before planning a style recipe", async () => {
+    const sbv2Root = createSbv2Root();
+    writeModelAssets(sbv2Root, "model-a", [1], [[0, 0], [1, 1]], { Neutral: 0, Calm: 3 });
+    writeModelAssets(sbv2Root, "model-b", [1], [[10, 10], [20, 20]], { Neutral: 0, Happy: 1 });
+    const styleRecipePath = writeStyleRecipe(sbv2Root, [{ styleA: "Calm", styleB: "Happy", outputStyle: "Happy" }]);
+
+    await expect(
+      createModelMergePlan({
+        ...commonWeightOptions(sbv2Root),
+        method: "usual",
+        styleRecipePath,
+      }),
+    ).rejects.toThrow("zero-based permutation");
+  });
+
+  it("rejects unsupported or truncated style vectors before running merge", async () => {
+    const sbv2Root = createSbv2Root();
+    writeModelAssets(sbv2Root, "model-a");
+    writeModelAssets(sbv2Root, "model-b");
+    const styleRecipePath = writeStyleRecipe(sbv2Root, [{ styleA: "Neutral", styleB: "Neutral", outputStyle: "Neutral" }]);
+    writeFileSync(path.join(sbv2Root, "model_assets", "model-a", "style_vectors.npy"), makeNpy([[0, 0]], "<i4"));
+
+    await expect(
+      createModelMergePlan({
+        ...commonWeightOptions(sbv2Root),
+        method: "usual",
+        styleRecipePath,
+      }),
+    ).rejects.toThrow("dtype must be float32 or float64");
+
+    writeFileSync(path.join(sbv2Root, "model_assets", "model-a", "style_vectors.npy"), makeNpy([[0, 0]]).subarray(0, -2));
+    await expect(
+      createModelMergePlan({
+        ...commonWeightOptions(sbv2Root),
+        method: "usual",
+        styleRecipePath,
+      }),
+    ).rejects.toThrow("data is truncated");
   });
 
   it("rejects weighted-sum part weights and non-usual slerp", async () => {

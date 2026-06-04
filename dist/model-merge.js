@@ -338,6 +338,7 @@ async function inspectMergeInput(options) {
     if (config.styleCount !== undefined && styleVectorShape[0] !== config.styleCount) {
         throw new Error(`${options.label} style_vectors.npy row count does not match config.json data.num_styles`);
     }
+    validateStyle2idPermutation(config.style2id, styleVectorShape[0], `${options.label} config.json data.style2id`);
     return {
         modelName: options.modelName,
         modelDir,
@@ -815,9 +816,15 @@ async function readConfigSummary(configJsonPath) {
 }
 async function readNpyShape(filePath) {
     await requireNonEmptyFile(filePath, "style_vectors.npy");
-    const header = parseNpy(await readFile(filePath));
+    const buffer = await readFile(filePath);
+    const header = parseNpy(buffer);
     if (!header || header.shape.length < 2)
         throw new Error(`style_vectors.npy is not a valid 2D NumPy file: ${filePath}`);
+    if (!isSupportedFloatDescriptor(header.descr))
+        throw new Error(`style_vectors.npy dtype must be float32 or float64: ${filePath}`);
+    const expectedBytes = header.shape.reduce((total, value) => total * value, 1) * header.bytesPerElement;
+    if (buffer.length < header.dataOffset + expectedBytes)
+        throw new Error(`style_vectors.npy data is truncated: ${filePath}`);
     return header.shape;
 }
 function parseNpy(buffer) {
@@ -870,6 +877,16 @@ function readStyle2id(config, filePath) {
         result[key] = value;
     }
     return result;
+}
+function validateStyle2idPermutation(style2id, size, label) {
+    const values = Object.values(style2id);
+    if (values.length !== size) {
+        throw new Error(`${label} size must match style_vectors.npy row count`);
+    }
+    const sorted = [...values].sort((left, right) => left - right);
+    if (!sorted.every((value, index) => value === index)) {
+        throw new Error(`${label} values must be a zero-based permutation matching style_vectors.npy rows`);
+    }
 }
 function isSupportedFloatDescriptor(descr) {
     return /^<f[48]$/.test(descr);
