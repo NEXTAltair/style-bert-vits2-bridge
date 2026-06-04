@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { mkdir, readFile, stat, writeFile } from "node:fs/promises";
+import { mkdir, readFile, readdir, stat, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import path from "node:path";
 import { createJobManifest, type Sbv2JobManifest } from "./jobs.js";
@@ -141,14 +141,18 @@ export async function createStyleMergePlan(options: StyleMergePlanOptions): Prom
   if (recipe.outputModelName === recipe.modelA || recipe.outputModelName === recipe.modelB) {
     errors.push("outputModelName must not be the same as modelA or modelB");
   }
-  if (!(await isNonEmptyFile(path.join(outputDir, `${recipe.outputModelName}.safetensors`)))) {
-    warnings.push(`output model safetensors was not found at the conventional path: ${path.join(outputDir, `${recipe.outputModelName}.safetensors`)}`);
+  const conventionalSafetensorsPath = path.join(outputDir, `${recipe.outputModelName}.safetensors`);
+  const outputHasSafetensors = await hasNonEmptySafetensors(outputDir);
+  if (!outputHasSafetensors) {
+    errors.push(`output model assets directory must contain a non-empty .safetensors file: ${outputDir}`);
+  } else if (!(await isNonEmptyFile(conventionalSafetensorsPath))) {
+    warnings.push(`output model safetensors was not found at the conventional path: ${conventionalSafetensorsPath}`);
   }
   if (modelA.styleVectorShape.slice(1).join("x") !== modelB.styleVectorShape.slice(1).join("x")) {
     errors.push("model A and model B style vector dimensions must match");
   }
 
-  const outputStyle2id: Record<string, number> = {};
+  const outputStyle2id = createStringNumberRecord();
   const styleRows: Sbv2StyleMergeRow[] = [];
   for (const [index, style] of recipe.styles.entries()) {
     const outputStyle = style.outputStyle.trim();
@@ -227,7 +231,7 @@ export async function runStyleMerge(options: StyleMergeRunOptions): Promise<Styl
   const logLines = [`style merge started for ${plan.outputModelName}`];
   let refreshForFailedJob: Sbv2StyleMergeSummary["refresh"] | undefined;
   const outputVectors = await buildMergedStyleVectors(plan);
-  const config = await readConfig(plan.modelA.configJsonPath);
+  const config = await readConfig(plan.outputConfigJsonPath);
   updateConfigForOutput(config, plan.outputModelName, plan.outputStyle2id);
 
   const buildSummary = (): Sbv2StyleMergeSummary => ({
@@ -485,10 +489,6 @@ function updateConfigForOutput(config: Record<string, unknown>, outputModelName:
   config.model_name = outputModelName;
   data.num_styles = Object.keys(style2id).length;
   data.style2id = style2id;
-  if (isSingleSpeakerConfig(data)) {
-    data.spk2id = { [outputModelName]: 0 };
-    data.id2spk = { "0": outputModelName };
-  }
 }
 
 function buildOutputRecipe(plan: Sbv2StyleMergePlan): Record<string, unknown> {
@@ -539,7 +539,7 @@ function readStyle2id(config: Record<string, unknown>, filePath: string): Record
   if (!isRecord(data) || !isRecord(data.style2id) || !Object.keys(data.style2id).length) {
     throw new Error(`config.json data.style2id must be a non-empty object: ${filePath}`);
   }
-  const result: Record<string, number> = {};
+  const result = createStringNumberRecord();
   for (const [key, value] of Object.entries(data.style2id)) {
     if (typeof value !== "number" || !Number.isSafeInteger(value) || value < 0) {
       throw new Error(`config.json data.style2id values must be non-negative safe integers: ${filePath}`);
@@ -567,12 +567,6 @@ function normalizeStyleWeight(value: number | undefined): number {
 
 function isSupportedFloatDescriptor(descr: string): boolean {
   return /^[<|]f[48]$/.test(descr);
-}
-
-function isSingleSpeakerConfig(data: Record<string, unknown>): boolean {
-  if (data.n_speakers === 1) return true;
-  if (data.n_speakers !== undefined) return false;
-  return isRecord(data.spk2id) && Object.keys(data.spk2id).length === 1;
 }
 
 async function readSbv2PathConfig(sbv2Root: string): Promise<Sbv2PathConfigRoots> {
@@ -644,6 +638,24 @@ async function isNonEmptyFile(filePath: string): Promise<boolean> {
   } catch {
     return false;
   }
+}
+
+async function hasNonEmptySafetensors(directoryPath: string): Promise<boolean> {
+  try {
+    const entries = await readdir(directoryPath);
+    for (const entry of entries) {
+      if (entry.endsWith(".safetensors") && (await isNonEmptyFile(path.join(directoryPath, entry)))) {
+        return true;
+      }
+    }
+    return false;
+  } catch {
+    return false;
+  }
+}
+
+function createStringNumberRecord(): Record<string, number> {
+  return Object.create(null) as Record<string, number>;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
