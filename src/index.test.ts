@@ -2435,14 +2435,20 @@ describe("Style-Bert-VITS2 speech provider", () => {
         key: "style",
         value: "01_Happy",
         policy: { allowVoiceSettings: true },
-        currentOverrides: { styleWeight: 0.65, noise: 0.45 },
+        currentOverrides: {
+          styleWeight: 0.65,
+          sdpRatio: 0.15,
+          sdp_ratio: 0.2,
+          noise: 0.45,
+          noisew: 0.55,
+          noise_w: 0.6,
+        },
       }),
     ).toEqual({
       handled: true,
       overrides: {
         style: "01_Happy",
         styleWeight: 0.65,
-        noise: 0.45,
       },
     });
   });
@@ -2652,7 +2658,7 @@ describe("Style-Bert-VITS2 speech provider", () => {
     });
   });
 
-  it("maps Talk snake_case voice fields, WPM rate, and style settings", () => {
+  it("maps Talk snake_case voice fields, WPM rate, and user-facing style settings", () => {
     const provider = buildSbv2SpeechProvider();
 
     expect(
@@ -2678,9 +2684,6 @@ describe("Style-Bert-VITS2 speech provider", () => {
       length: 1,
       style: "Happy",
       styleWeight: 0.7,
-      sdpRatio: 0.15,
-      noise: 0.45,
-      noisew: 0.55,
       assistText: "cheerful",
       assistTextWeight: 0.8,
     });

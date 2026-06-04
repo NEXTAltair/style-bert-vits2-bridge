@@ -120,7 +120,7 @@ OpenClaw の policy が許可している場合、directive や Talk params か�
 | `speed`, `length` | 話速 override。`speed` は `length = 1 / speed` に変換 |
 | `assist_text`, `assist_text_weight` | 感情補助テキスト override |
 
-低レベルの `sdp_ratio`、`noise`、`noisew`、`auto_split`、`split_interval` は directive からは受け付けません。
+低レベルの `sdp_ratio`、`noise`、`noisew`、`auto_split`、`split_interval` は OpenClaw agent が扱う per-request override からは受け付けません。必要な場合は operator が provider config の既定値として固定します。
 
 ## 動作確認
 
