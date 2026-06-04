@@ -365,6 +365,16 @@ Example:
 
 Print an agent-safe SBV2 model merge plan without running it.
 
+Method guide:
+  usual                   Blend two models by part weights. Use for normal A/B voice mixing.
+  add-diff                Apply the difference between model B and model C to model A.
+  weighted-sum            Combine three models with explicit A/B/C coefficients.
+  add-null                Add model B toward model A with part weights and no third model.
+
+Meaningful merge note:
+  A successful command only proves artifacts were generated. Confirm parameters, recipe.json,
+  /models/info registration, and sample audio before treating the output as a useful model.
+
 Required:
   --method <name>          Model merge method: usual, add-diff, weighted-sum, add-null.
   --model-a <name>         Model A for model merge.
@@ -381,30 +391,43 @@ Optional file selectors:
   --model-c-file <name>    Model C top-level safetensors filename.
 
 Weights for usual/add-diff/add-null:
-  --voice-weight <n>       Voice quality weight. Default 0.5.
-  --voice-pitch-weight <n> Voice pitch weight. Default 0.5.
+  --voice-weight <n>       Voice quality weight for the B contribution, or B-C diff in add-diff. Default 0.5.
+  --voice-pitch-weight <n> Pitch weight for the B contribution, or B-C diff in add-diff. Default 0.5.
   --speech-style-weight <n>
-                            Speech style weight. Default 0.5.
-  --tempo-weight <n>       Tempo weight. Default 0.5.
-  --slerp                  Use spherical interpolation for usual merge.
+                            Speaking style weight for B, or B-C diff in add-diff. Default 0.5.
+  --tempo-weight <n>       Speaking tempo weight for B, or B-C diff in add-diff. Default 0.5.
+  --slerp                  Use spherical interpolation for usual merge when exploring smoother blends.
 
 Coefficients for weighted-sum:
-  --model-a-coeff <n>      Model A coefficient. Default 0.5.
-  --model-b-coeff <n>      Model B coefficient. Default 0.5.
-  --model-c-coeff <n>      Model C coefficient. Default 0.5.
+  --model-a-coeff <n>      Model A contribution coefficient. Default 0.5.
+  --model-b-coeff <n>      Model B contribution coefficient. Default 0.5.
+  --model-c-coeff <n>      Model C contribution coefficient. Default 0.5.
+                            Defaults keep omitted values at a visible half-strength blend.
 
 Options:
   --sbv2-root <path>       SBV2 repository root.
   --json                   Print machine-readable JSON.
   -h, --help               Show this help.
 
-Example:
-  sbv2-bridge models merge-plan --method usual --model-a base --model-b donor --output-model-name merged`;
+Examples:
+  Smoke:      sbv2-bridge models merge-plan --method usual --model-a base --model-b donor --output-model-name smoke_mix --json
+  Experiment: sbv2-bridge models merge-plan --method usual --model-a base --model-b donor --output-model-name soft_mix --voice-weight 0.35 --voice-pitch-weight 0.5 --speech-style-weight 0.65 --tempo-weight 0.5 --json
+  Candidate:  sbv2-bridge models merge-plan --method weighted-sum --model-a base --model-b donor --model-c reference --output-model-name candidate_mix --model-a-coeff 0.5 --model-b-coeff 0.5 --model-c-coeff 0.0 --json`;
     }
     if (command === "merge-run") {
       return `Usage: sbv2-bridge models merge-run [options]
 
 Run a planned SBV2 model merge and write a job.
+
+Method guide:
+  usual                   Blend two models by part weights. Use for normal A/B voice mixing.
+  add-diff                Apply the difference between model B and model C to model A.
+  weighted-sum            Combine three models with explicit A/B/C coefficients.
+  add-null                Add model B toward model A with part weights and no third model.
+
+Meaningful merge note:
+  A successful job only proves artifacts were generated. Confirm recipe.json, summary.json,
+  /models/info registration, config.json style2id, style_vectors.npy, and A/B sample audio.
 
 Required:
   --method <name>          Model merge method: usual, add-diff, weighted-sum, add-null.
@@ -424,17 +447,18 @@ Optional file selectors:
   --model-c-file <name>    Model C top-level safetensors filename.
 
 Weights for usual/add-diff/add-null:
-  --voice-weight <n>       Voice quality weight. Default 0.5.
-  --voice-pitch-weight <n> Voice pitch weight. Default 0.5.
+  --voice-weight <n>       Voice quality weight for the B contribution, or B-C diff in add-diff. Default 0.5.
+  --voice-pitch-weight <n> Pitch weight for the B contribution, or B-C diff in add-diff. Default 0.5.
   --speech-style-weight <n>
-                            Speech style weight. Default 0.5.
-  --tempo-weight <n>       Tempo weight. Default 0.5.
-  --slerp                  Use spherical interpolation for usual merge.
+                            Speaking style weight for B, or B-C diff in add-diff. Default 0.5.
+  --tempo-weight <n>       Speaking tempo weight for B, or B-C diff in add-diff. Default 0.5.
+  --slerp                  Use spherical interpolation for usual merge when exploring smoother blends.
 
 Coefficients for weighted-sum:
-  --model-a-coeff <n>      Model A coefficient. Default 0.5.
-  --model-b-coeff <n>      Model B coefficient. Default 0.5.
-  --model-c-coeff <n>      Model C coefficient. Default 0.5.
+  --model-a-coeff <n>      Model A contribution coefficient. Default 0.5.
+  --model-b-coeff <n>      Model B contribution coefficient. Default 0.5.
+  --model-c-coeff <n>      Model C contribution coefficient. Default 0.5.
+                            Defaults keep omitted values at a visible half-strength blend.
 
 Options:
   --jobs-dir <path>        Job manifest/log root.
@@ -443,8 +467,10 @@ Options:
   --json                   Print machine-readable JSON.
   -h, --help               Show this help.
 
-Example:
-  sbv2-bridge models merge-run --method usual --model-a base --model-b donor --output-model-name merged --confirm-output-model-name merged`;
+Examples:
+  Smoke:      sbv2-bridge models merge-run --method usual --model-a base --model-b donor --output-model-name smoke_mix --confirm-output-model-name smoke_mix --json
+  Experiment: sbv2-bridge models merge-run --method usual --model-a base --model-b donor --output-model-name soft_mix --confirm-output-model-name soft_mix --voice-weight 0.35 --voice-pitch-weight 0.5 --speech-style-weight 0.65 --tempo-weight 0.5 --json
+  Candidate:  sbv2-bridge models merge-run --method weighted-sum --model-a base --model-b donor --model-c reference --output-model-name candidate_mix --confirm-output-model-name candidate_mix --model-a-coeff 0.5 --model-b-coeff 0.5 --model-c-coeff 0.0 --base-url http://127.0.0.1:5000 --json`;
     }
     if (command === "promote") {
       return `Usage: sbv2-bridge models promote [options]

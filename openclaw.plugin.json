@@ -8,7 +8,8 @@
   },
   "skills": [
     "./skills/voice",
-    "./skills/model-production"
+    "./skills/model-production",
+    "./skills/sbv2-model-ops"
   ],
   "configSchema": {
     "type": "object",
