@@ -28,6 +28,7 @@ export async function createStyleMergePlan(options) {
     if (!(await isDirectory(outputDir))) {
         errors.push(`output model assets directory was not found: ${outputDir}`);
     }
+    await validateOutputConfig(outputConfigJsonPath, errors);
     if (recipe.outputModelName === recipe.modelA || recipe.outputModelName === recipe.modelB) {
         errors.push("outputModelName must not be the same as modelA or modelB");
     }
@@ -274,6 +275,18 @@ async function inspectStyleMergeInput(assetsRoot, modelName, label) {
         numStyles,
         styleVectorShape: npy.shape,
     };
+}
+async function validateOutputConfig(configJsonPath, errors) {
+    try {
+        const config = await readConfig(configJsonPath);
+        if (!isRecord(config.data)) {
+            errors.push(`output config.json is missing data object: ${configJsonPath}`);
+        }
+    }
+    catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        errors.push(`output config.json could not be read: ${configJsonPath}: ${message}`);
+    }
 }
 async function buildMergedStyleVectors(plan) {
     const a = readNpyNumeric2d(await readFile(plan.modelA.styleVectorsPath));

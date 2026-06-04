@@ -426,6 +426,25 @@ describe("SBV2 style merge", () => {
     expect(plan.compatibility.errors.join("\n")).toContain("must contain a non-empty .safetensors file");
   });
 
+  it("rejects unreadable output configs while planning", async () => {
+    const sbv2Root = createSbv2Root();
+    writeModelAssets(sbv2Root, "base", { Neutral: 0 }, [[0, 0]]);
+    writeModelAssets(sbv2Root, "donor", { Neutral: 0 }, [[10, 10]]);
+    writeModelAssets(sbv2Root, "merged", { Neutral: 0 }, [[0, 0]]);
+    writeFileSync(path.join(sbv2Root, "model_assets", "merged", "config.json"), "{ invalid json\n");
+    const recipePath = writeRecipe(sbv2Root, {
+      outputModelName: "merged",
+      modelA: "base",
+      modelB: "donor",
+      styles: [{ styleA: "Neutral", styleB: "Neutral", outputStyle: "Neutral" }],
+    });
+
+    const plan = await createStyleMergePlan({ sbv2Root, recipePath });
+
+    expect(plan.compatibility.compatible).toBe(false);
+    expect(plan.compatibility.errors.join("\n")).toContain("output config.json could not be read");
+  });
+
   it("records failed jobs when refresh misses the style-merged model", async () => {
     const sbv2Root = createSbv2Root();
     const jobsRoot = tempRoot("sbv2-style-merge-jobs-");
