@@ -5,7 +5,7 @@ description: Style-Bert-VITS2 の音声素材 ingest から dataset prepare、tr
 
 # Model Production — SBV2 学習モデル作成ガイド
 
-このスキルは、音声ファイルまたは音声ディレクトリから Style-Bert-VITS2 (SBV2) の学習モデルを作成する制作 workflow をガイドします。TTS 再生や声色選択は `voice` skill を使います。
+このスキルは、音声ファイルまたは音声ディレクトリから Style-Bert-VITS2 (SBV2) の学習モデルを作成する制作 workflow をガイドします。TTS 再生や声色選択は `voice` skill、制作系操作の開始前後チェックは `sbv2-model-ops` skill を使います。
 
 ## 基本方針
 

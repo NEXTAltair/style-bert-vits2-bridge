@@ -136,8 +136,13 @@ describe("sbv2-bridge CLI", () => {
     expect(stdout.output()).toContain("--model-b <name>");
     expect(stdout.output()).toContain("--output-model-name <name>");
     expect(stdout.output()).toContain("--model-c <name>");
-    expect(stdout.output()).toContain("Voice quality weight. Default 0.5.");
-    expect(stdout.output()).toContain("Model A coefficient. Default 0.5.");
+    expect(stdout.output()).toContain("usual                   Blend two models by part weights.");
+    expect(stdout.output()).toContain("Voice quality balance between model A and B. Default 0.5.");
+    expect(stdout.output()).toContain("Model A contribution coefficient. Default 0.5.");
+    expect(stdout.output()).toContain("Defaults keep omitted values at a visible half-strength blend.");
+    expect(stdout.output()).toContain("Smoke:      sbv2-bridge models merge-plan");
+    expect(stdout.output()).toContain("Experiment: sbv2-bridge models merge-plan");
+    expect(stdout.output()).toContain("Candidate:  sbv2-bridge models merge-plan");
     expect(stdout.output()).toContain("--json");
     expect(stdout.output()).not.toContain("datasets ingest");
   });
@@ -166,8 +171,10 @@ describe("sbv2-bridge CLI", () => {
     expect(stdout.output()).toContain("Usage: sbv2-bridge models merge-run [options]");
     expect(stdout.output()).toContain("--confirm-output-model-name <name>");
     expect(stdout.output()).toContain("--base-url <url>");
-    expect(stdout.output()).toContain("Tempo weight. Default 0.5.");
-    expect(stdout.output()).toContain("Model C coefficient. Default 0.5.");
+    expect(stdout.output()).toContain("Speaking tempo balance between model A and B. Default 0.5.");
+    expect(stdout.output()).toContain("Model C contribution coefficient. Default 0.5.");
+    expect(stdout.output()).toContain("/models/info registration, config.json style2id, style_vectors.npy");
+    expect(stdout.output()).toContain("Candidate:  sbv2-bridge models merge-run");
   });
 
   it("prints rename help with data and confirmation options", async () => {
