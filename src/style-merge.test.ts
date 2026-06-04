@@ -374,6 +374,39 @@ describe("SBV2 style merge", () => {
     await expect(createStyleMergePlan({ sbv2Root, recipePath })).rejects.toThrow("dtype must be float32 or float64");
   });
 
+  it("rejects byte-order-less multi-byte float descriptors", async () => {
+    const sbv2Root = createSbv2Root();
+    writeModelAssets(sbv2Root, "base", { Neutral: 0 }, [[0, 0]]);
+    writeModelAssets(sbv2Root, "donor", { Neutral: 0 }, [[10, 10]]);
+    writeModelAssets(sbv2Root, "merged", { Neutral: 0 }, [[0, 0]]);
+    writeFileSync(path.join(sbv2Root, "model_assets", "base", "style_vectors.npy"), makeNpyWithDescriptor([[1, 2]], "|f4"));
+    const recipePath = writeRecipe(sbv2Root, {
+      outputModelName: "merged",
+      modelA: "base",
+      modelB: "donor",
+      styles: [{ styleA: "Neutral", styleB: "Neutral", outputStyle: "Neutral" }],
+    });
+
+    await expect(createStyleMergePlan({ sbv2Root, recipePath })).rejects.toThrow("dtype must be float32 or float64");
+  });
+
+  it("rejects zero-width style vector arrays", async () => {
+    const sbv2Root = createSbv2Root();
+    writeModelAssets(sbv2Root, "base", { Neutral: 0 }, [[0, 0]]);
+    writeModelAssets(sbv2Root, "donor", { Neutral: 0 }, [[10, 10]]);
+    writeModelAssets(sbv2Root, "merged", { Neutral: 0 }, [[0, 0]]);
+    writeFileSync(path.join(sbv2Root, "model_assets", "base", "style_vectors.npy"), makeNpy([[]]));
+    writeFileSync(path.join(sbv2Root, "model_assets", "donor", "style_vectors.npy"), makeNpy([[]]));
+    const recipePath = writeRecipe(sbv2Root, {
+      outputModelName: "merged",
+      modelA: "base",
+      modelB: "donor",
+      styles: [{ styleA: "Neutral", styleB: "Neutral", outputStyle: "Neutral" }],
+    });
+
+    await expect(createStyleMergePlan({ sbv2Root, recipePath })).rejects.toThrow("must be a 2D NumPy file");
+  });
+
   it("preserves output speaker maps when n_speakers is omitted", async () => {
     const sbv2Root = createSbv2Root();
     const jobsRoot = tempRoot("sbv2-style-merge-jobs-");

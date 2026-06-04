@@ -254,7 +254,7 @@ async function inspectStyleMergeInput(assetsRoot, modelName, label) {
     }
     const styleVectorsBuffer = await readFile(styleVectorsPath);
     const npy = parseNpy(styleVectorsBuffer);
-    if (!npy || npy.shape.length !== 2 || npy.shape[0] < 1) {
+    if (!npy || npy.shape.length !== 2 || npy.shape[0] < 1 || npy.shape[1] < 1) {
         throw new Error(`${label} style_vectors.npy must be a 2D NumPy file: ${styleVectorsPath}`);
     }
     if (!isSupportedFloatDescriptor(npy.descr)) {
@@ -456,7 +456,7 @@ function normalizeStyleWeight(value) {
     return number;
 }
 function isSupportedFloatDescriptor(descr) {
-    return /^[<|]f[48]$/.test(descr);
+    return /^<f[48]$/.test(descr);
 }
 async function readSbv2PathConfig(sbv2Root) {
     const pathsPath = path.join(sbv2Root, "configs", "paths.yml");
