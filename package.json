@@ -1,6 +1,6 @@
 {
   "name": "style-bert-vits2-bridge",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Bridge OpenClaw to a Style-Bert-VITS2 API server for speech generation.",
   "type": "module",
   "main": "./dist/index.js",
