@@ -22,6 +22,8 @@ description: Style-Bert-VITS2 の音声素材 ingest から dataset prepare、tr
 
 `modelName` は pipeline 全体のキーです。SBV2 の単一話者 workflow に合わせ、別の speaker name や project name は通常入力として持ちません。
 
+slice、transcription、preprocess、training の詳細 option は通常 agent surface では指定しません。`datasets prepare` と `training run` は bridge の既定値を使い、必要になった場合は別 issue の advanced surface として扱います。
+
 保存先は SBV2 の `configs/paths.yml`、次に `configs/default_paths.yml`、最後に SBV2 既定値から解決します。`Data/<modelName>` と `model_assets/<modelName>` は既定例であり、実際の `dataset_root` / `assets_root` が変わっている環境では CLI の `pathRoles` と表示された path を正としてください。
 
 ```text

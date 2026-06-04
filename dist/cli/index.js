@@ -2,7 +2,7 @@
 import { realpathSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { DEFAULT_SLICE_MAX_SEC, DEFAULT_SLICE_MIN_SEC, ingestDataset, prepareDataset, } from "../datasets.js";
+import { ingestDataset, prepareDataset, } from "../datasets.js";
 import { createTrainingPlan, parseTrainingStage, runTraining, } from "../training.js";
 import { evaluateModelCandidate, readEvaluationManifest, updateEvaluationNote, } from "../evaluation.js";
 import { listModelCandidates, promoteModel } from "../model-registry.js";
@@ -59,12 +59,6 @@ Options:
                             For models promote, source model artifact directory.
   --manifest <path>        Dataset manifest path for datasets prepare/training.
   --style-recipe <path>    Optional style mapping JSON for model merge.
-  --slice-min-sec <n>      Minimum seconds of a slice for datasets prepare. Default 2.
-  --slice-max-sec <n>      Maximum seconds of a slice for datasets prepare. Default 12.
-  --slice-min-silence-dur-ms <n>
-                            Silence duration in ms considered a split point. Default 700.
-  --slice-num-processes <n>
-                            SBV2 slice.py process count. Default 3.
   --confirm-model-name <name>
                             Required exact model name confirmation for models promote.
   --confirm-output-model-name <name>
@@ -97,19 +91,6 @@ Options:
   --case <id>              Evaluation test case id for evaluation note.
   --decision <mode>        Listening decision: adopt, hold, or reject.
   --stage <name>           Training stage. May be repeated. Defaults to all stages.
-  --batch-size <n>         Training batch size. Default 2.
-  --epochs <n>             Training epochs. Default 100.
-  --save-every-steps <n>   Checkpoint/eval interval. Default 1000.
-  --log-interval <n>       Training log interval. Default 200.
-  --num-processes <n>      Resample/style_gen process count.
-  --val-per-lang <n>       Validation rows per speaker/language field. Default 0.
-  --yomi-error <mode>      Yomi error mode: raise, skip, or use. Default skip.
-  --normalize              Normalize audio during resample.
-  --trim                   Trim leading/trailing silence during resample.
-  --skip-default-style     Pass --skip_default_style to train_ms.
-  --speedup                Pass --speedup to train_ms.
-  --not-use-custom-batch-sampler
-                            Pass --not_use_custom_batch_sampler to train_ms.
   --language <ja|en|zh>    Dataset language for downstream SBV2 transcription/preprocess.
   --use-jp-extra           Record JP-Extra as enabled for downstream production.
   --no-use-jp-extra        Record JP-Extra as disabled for downstream production.
@@ -158,17 +139,11 @@ Required:
 
 Options:
   --jobs-dir <path>        Job manifest/log root.
-  --slice-min-sec <n>      Minimum seconds of a slice. Default 2.
-  --slice-max-sec <n>      Maximum seconds of a slice. Default 12.
-  --slice-min-silence-dur-ms <n>
-                            Silence duration in ms considered a split point. Default 700.
-  --slice-num-processes <n>
-                            SBV2 slice.py process count. Default 3.
   --json                   Print machine-readable JSON.
   -h, --help               Show this help.
 
 Example:
-  sbv2-bridge datasets prepare --manifest ./dataset.json --slice-min-sec 1 --slice-max-sec 10`;
+  sbv2-bridge datasets prepare --manifest ./dataset.json --json`;
         }
         throw new Error(`Unknown datasets command: ${command}`);
     }
@@ -183,19 +158,6 @@ Required:
 
 Options:
   --stage <name>           Training stage. May be repeated. Defaults to all stages.
-  --batch-size <n>         Training batch size. Default 2.
-  --epochs <n>             Training epochs. Default 100.
-  --save-every-steps <n>   Checkpoint/eval interval. Default 1000.
-  --log-interval <n>       Training log interval. Default 200.
-  --num-processes <n>      Resample/style_gen process count.
-  --val-per-lang <n>       Validation rows per speaker/language field. Default 0.
-  --yomi-error <mode>      Yomi error mode: raise, skip, or use. Default skip.
-  --normalize              Normalize audio during resample.
-  --trim                   Trim leading/trailing silence during resample.
-  --skip-default-style     Pass --skip_default_style to train_ms.
-  --speedup                Pass --speedup to train_ms.
-  --not-use-custom-batch-sampler
-                            Pass --not_use_custom_batch_sampler to train_ms.
   --json                   Print machine-readable JSON.
   -h, --help               Show this help.
 
@@ -213,19 +175,6 @@ Required:
 Options:
   --jobs-dir <path>        Job manifest/log root.
   --stage <name>           Training stage. May be repeated. Defaults to all stages.
-  --batch-size <n>         Training batch size. Default 2.
-  --epochs <n>             Training epochs. Default 100.
-  --save-every-steps <n>   Checkpoint/eval interval. Default 1000.
-  --log-interval <n>       Training log interval. Default 200.
-  --num-processes <n>      Resample/style_gen process count.
-  --val-per-lang <n>       Validation rows per speaker/language field. Default 0.
-  --yomi-error <mode>      Yomi error mode: raise, skip, or use. Default skip.
-  --normalize              Normalize audio during resample.
-  --trim                   Trim leading/trailing silence during resample.
-  --skip-default-style     Pass --skip_default_style to train_ms.
-  --speedup                Pass --speedup to train_ms.
-  --not-use-custom-batch-sampler
-                            Pass --not_use_custom_batch_sampler to train_ms.
   --json                   Print machine-readable JSON.
   -h, --help               Show this help.
 
@@ -611,24 +560,10 @@ function parsePositiveInteger(value, name) {
     }
     return parsed;
 }
-function parseNonNegativeInteger(value, name) {
-    const parsed = Number(value);
-    if (!Number.isInteger(parsed) || parsed < 0) {
-        throw new Error(`${name} must be a non-negative integer`);
-    }
-    return parsed;
-}
 function parseFiniteNumber(value, name) {
     const parsed = Number(value);
     if (!Number.isFinite(parsed)) {
         throw new Error(`${name} must be a finite number`);
-    }
-    return parsed;
-}
-function parsePositiveFiniteNumber(value, name) {
-    const parsed = parseFiniteNumber(value, name);
-    if (parsed <= 0) {
-        throw new Error(`${name} must be a positive finite number`);
     }
     return parsed;
 }
@@ -637,12 +572,6 @@ function parseLanguage(value) {
         return value;
     }
     throw new Error("--language must be one of: ja, en, zh");
-}
-function parseYomiError(value) {
-    if (value === "raise" || value === "skip" || value === "use") {
-        return value;
-    }
-    throw new Error("--yomi-error must be one of: raise, skip, use");
 }
 function parseEvaluationDecision(value) {
     if (value === "adopt" || value === "hold" || value === "reject") {
@@ -796,22 +725,6 @@ function parseArgs(argv) {
             options.styleRecipePath = next;
             index += 1;
         }
-        else if (arg === "--slice-min-sec" && next) {
-            options.sliceOptions.minSec = parsePositiveFiniteNumber(next, "--slice-min-sec");
-            index += 1;
-        }
-        else if (arg === "--slice-max-sec" && next) {
-            options.sliceOptions.maxSec = parsePositiveFiniteNumber(next, "--slice-max-sec");
-            index += 1;
-        }
-        else if (arg === "--slice-min-silence-dur-ms" && next) {
-            options.sliceOptions.minSilenceDurMs = parsePositiveInteger(next, "--slice-min-silence-dur-ms");
-            index += 1;
-        }
-        else if (arg === "--slice-num-processes" && next) {
-            options.sliceOptions.numProcesses = parsePositiveInteger(next, "--slice-num-processes");
-            index += 1;
-        }
         else if (arg === "--test-set" && next) {
             options.testSetPath = next;
             index += 1;
@@ -831,49 +744,6 @@ function parseArgs(argv) {
         else if (arg === "--stage" && next) {
             options.stages = [...(options.stages ?? []), parseTrainingStage(next)];
             index += 1;
-        }
-        else if (arg === "--batch-size" && next) {
-            options.trainingSettings.batchSize = parsePositiveInteger(next, "--batch-size");
-            index += 1;
-        }
-        else if (arg === "--epochs" && next) {
-            options.trainingSettings.epochs = parsePositiveInteger(next, "--epochs");
-            index += 1;
-        }
-        else if (arg === "--save-every-steps" && next) {
-            options.trainingSettings.saveEverySteps = parsePositiveInteger(next, "--save-every-steps");
-            index += 1;
-        }
-        else if (arg === "--log-interval" && next) {
-            options.trainingSettings.logInterval = parsePositiveInteger(next, "--log-interval");
-            index += 1;
-        }
-        else if (arg === "--num-processes" && next) {
-            options.trainingSettings.numProcesses = parsePositiveInteger(next, "--num-processes");
-            index += 1;
-        }
-        else if (arg === "--val-per-lang" && next) {
-            options.trainingSettings.valPerLang = parseNonNegativeInteger(next, "--val-per-lang");
-            index += 1;
-        }
-        else if (arg === "--yomi-error" && next) {
-            options.trainingSettings.yomiError = parseYomiError(next);
-            index += 1;
-        }
-        else if (arg === "--normalize") {
-            options.trainingSettings.normalize = true;
-        }
-        else if (arg === "--trim") {
-            options.trainingSettings.trim = true;
-        }
-        else if (arg === "--skip-default-style") {
-            options.trainingSettings.skipDefaultStyle = true;
-        }
-        else if (arg === "--speedup") {
-            options.trainingSettings.speedup = true;
-        }
-        else if (arg === "--not-use-custom-batch-sampler") {
-            options.trainingSettings.notUseCustomBatchSampler = true;
         }
         else if (arg === "--language" && next) {
             options.language = parseLanguage(next);
@@ -899,11 +769,6 @@ function parseArgs(argv) {
         else {
             positional.push(arg);
         }
-    }
-    const effectiveSliceMinSec = options.sliceOptions.minSec ?? DEFAULT_SLICE_MIN_SEC;
-    const effectiveSliceMaxSec = options.sliceOptions.maxSec ?? DEFAULT_SLICE_MAX_SEC;
-    if (effectiveSliceMinSec > effectiveSliceMaxSec) {
-        throw new Error("--slice-min-sec must be less than or equal to --slice-max-sec");
     }
     if (positional[0] === "help") {
         return { group: "help", command: "help", args: [], options, helpRequested };

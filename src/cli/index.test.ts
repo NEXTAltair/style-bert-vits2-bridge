@@ -111,14 +111,17 @@ describe("sbv2-bridge CLI", () => {
     expect(isCliEntrypoint(pathToFileURL(target).href, link)).toBe(true);
   });
 
-  it("documents datasets prepare slice flags in help", async () => {
+  it("does not expose dataset/training advanced options in help", async () => {
     const stdout = createWriter();
     await expect(runCli(["--help"], { stdout: stdout.stream, stderr: createWriter().stream })).resolves.toBe(0);
 
-    expect(stdout.output()).toContain("--slice-min-sec <n>");
-    expect(stdout.output()).toContain("--slice-max-sec <n>");
-    expect(stdout.output()).toContain("--slice-min-silence-dur-ms <n>");
-    expect(stdout.output()).toContain("--slice-num-processes <n>");
+    expect(stdout.output()).not.toContain("--slice-min-sec <n>");
+    expect(stdout.output()).not.toContain("--slice-max-sec <n>");
+    expect(stdout.output()).not.toContain("--slice-min-silence-dur-ms <n>");
+    expect(stdout.output()).not.toContain("--slice-num-processes <n>");
+    expect(stdout.output()).not.toContain("--batch-size <n>");
+    expect(stdout.output()).not.toContain("--epochs <n>");
+    expect(stdout.output()).not.toContain("--not-use-custom-batch-sampler");
   });
 
   it("prints command-specific help for model merge plan without requiring merge args", async () => {
@@ -1079,14 +1082,6 @@ if (args.includes("transcribe.py")) {
             jobsRoot,
             "--manifest",
             ingested.dataset.manifestPath,
-            "--slice-min-sec",
-            "0.7",
-            "--slice-max-sec",
-            "8.5",
-            "--slice-min-silence-dur-ms",
-            "300",
-            "--slice-num-processes",
-            "2",
             "--json",
           ],
           { stdout: prepareOut.stream, stderr: prepareErr.stream },
@@ -1111,10 +1106,10 @@ if (args.includes("transcribe.py")) {
         rawWavCount: 1,
         esdLineCount: 1,
         sliceOptions: {
-          minSec: 0.7,
-          maxSec: 8.5,
-          minSilenceDurMs: 300,
-          numProcesses: 2,
+          minSec: 2,
+          maxSec: 12,
+          minSilenceDurMs: 700,
+          numProcesses: 3,
         },
       });
       expect(prepared.job.operation).toBe("dataset-prepare");
@@ -1129,27 +1124,35 @@ if (args.includes("transcribe.py")) {
     }
   });
 
-  it("rejects invalid datasets prepare slice flags at the CLI layer", async () => {
+  it("rejects advanced dataset/training options at the CLI layer", async () => {
     const cases: Array<{ argv: string[]; message: string }> = [
       {
         argv: ["datasets", "prepare", "--slice-min-sec", "0"],
-        message: "--slice-min-sec must be a positive finite number",
+        message: "Unknown option: --slice-min-sec",
       },
       {
-        argv: ["datasets", "prepare", "--slice-min-sec", "9", "--slice-max-sec", "8"],
-        message: "--slice-min-sec must be less than or equal to --slice-max-sec",
+        argv: ["datasets", "prepare", "--slice-max-sec", "8"],
+        message: "Unknown option: --slice-max-sec",
       },
       {
-        argv: ["datasets", "prepare", "--slice-min-sec", "20"],
-        message: "--slice-min-sec must be less than or equal to --slice-max-sec",
+        argv: ["datasets", "prepare", "--slice-min-silence-dur-ms", "300"],
+        message: "Unknown option: --slice-min-silence-dur-ms",
       },
       {
-        argv: ["datasets", "prepare", "--slice-max-sec", "1"],
-        message: "--slice-min-sec must be less than or equal to --slice-max-sec",
+        argv: ["datasets", "prepare", "--slice-num-processes", "2"],
+        message: "Unknown option: --slice-num-processes",
       },
       {
-        argv: ["datasets", "prepare", "--slice-num-processes", "1.5"],
-        message: "--slice-num-processes must be a positive integer",
+        argv: ["training", "plan", "--batch-size", "4"],
+        message: "Unknown option: --batch-size",
+      },
+      {
+        argv: ["training", "run", "--epochs", "20"],
+        message: "Unknown option: --epochs",
+      },
+      {
+        argv: ["training", "run", "--not-use-custom-batch-sampler"],
+        message: "Unknown option: --not-use-custom-batch-sampler",
       },
     ];
 
@@ -1238,8 +1241,6 @@ if (args.includes("resample.py")) {
           ingested.dataset.manifestPath,
           "--stage",
           "resample",
-          "--batch-size",
-          "4",
           "--json",
         ],
         { stdout: planOut.stream, stderr: createWriter().stream },
@@ -1250,7 +1251,7 @@ if (args.includes("resample.py")) {
       pathRoles: { sbv2Dataset: string; sbv2LoadableModel: string };
     };
     expect(planned.plan.stages).toEqual(["resample"]);
-    expect(planned.plan.settings.batchSize).toBe(4);
+    expect(planned.plan.settings.batchSize).toBe(2);
     expect(planned.pathRoles).toMatchObject({
       sbv2Dataset: path.join(configuredDatasetRoot, "cli-train"),
       sbv2LoadableModel: path.join(configuredAssetsRoot, "cli-train"),

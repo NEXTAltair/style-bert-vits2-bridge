@@ -61,7 +61,7 @@ bridge の既定値は次の通りとする。
 
 `notUseCustomBatchSampler` は初期実装では公開せず、SBV2 GUI 既定値どおり `false` とする。これを `true` にすると 14 秒超の音声も学習対象にできるが、要求 VRAM が増えるため、必要になった時点で advanced option として扱う。
 
-slice の詳細設定、Whisper initial prompt、preprocess 詳細設定、batch size、epochs、save interval、freeze 系設定、validation split、dataset root、assets root は初期 bridge の通常入力として公開しない。SBV2 GUI / CLI の既定値を使い、実際に使った値は job manifest に記録する。
+slice の詳細設定、Whisper initial prompt、preprocess 詳細設定、batch size、epochs、save interval、freeze 系設定、validation split、dataset root、assets root は初期 bridge の通常入力として公開しない。この制限は OpenClaw agent tool だけでなく通常 CLI surface にも適用する。SBV2 GUI / CLI の既定値を使い、実際に使った値は job manifest に記録する。
 
 Style 作成タブ相当の探索的 workflow は初期 bridge scope から外す。style は学習 pipeline 中の SBV2 既定処理に任せ、入力音声のサブディレクトリ構造で指定する。UMAP、t-SNE、clustering、代表音声選択による style vector 再生成は、人間が GUI で確認しながら行う advanced workflow として扱う。
 
