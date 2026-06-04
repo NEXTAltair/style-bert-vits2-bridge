@@ -469,7 +469,7 @@ function updateConfigForOutput(config: Record<string, unknown>, outputModelName:
   config.model_name = outputModelName;
   data.num_styles = Object.keys(style2id).length;
   data.style2id = style2id;
-  if (data.n_speakers === 1) {
+  if (isSingleSpeakerConfig(data)) {
     data.spk2id = { [outputModelName]: 0 };
     data.id2spk = { "0": outputModelName };
   }
@@ -550,7 +550,13 @@ function normalizeStyleWeight(value: number | undefined): number {
 }
 
 function isSupportedFloatDescriptor(descr: string): boolean {
-  return /^[<>=|]f[48]$/.test(descr);
+  return /^[<|]f[48]$/.test(descr);
+}
+
+function isSingleSpeakerConfig(data: Record<string, unknown>): boolean {
+  if (data.n_speakers === 1) return true;
+  if (data.n_speakers !== undefined) return false;
+  return isRecord(data.spk2id) && Object.keys(data.spk2id).length === 1;
 }
 
 async function readSbv2PathConfig(sbv2Root: string): Promise<Sbv2PathConfigRoots> {

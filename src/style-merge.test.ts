@@ -44,6 +44,13 @@ function writeModelAssets(
   writeFileSync(path.join(modelDir, `${modelName}.safetensors`), makeSafetensors());
 }
 
+function omitSpeakerCount(sbv2Root: string, modelName: string): void {
+  const configPath = path.join(sbv2Root, "model_assets", modelName, "config.json");
+  const config = JSON.parse(readFileSync(configPath, "utf8")) as { data: Record<string, unknown> };
+  delete config.data.n_speakers;
+  writeFileSync(configPath, `${JSON.stringify(config)}\n`);
+}
+
 function writeRecipe(
   root: string,
   recipe: {
@@ -250,6 +257,50 @@ describe("SBV2 style merge", () => {
     });
 
     await expect(createStyleMergePlan({ sbv2Root, recipePath })).rejects.toThrow("dtype must be float32 or float64");
+  });
+
+  it("rejects native-endian style vector descriptors instead of guessing host endian", async () => {
+    const sbv2Root = createSbv2Root();
+    writeModelAssets(sbv2Root, "base", { Neutral: 0 }, [[0, 0]]);
+    writeModelAssets(sbv2Root, "donor", { Neutral: 0 }, [[10, 10]]);
+    writeModelAssets(sbv2Root, "merged", { Neutral: 0 }, [[0, 0]]);
+    writeFileSync(path.join(sbv2Root, "model_assets", "base", "style_vectors.npy"), makeNpyWithDescriptor([[1, 2]], "=f4"));
+    const recipePath = writeRecipe(sbv2Root, {
+      outputModelName: "merged",
+      modelA: "base",
+      modelB: "donor",
+      styles: [{ styleA: "Neutral", styleB: "Neutral", outputStyle: "Neutral" }],
+    });
+
+    await expect(createStyleMergePlan({ sbv2Root, recipePath })).rejects.toThrow("dtype must be float32 or float64");
+  });
+
+  it("treats omitted n_speakers with one speaker map entry as single-speaker", async () => {
+    const sbv2Root = createSbv2Root();
+    const jobsRoot = tempRoot("sbv2-style-merge-jobs-");
+    writeModelAssets(sbv2Root, "base", { Neutral: 0 }, [[0, 0]]);
+    writeModelAssets(sbv2Root, "donor", { Neutral: 0 }, [[10, 10]]);
+    writeModelAssets(sbv2Root, "merged", { Neutral: 0 }, [[0, 0]]);
+    omitSpeakerCount(sbv2Root, "base");
+    const recipePath = writeRecipe(sbv2Root, {
+      outputModelName: "merged",
+      modelA: "base",
+      modelB: "donor",
+      styles: [{ styleA: "Neutral", styleB: "Neutral", outputStyle: "Neutral" }],
+    });
+
+    await runStyleMerge({
+      sbv2Root,
+      jobsRoot,
+      recipePath,
+      confirmOutputModelName: "merged",
+    });
+
+    const config = JSON.parse(readFileSync(path.join(sbv2Root, "model_assets", "merged", "config.json"), "utf8")) as {
+      data: { spk2id: Record<string, number>; id2spk: Record<string, string> };
+    };
+    expect(config.data.spk2id).toEqual({ merged: 0 });
+    expect(config.data.id2spk).toEqual({ "0": "merged" });
   });
 
   it("records failed jobs when refresh misses the style-merged model", async () => {
