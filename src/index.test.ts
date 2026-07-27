@@ -72,9 +72,7 @@ describe("Style-Bert-VITS2 speech provider", () => {
       id: "style-bert-vits2",
       label: "Style-Bert-VITS2",
       capabilities: {
-        text: {
-          maxInputChars: 100,
-        },
+        text: {},
       },
     });
   });
@@ -106,6 +104,31 @@ describe("Style-Bert-VITS2 speech provider", () => {
 
     const url = new URL(mockFetch.mock.calls[0][0]);
     expect(url.pathname).toBe("/openapi.json");
+  });
+
+  it("does not invent a 100 character limit when OpenAPI is temporarily unavailable", async () => {
+    const mockFetch = vi
+      .fn()
+      .mockRejectedValueOnce(new Error("connect ECONNREFUSED"))
+      .mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.resolve(valentinaModelsInfo),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        arrayBuffer: () => Promise.resolve(wavBytes.buffer),
+      });
+    vi.stubGlobal("fetch", mockFetch);
+
+    const provider = buildSbv2SpeechProvider();
+    await provider.synthesize({
+      text: "あ".repeat(400),
+      providerConfig: { baseUrl: "http://localhost:5000" },
+    });
+
+    const voiceUrl = new URL(mockFetch.mock.calls[2][0]);
+    expect(voiceUrl.pathname).toBe("/voice");
+    expect(voiceUrl.searchParams.get("text")).toBe("あ".repeat(400));
   });
 
   it("rejects text over the SBV2 hard limit before sending /voice", async () => {

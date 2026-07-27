@@ -54,7 +54,6 @@ export interface Sbv2ModelInfo {
     raw: unknown;
     [key: string]: unknown;
 }
-export declare const SBV2_FALLBACK_VOICE_TEXT_MAX_CHARS = 100;
 export declare class Sbv2UnavailableError extends Error {
     constructor(message: string, options?: ErrorOptions);
 }

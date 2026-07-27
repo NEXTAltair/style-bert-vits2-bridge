@@ -88,7 +88,8 @@ function getProviderConfig(config) {
   }
 
   const messages = isRecord(config.messages) ? config.messages : {};
-  const tts = isRecord(messages.tts) ? messages.tts : {};
+  const legacyTts = isRecord(messages.tts) ? messages.tts : {};
+  const tts = isRecord(config.tts) ? config.tts : legacyTts;
   const providers = isRecord(tts.providers) ? tts.providers : {};
   const provider = isRecord(providers["style-bert-vits2"]) ? providers["style-bert-vits2"] : undefined;
   const configuredProviderIds = Object.keys(providers);
@@ -208,7 +209,7 @@ function printTextReport(report) {
     console.log(`    ${report.config.error}`);
   }
 
-  console.log(statusLine(report.openclaw.hasProviderConfig, "provider config: messages.tts.providers.style-bert-vits2"));
+  console.log(statusLine(report.openclaw.hasProviderConfig, "provider config: tts.providers.style-bert-vits2"));
   console.log(statusLine(report.openclaw.hasBaseUrl, "provider baseUrl configured"));
   console.log(statusLine(report.openclaw.selected, `selected provider: ${report.openclaw.selectedProvider ?? "(not set)"}`));
   if (report.openclaw.configuredProviderIds.length) {

@@ -4,7 +4,7 @@ import {
   applyPronunciationReplacements,
   resolvePronunciationReplacements,
 } from "./pronunciation.js";
-import { SBV2_FALLBACK_VOICE_TEXT_MAX_CHARS, Sbv2Client } from "./sbv2-client.js";
+import { Sbv2Client } from "./sbv2-client.js";
 import {
   listVoiceProfiles,
   parseVoiceDirectiveToken,
@@ -564,9 +564,7 @@ export function buildSbv2SpeechProvider(options: Sbv2SpeechProviderOptions = {})
     id: "style-bert-vits2",
     label: "Style-Bert-VITS2",
     capabilities: {
-      text: {
-        maxInputChars: SBV2_FALLBACK_VOICE_TEXT_MAX_CHARS,
-      },
+      text: {},
     },
 
     isConfigured: ({ providerConfig }) => Boolean(trimToUndefined(providerConfig.baseUrl)),
@@ -576,9 +574,7 @@ export function buildSbv2SpeechProvider(options: Sbv2SpeechProviderOptions = {})
       const baseUrl = trimToUndefined(config.baseUrl) ?? trimToUndefined(req.baseUrl);
       if (!baseUrl) {
         return {
-          text: {
-            maxInputChars: SBV2_FALLBACK_VOICE_TEXT_MAX_CHARS,
-          },
+          text: {},
         };
       }
 

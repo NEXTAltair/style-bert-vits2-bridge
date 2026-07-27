@@ -27,19 +27,27 @@ describeLive("SBV2 live smoke", () => {
     expect(models.some((model) => model.name.trim())).toBe(true);
   });
 
-  it("synthesizes a short WAV response", async () => {
-    const audio = await client.synthesize({ text: "テストです。", language: "JP" });
+  it(
+    "synthesizes a short WAV response",
+    async () => {
+      const audio = await client.synthesize({ text: "テストです。", language: "JP" });
 
-    expectWav(audio);
-  });
+      expectWav(audio);
+    },
+    30_000,
+  );
 
-  it("rejects invalid model parameters", async () => {
-    await expect(
-      client.synthesize({
-        text: "テストです。",
-        language: "JP",
-        modelName: "__openclaw_missing_model__",
-      }),
-    ).rejects.toThrow(/SBV2 \/voice validation failed|SBV2 \/voice failed|non-WAV response/);
-  });
+  it(
+    "rejects invalid model parameters",
+    async () => {
+      await expect(
+        client.synthesize({
+          text: "テストです。",
+          language: "JP",
+          modelName: "__openclaw_missing_model__",
+        }),
+      ).rejects.toThrow(/SBV2 \/voice validation failed|SBV2 \/voice failed|non-WAV response/);
+    },
+    30_000,
+  );
 });

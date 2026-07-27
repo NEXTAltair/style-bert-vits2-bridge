@@ -82,9 +82,9 @@ Valentina 系の推奨開始点は次の通りです。
 5. SBV2 が WAV 音声 (PCM 16bit mono 44100Hz) を返却
 6. チャネル（Discord 等）が必要に応じてフォーマット変換して配信
 
-bridge は provider capability として SBV2 `/voice` の読み上げ本文上限を公開します。`/openapi.json` から `text.schema.maxLength` を取得できる場合はその値を使い、取得できない場合は stock SBV2 の既定値である `100` 文字を安全側の fallback として使います。到達可能な `/openapi.json` に `maxLength` が無い場合は、SBV2 側で text limit が無効な設定として扱い、bridge 側では上限を広告・強制しません。合成時も、発音置換後に SBV2 へ実際に送る本文が実効上限を超える場合は `/voice` に送信せず、OpenClaw 本体側で短い spoken text を準備するための明確なエラーにします。
+bridge は provider capability として SBV2 `/voice` の読み上げ本文上限を公開します。`/openapi.json` から `text.schema.maxLength` を取得できる場合は、その起動中serverの実効値を使います。OpenAPIへ到達できない場合は、SBV2の起動時設定を推測せず上限不明として扱います。到達可能な `/openapi.json` に `maxLength` が無い場合も、SBV2側でtext limitが無効な設定として扱い、bridge側では上限を広告・強制しません。合成時は、発音置換後にSBV2へ実際に送る本文が取得済みの実効上限を超える場合だけ `/voice` に送信せず、OpenClaw本体側で短いspoken textを準備するための明確なエラーにします。
 
-見えるチャット本文を自然な読み上げ文に変換する処理、`messages.tts.maxTextLength` や user preference と provider hard limit の統合は OpenClaw 本体側の責務です。この bridge は SBV2 固有の hard limit を公開し、送信直前の安全ガードを担当します。
+見えるチャット本文を自然な読み上げ文に変換する処理、`tts.maxTextLength` やuser preferenceとprovider hard limitの統合はOpenClaw本体側の責務です。このbridgeはSBV2固有のhard limitを公開し、送信直前の安全ガードを担当します。
 
 ## 設定項目
 
@@ -393,7 +393,7 @@ sbv2-bridge evaluation note \
 
 ### Healthcheck / lifecycle 境界
 
-この bridge は SBV2 FastAPI server manager ではありません。SBV2 server の起動、停止、GPU/backend 選択、モデルファイルの配置、モデルロードは SBV2 側または運用スクリプトの責務です。bridge は設定済みの `baseUrl` に対して `/models/info` と `/voice` を呼び、失敗時に operator が切り分けやすいエラーを返します。
+このbridgeはSBV2 FastAPI server managerではありません。SBV2 serverの起動、停止、GPU/backend選択、モデルファイルの配置、モデルロードはSBV2側または運用スクリプトの責務です。同梱の`skills/voice`には、agentがTTS実行前に専用のdetached tmux sessionでserverを起動し、readinessを確認する手順があります。tmux paneは`remain-on-exit`を有効にし、起動失敗時もログを残します。bridgeは設定済みの`baseUrl`に対して`/models/info`と`/voice`を呼び、失敗時にoperatorが切り分けやすいエラーを返します。
 
 ### Telemetry / debug
 
@@ -401,7 +401,9 @@ OpenClaw の `/tts status` は、直近の TTS 試行について `provider`、`
 
 bridge 側では合成成功時に、安全な telemetry metadata と debug log へ resolved profile を出します。確認できる主な項目は `provider=style-bert-vits2`、sanitized `baseUrl`、`voiceId`、`modelName`、`modelId`、`speakerName`、`speakerId`、`style`、`styleWeight`、`length`、`language`、`outputFormat=wav`、`audioBytes` です。
 
-エラー時も同じ安全な context をエラーメッセージ末尾に付けます。SBV2 FastAPI server 未起動、`baseUrl` 誤り、`/models/info` の model / speaker / style 不一致を切り分ける用途です。primary の `style-bert-vits2` が失敗してfallback providerが成功した場合でも、bridge由来の失敗理由は OpenClaw の `attempts` に残ります。
+エラー時も同じ安全なcontextをエラーメッセージ末尾に付けます。SBV2 FastAPI server未起動、`baseUrl`誤り、`/models/info`のmodel / speaker / style不一致を切り分ける用途です。primaryの`style-bert-vits2`が失敗してfallback providerが成功した場合でも、bridge由来の失敗理由はOpenClawの`attempts`に残ります。
+
+speech provider plugin contractには、provider自身が後続providerへのfallbackを禁止するfieldがありません。明示的なprovider / model / voice指定を伴うOpenClaw TTS requestは`disableFallback`で対象providerだけを試せますが、自動TTSには現時点で同等のglobal configがありません。自動TTSをfail-closedにするにはOpenClaw本体側の対応が必要です。bridgeはSBV2障害を別の声で隠さず、`Sbv2UnavailableError`として明示します。
 
 debug log と telemetry には、読み上げ本文、`assistText`、音声バイナリ、base64、URL の user/password/query/hash は出しません。secret を `baseUrl` の query や userinfo に入れている場合でも、ログ上は除去されます。
 

@@ -1,6 +1,6 @@
 import { definePluginEntry } from "openclaw/plugin-sdk/plugin-entry";
 import { applyPronunciationReplacements, resolvePronunciationReplacements, } from "./pronunciation.js";
-import { SBV2_FALLBACK_VOICE_TEXT_MAX_CHARS, Sbv2Client } from "./sbv2-client.js";
+import { Sbv2Client } from "./sbv2-client.js";
 import { listVoiceProfiles, parseVoiceDirectiveToken, resolveVoiceProfile, } from "./voice-resolver.js";
 const TOOL_STATUS_REWRITE_TEXT = {
     JP: "コマンドが失敗しました。別の方法で進めます。",
@@ -421,9 +421,7 @@ export function buildSbv2SpeechProvider(options = {}) {
         id: "style-bert-vits2",
         label: "Style-Bert-VITS2",
         capabilities: {
-            text: {
-                maxInputChars: SBV2_FALLBACK_VOICE_TEXT_MAX_CHARS,
-            },
+            text: {},
         },
         isConfigured: ({ providerConfig }) => Boolean(trimToUndefined(providerConfig.baseUrl)),
         resolveCapabilities: async (req) => {
@@ -431,9 +429,7 @@ export function buildSbv2SpeechProvider(options = {}) {
             const baseUrl = trimToUndefined(config.baseUrl) ?? trimToUndefined(req.baseUrl);
             if (!baseUrl) {
                 return {
-                    text: {
-                        maxInputChars: SBV2_FALLBACK_VOICE_TEXT_MAX_CHARS,
-                    },
+                    text: {},
                 };
             }
             const timeoutMs = asNumber(config.timeoutMs) ?? 30_000;
