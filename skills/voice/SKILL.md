@@ -1,6 +1,6 @@
 ---
 name: "voice"
-description: "Style-Bert-VITS2のモデル・speaker・style選択とFastAPIのtmux起動・稼働確認"
+description: "Style-Bert-VITS2のモデル・speaker・style選択とFastAPIの分離tmux起動・稼働確認"
 ---
 
 # Voice — Style-Bert-VITS2 声色選択ガイド
@@ -22,14 +22,19 @@ tmux has-session -t sbv2-fastapi 2>/dev/null
 tmux capture-pane -t sbv2-fastapi -p -S - | tail -80
 ```
 
-sessionが存在する場合は重複起動しません。sessionが無い場合だけ、先にshell sessionを作成して`remain-on-exit`を設定し、その後server commandを投入します。これにより起動失敗時もpaneと終了statusを保持できます。
+sessionが存在する場合は重複起動しません。OpenClaw/Gateway内から通常のdetached tmuxを起動すると、Gateway serviceの`KillMode=control-group`によりGateway再起動時にtmuxも終了します。OpenClawから起動する場合は、永続service fileを登録せず、transient user unit内へtmux serverを分離します。
 
 ```bash
-tmux new-session -d -s sbv2-fastapi -c /home/altair/src/Style-Bert-VITS2
-tmux set-option -t sbv2-fastapi remain-on-exit on
-tmux send-keys -t sbv2-fastapi -l -- 'exec uv run server_fastapi.py'
-tmux send-keys -t sbv2-fastapi Enter
+systemctl --user reset-failed sbv2-fastapi-tmux.service 2>/dev/null || true
+systemd-run --user \
+  --unit=sbv2-fastapi-tmux \
+  --collect \
+  --property=Type=exec \
+  --property=Restart=no \
+  /bin/bash -lc 'set -e; /usr/bin/tmux new-session -d -s sbv2-fastapi -c /home/altair/src/Style-Bert-VITS2 "exec /home/altair/.local/bin/uv run server_fastapi.py"; /usr/bin/tmux set-option -t sbv2-fastapi remain-on-exit on; sbv2_tmux_pid=$(/usr/bin/tmux display-message -p -t sbv2-fastapi "#{pid}"); exec /usr/bin/tail --pid="$sbv2_tmux_pid" -f /dev/null'
 ```
+
+これは一時unitであり、unit fileや自動起動設定は作りません。Gatewayとは別cgroupで動き、tmuxが終了するとunitも回収されます。外部の人間用terminalから起動する場合は通常のdetached tmuxでも構いません。
 
 `/mnt/h`上のmodel catalog読み込みは数分かかることがあります。起動後は最大300秒待って`/status`と`/models/info`を確認します。
 
