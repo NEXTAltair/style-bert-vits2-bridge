@@ -45,7 +45,7 @@ curl --fail --silent --show-error --max-time 5 http://127.0.0.1:5000/models/info
 
 最後まで失敗する場合は、別のTTS providerへ声を切り替えず、`tmux list-panes -t sbv2-fastapi -F '#{pane_pid} #{pane_dead} #{pane_dead_status} #{pane_current_command}'`と`tmux capture-pane -t sbv2-fastapi -p -S - | tail -120`で終了statusとログを確認し、SBV2 unavailableとして扱います。
 
-OpenClaw 2026.7.2以降では、SBV2専用personaへ`fallbackPolicy: "fail"`を設定して後続providerへのfallbackを禁止できます。自動TTSをfail-closedにする場合は、`tts.defaultPersonaId`または会話のpersona bindingがSBV2専用personaを指し、そのpersonaが`style-bert-vits2`だけをproviderとして持つことを確認します。現在のValentina設定では`tts.personas.valentina.fallbackPolicy`を`fail`にします。
+OpenClaw 2026.7.2以降では、SBV2専用personaへ`fallbackPolicy: "fail"`を設定して後続providerへのfallbackを禁止できます。自動TTSをfail-closedにする場合は、`tts.persona`または`/tts persona <id>`のsession preferenceがSBV2専用personaを指し、そのpersonaが`style-bert-vits2`だけをproviderとして持つことを確認します。現在のValentina設定では`tts.personas.valentina.fallbackPolicy`を`fail`にします。
 
 基本ルール: model / speaker は声の同一性を決め、style は選択済みモデル内の表情・トーンを決めます。別の声にしたい場合は model / speaker を選び直し、現在の声の表現だけを変えたい場合に style を選びます。
 
