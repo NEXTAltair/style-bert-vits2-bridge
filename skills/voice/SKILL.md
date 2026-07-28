@@ -7,7 +7,6 @@ description: "Style-Bert-VITS2のモデル・speaker・style選択とFastAPIのt
 
 このスキルは、Style-Bert-VITS2 (SBV2) で音声を生成する際のモデル・スピーカー・スタイル選択をガイドします。
 
-
 ## SBV2 FastAPI の起動確認
 
 TTS実行前に`http://127.0.0.1:5000/status`を確認します。応答しない場合は、OpenClaw/Gatewayの実行ターミナルを占有するforeground processや、その子として残す`nohup` / `setsid`ではなく、専用のdetached tmux session `sbv2-fastapi`で起動します。通常運用ではsystemd service登録は不要です。
@@ -23,7 +22,7 @@ tmux has-session -t sbv2-fastapi 2>/dev/null
 tmux capture-pane -t sbv2-fastapi -p -S - | tail -80
 ```
 
-sessionが存在する場合は重複起動しません。sessionが無い場合だけ起動します。
+sessionが存在する場合は重複起動しません。sessionが無い場合だけ、先にshell sessionを作成して`remain-on-exit`を設定し、その後server commandを投入します。これにより起動失敗時もpaneと終了statusを保持できます。
 
 ```bash
 tmux new-session -d -s sbv2-fastapi -c /home/altair/src/Style-Bert-VITS2
@@ -32,10 +31,10 @@ tmux send-keys -t sbv2-fastapi -l -- 'exec uv run server_fastapi.py'
 tmux send-keys -t sbv2-fastapi Enter
 ```
 
-モデルロードには時間がかかるため、起動後は最大120秒待って`/status`と`/models/info`を確認します。
+`/mnt/h`上のmodel catalog読み込みは数分かかることがあります。起動後は最大300秒待って`/status`と`/models/info`を確認します。
 
 ```bash
-for _ in $(seq 1 60); do
+for _ in $(seq 1 150); do
   if curl --fail --silent --max-time 2 http://127.0.0.1:5000/status; then
     break
   fi
@@ -44,7 +43,9 @@ done
 curl --fail --silent --show-error --max-time 5 http://127.0.0.1:5000/models/info
 ```
 
-最後まで失敗する場合は、別のTTS providerへ声を切り替えず、`tmux capture-pane -t sbv2-fastapi -p -S - | tail -120`でログを確認してSBV2 unavailableとして扱います。OpenClaw本体の自動TTSはこのskillを毎回実行するとは限りません。現行のspeech provider plugin contractではbridge自身が後続providerへのfallbackを禁止できないため、自動TTSをfail-closedにするにはOpenClaw本体側の対応が必要です。
+最後まで失敗する場合は、別のTTS providerへ声を切り替えず、`tmux list-panes -t sbv2-fastapi -F '#{pane_pid} #{pane_dead} #{pane_dead_status} #{pane_current_command}'`と`tmux capture-pane -t sbv2-fastapi -p -S - | tail -120`で終了statusとログを確認し、SBV2 unavailableとして扱います。
+
+OpenClaw 2026.7.2以降では、SBV2専用personaへ`fallbackPolicy: "fail"`を設定して後続providerへのfallbackを禁止できます。自動TTSをfail-closedにする場合は、`tts.defaultPersonaId`または会話のpersona bindingがSBV2専用personaを指し、そのpersonaが`style-bert-vits2`だけをproviderとして持つことを確認します。現在のValentina設定では`tts.personas.valentina.fallbackPolicy`を`fail`にします。
 
 基本ルール: model / speaker は声の同一性を決め、style は選択済みモデル内の表情・トーンを決めます。別の声にしたい場合は model / speaker を選び直し、現在の声の表現だけを変えたい場合に style を選びます。
 
