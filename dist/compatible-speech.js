@@ -1,3 +1,4 @@
+import { speechConfiguredHooks } from "./speech-config.js";
 function record(value) {
     return value && typeof value === "object" && !Array.isArray(value)
         ? value
@@ -55,12 +56,22 @@ export function buildCompatibleSpeechProvider(engine) {
     return {
         id: engine,
         label: engine === "irodori" ? "Irodori-TTS" : "speech.cpp",
-        capabilities: { text: engine === "irodori" ? { maxInputChars: 4096 } : {} },
-        isConfigured: ({ providerConfig }) => Boolean(string(providerConfig.baseUrl)),
-        resolveConfig: ({ rawConfig }) => rawConfig,
-        listVoices: async ({ providerConfig = {} }) => {
+        defaultTimeoutMs: 120_000,
+        ...speechConfiguredHooks(({ providerConfig }) => Boolean(string(providerConfig.baseUrl))),
+        resolveConfig: ({ rawConfig, timeoutMs }) => {
+            // The SDK passes the whole TTS config, not an already-selected provider.
+            const config = record(record(rawConfig.providers)[engine] ?? rawConfig[engine]);
+            return { ...config, timeoutMs: config.timeoutMs ?? timeoutMs };
+        },
+        listVoices: async ({ providerConfig = {}, baseUrl, apiKey, timeoutMs }) => {
             const route = engine === "irodori" ? "audio/voices" : "models";
-            const response = await request(endpoint(providerConfig.baseUrl, route), providerConfig);
+            const config = {
+                ...providerConfig,
+                baseUrl: baseUrl ?? providerConfig.baseUrl,
+                apiKey: apiKey ?? providerConfig.apiKey,
+                timeoutMs: timeoutMs ?? providerConfig.timeoutMs,
+            };
+            const response = await request(endpoint(config.baseUrl, route), config);
             const body = record(await response.json());
             const rows = Array.isArray(body.data) ? body.data : [];
             if (engine === "irodori") {

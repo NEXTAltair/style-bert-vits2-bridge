@@ -1,5 +1,6 @@
 import { definePluginEntry } from "openclaw/plugin-sdk/plugin-entry";
 import { buildCompatibleSpeechProvider } from "./compatible-speech.js";
+import { speechConfiguredHooks } from "./speech-config.js";
 import { resolveEmotionStateSelection } from "./emotion-state.js";
 import { applyPronunciationReplacements, resolvePronunciationReplacements, } from "./pronunciation.js";
 import { Sbv2Client } from "./sbv2-client.js";
@@ -427,29 +428,12 @@ export function buildSbv2SpeechProvider(options = {}) {
     return {
         id: "style-bert-vits2",
         label: "Style-Bert-VITS2",
-        capabilities: {
-            text: {},
-        },
-        isConfigured: ({ providerConfig }) => Boolean(trimToUndefined(providerConfig.baseUrl)),
-        resolveCapabilities: async (req) => {
-            const config = req.providerConfig ?? {};
-            const baseUrl = trimToUndefined(config.baseUrl) ?? trimToUndefined(req.baseUrl);
-            if (!baseUrl) {
-                return {
-                    text: {},
-                };
-            }
-            const timeoutMs = asNumber(config.timeoutMs) ?? 30_000;
-            const client = new Sbv2Client({ baseUrl, timeoutMs });
-            return {
-                text: await client.getTextCapabilities(),
-            };
-        },
+        ...speechConfiguredHooks(({ providerConfig }) => Boolean(trimToUndefined(providerConfig.baseUrl))),
         parseDirectiveToken: (ctx) => {
             const parsed = parseVoiceDirectiveToken(ctx);
             return parsed
                 ? { handled: true, overrides: { ...withoutLowLevelInferenceOverrides(ctx.currentOverrides), ...parsed } }
-                : undefined;
+                : { handled: false };
         },
         resolveTalkConfig: ({ baseTtsConfig, talkProviderConfig }) => {
             const providers = asRecord(baseTtsConfig.providers);
@@ -507,11 +491,11 @@ export function buildSbv2SpeechProvider(options = {}) {
         },
         listVoices: async (req) => {
             const config = req.providerConfig ?? {};
-            const baseUrl = trimToUndefined(config.baseUrl) ?? trimToUndefined(req.baseUrl);
+            const baseUrl = trimToUndefined(req.baseUrl) ?? trimToUndefined(config.baseUrl);
             if (!baseUrl) {
                 throw new Error("Style-Bert-VITS2 baseUrl is not configured");
             }
-            const timeoutMs = asNumber(config.timeoutMs) ?? 30_000;
+            const timeoutMs = req.timeoutMs ?? asNumber(config.timeoutMs) ?? 30_000;
             const client = new Sbv2Client({ baseUrl, timeoutMs });
             return listVoiceProfiles(await client.getModelsInfo());
         },

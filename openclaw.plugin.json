@@ -2,7 +2,7 @@
   "id": "style-bert-vits2-bridge",
   "name": "Style-Bert-VITS2 Bridge",
   "description": "Local speech and voice-production bridge for Style-Bert-VITS2, Irodori-TTS, and speech.cpp.",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "contracts": {
     "speechProviders": ["style-bert-vits2", "irodori", "speech-cpp"]
   },

@@ -1,6 +1,6 @@
 {
   "name": "style-bert-vits2-bridge",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "description": "Local speech and voice-production bridge for Style-Bert-VITS2, Irodori-TTS, and speech.cpp.",
   "type": "module",
   "main": "./dist/index.js",
@@ -24,16 +24,16 @@
       "./dist/index.js"
     ],
     "compat": {
-      "pluginApi": ">=2026.5.28",
-      "minGatewayVersion": "2026.5.28"
+      "pluginApi": ">=2026.9.9",
+      "minGatewayVersion": "2026.9.9"
     }
   },
   "peerDependencies": {
-    "openclaw": ">=2026.5.28"
+    "openclaw": ">=2026.9.9"
   },
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
-    "check": "tsc --noEmit",
+    "check": "node scripts/check-sdk-contract.mjs && tsc --noEmit",
     "check:sbv2": "node scripts/check-sbv2-runtime.mjs",
     "prepack": "pnpm run build",
     "sbv2-bridge": "node dist/cli/index.js",
@@ -43,11 +43,12 @@
   },
   "devDependencies": {
     "@types/node": "^25.5.2",
+    "openclaw": "2026.10.4",
     "typescript": "^5.8.0",
     "vitest": "^3.1.0"
   },
   "engines": {
-    "node": ">=22"
+    "node": ">=24.16.0"
   },
   "dependencies": {
     "json5": "^2.2.3"

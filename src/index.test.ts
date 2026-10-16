@@ -1,3 +1,4 @@
+import { directiveContext, speechRequest, talkConfigContext, talkOverridesContext } from "./speech.test-support.js";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("openclaw/plugin-sdk/plugin-entry", () => ({
@@ -63,19 +64,18 @@ describe("Style-Bert-VITS2 speech provider", () => {
   it("registers the speech provider through the plugin entry", () => {
     let provider: unknown;
     const providers: unknown[] = [];
+    // This unit fixture supplies only the registration API used by this entry.
+    // Packaged-host tests exercise the complete real OpenClaw API separately.
     pluginEntry.register({
       registerSpeechProvider: (registered: unknown) => {
         provider = registered;
         providers.push(registered);
       },
-    });
+    } as Parameters<typeof pluginEntry.register>[0]);
 
     expect(provider).toMatchObject({
       id: "style-bert-vits2",
       label: "Style-Bert-VITS2",
-      capabilities: {
-        text: {},
-      },
     });
     expect(providers).toEqual(expect.arrayContaining([
       expect.objectContaining({ id: "irodori" }),
@@ -84,33 +84,12 @@ describe("Style-Bert-VITS2 speech provider", () => {
     ]));
   });
 
-  it("reports dynamic SBV2 text capabilities from OpenAPI when configured", async () => {
-    const mockFetch = vi.fn().mockResolvedValue({
-      ok: true,
-      json: () =>
-        Promise.resolve({
-          paths: {
-            "/voice": {
-              post: {
-                parameters: [{ name: "text", schema: { maxLength: 320 } }],
-              },
-            },
-          },
-        }),
-    });
-    vi.stubGlobal("fetch", mockFetch);
-
+  it("returns an explicit unhandled result for unknown or disallowed directives", () => {
     const provider = buildSbv2SpeechProvider();
-    await expect(
-      provider.resolveCapabilities?.({ providerConfig: { baseUrl: "http://localhost:5000" } }),
-    ).resolves.toEqual({
-      text: {
-        maxInputChars: 320,
-      },
-    });
-
-    const url = new URL(mockFetch.mock.calls[0][0]);
-    expect(url.pathname).toBe("/openapi.json");
+    for (const [key, value] of [["unknown_option", "x"], ["style", "Happy"], ["voice", ""]]) {
+      expect(provider.parseDirectiveToken(directiveContext({ key, value, policy: {} })))
+        .toEqual({ handled: false });
+    }
   });
 
   it("does not invent a 100 character limit when OpenAPI is temporarily unavailable", async () => {
@@ -128,10 +107,10 @@ describe("Style-Bert-VITS2 speech provider", () => {
     vi.stubGlobal("fetch", mockFetch);
 
     const provider = buildSbv2SpeechProvider();
-    await provider.synthesize({
+    await provider.synthesize(speechRequest({
       text: "あ".repeat(400),
       providerConfig: { baseUrl: "http://localhost:5000" },
-    });
+    }));
 
     const voiceUrl = new URL(mockFetch.mock.calls[2][0]);
     expect(voiceUrl.pathname).toBe("/voice");
@@ -144,10 +123,10 @@ describe("Style-Bert-VITS2 speech provider", () => {
 
     const provider = buildSbv2SpeechProvider();
     await expect(
-      provider.synthesize({
+      provider.synthesize(speechRequest({
         text: "あ".repeat(401),
         providerConfig: { baseUrl: "http://localhost:5000" },
-      }),
+      })),
     ).rejects.toThrow(/SBV2 \/voice text is too long: 401 chars exceeds provider hard limit 400/);
 
     expect(mockFetch).toHaveBeenCalledOnce();
@@ -170,10 +149,10 @@ describe("Style-Bert-VITS2 speech provider", () => {
     vi.stubGlobal("fetch", mockFetch);
 
     const provider = buildSbv2SpeechProvider();
-    await provider.synthesize({
+    await provider.synthesize(speechRequest({
       text: "あ".repeat(400),
       providerConfig: { baseUrl: "http://localhost:5000" },
-    });
+    }));
 
     const voiceUrl = new URL(mockFetch.mock.calls[2][0]);
     expect(voiceUrl.pathname).toBe("/voice");
@@ -186,10 +165,10 @@ describe("Style-Bert-VITS2 speech provider", () => {
 
     const provider = buildSbv2SpeechProvider();
     await expect(
-      provider.synthesize({
+      provider.synthesize(speechRequest({
         text: "あ".repeat(321),
         providerConfig: { baseUrl: "http://localhost:5000" },
-      }),
+      })),
     ).rejects.toThrow(/exceeds provider hard limit 320/);
 
     expect(mockFetch).toHaveBeenCalledOnce();
@@ -212,10 +191,10 @@ describe("Style-Bert-VITS2 speech provider", () => {
     vi.stubGlobal("fetch", mockFetch);
 
     const provider = buildSbv2SpeechProvider();
-    await provider.synthesize({
+    await provider.synthesize(speechRequest({
       text: "😀".repeat(51),
       providerConfig: { baseUrl: "http://localhost:5000" },
-    });
+    }));
 
     const voiceUrl = new URL(mockFetch.mock.calls[2][0]);
     expect(voiceUrl.pathname).toBe("/voice");
@@ -228,10 +207,10 @@ describe("Style-Bert-VITS2 speech provider", () => {
 
     const provider = buildSbv2SpeechProvider();
     await expect(
-      provider.synthesize({
+      provider.synthesize(speechRequest({
         text: "😀".repeat(101),
         providerConfig: { baseUrl: "http://localhost:5000" },
-      }),
+      })),
     ).rejects.toThrow(/SBV2 \/voice text is too long: 101 chars exceeds provider hard limit 100/);
   });
 
@@ -241,13 +220,13 @@ describe("Style-Bert-VITS2 speech provider", () => {
 
     const provider = buildSbv2SpeechProvider();
     await expect(
-      provider.synthesize({
+      provider.synthesize(speechRequest({
         text: "SBV2",
         providerConfig: {
           baseUrl: "http://localhost:5000",
           pronunciationReplacements: { SBV2: "あ".repeat(101) },
         },
-      }),
+      })),
     ).rejects.toThrow(/SBV2 \/voice text is too long: 101 chars exceeds provider hard limit 100/);
 
     expect(mockFetch).toHaveBeenCalledOnce();
@@ -268,10 +247,10 @@ describe("Style-Bert-VITS2 speech provider", () => {
     vi.stubGlobal("fetch", mockFetch);
 
     const provider = buildSbv2SpeechProvider();
-    await provider.synthesize({
+    await provider.synthesize(speechRequest({
       text: "あ".repeat(401),
       providerConfig: { baseUrl: "http://localhost:5000" },
-    });
+    }));
 
     const voiceUrl = new URL(mockFetch.mock.calls[2][0]);
     expect(voiceUrl.pathname).toBe("/voice");
@@ -375,10 +354,10 @@ describe("Style-Bert-VITS2 speech provider", () => {
     vi.stubGlobal("fetch", mockFetch);
 
     const provider = buildSbv2SpeechProvider();
-    const result = await provider.synthesize({
+    const result = await provider.synthesize(speechRequest({
       text: "こんにちは",
       providerConfig: { baseUrl: "http://localhost:5000" },
-    });
+    }));
 
     expect(result.outputFormat).toBe("wav");
     expect(mockFetch).toHaveBeenCalledTimes(3);
@@ -410,10 +389,10 @@ describe("Style-Bert-VITS2 speech provider", () => {
     vi.stubGlobal("fetch", mockFetch);
 
     const provider = buildSbv2SpeechProvider();
-    const result = await provider.synthesize({
+    const result = await provider.synthesize(speechRequest({
       text: observedToolFailureText,
       providerConfig: { baseUrl: "http://localhost:5000" },
-    });
+    }));
 
     const voiceUrl = new URL(mockFetch.mock.calls[2][0]);
     const spokenText = voiceUrl.searchParams.get("text");
@@ -440,10 +419,10 @@ describe("Style-Bert-VITS2 speech provider", () => {
     vi.stubGlobal("fetch", mockFetch);
 
     const provider = buildSbv2SpeechProvider();
-    await provider.synthesize({
+    await provider.synthesize(speechRequest({
       text: observedToolFailureText,
       providerConfig: { baseUrl: "http://localhost:5000", defaultLanguage: "EN" },
-    });
+    }));
 
     const voiceUrl = new URL(mockFetch.mock.calls[2][0]);
     expect(voiceUrl.searchParams.get("text")).toBe("The command failed. I will try another way.");
@@ -465,10 +444,10 @@ describe("Style-Bert-VITS2 speech provider", () => {
     vi.stubGlobal("fetch", mockFetch);
 
     const provider = buildSbv2SpeechProvider();
-    const result = await provider.synthesize({
+    const result = await provider.synthesize(speechRequest({
       text: "Issue: https://github.com/NEXTAltair/style-bert-vits2-bridge/issues/64",
       providerConfig: { baseUrl: "http://localhost:5000" },
-    });
+    }));
 
     const voiceUrl = new URL(mockFetch.mock.calls[2][0]);
     const spokenText = voiceUrl.searchParams.get("text");
@@ -494,10 +473,10 @@ describe("Style-Bert-VITS2 speech provider", () => {
     vi.stubGlobal("fetch", mockFetch);
 
     const provider = buildSbv2SpeechProvider();
-    const result = await provider.synthesize({
+    const result = await provider.synthesize(speechRequest({
       text: "PR updated: https://github.com/NEXTAltair/style-bert-vits2-bridge/pull/65",
       providerConfig: { baseUrl: "http://localhost:5000", defaultLanguage: "EN" },
-    });
+    }));
 
     const voiceUrl = new URL(mockFetch.mock.calls[2][0]);
     const spokenText = voiceUrl.searchParams.get("text");
@@ -523,10 +502,10 @@ describe("Style-Bert-VITS2 speech provider", () => {
     vi.stubGlobal("fetch", mockFetch);
 
     const provider = buildSbv2SpeechProvider();
-    const result = await provider.synthesize({
+    const result = await provider.synthesize(speechRequest({
       text: "Created issue: https://github.com/NEXTAltair/style-bert-vits2-bridge/issues/64",
       providerConfig: { baseUrl: "http://localhost:5000", defaultLanguage: "EN" },
-    });
+    }));
 
     const voiceUrl = new URL(mockFetch.mock.calls[2][0]);
     expect(voiceUrl.searchParams.get("text")).toBe("The GitHub issue was updated.");
@@ -554,10 +533,10 @@ describe("Style-Bert-VITS2 speech provider", () => {
       vi.stubGlobal("fetch", mockFetch);
 
       const provider = buildSbv2SpeechProvider();
-      const result = await provider.synthesize({
+      const result = await provider.synthesize(speechRequest({
         text,
         providerConfig: { baseUrl: "http://localhost:5000", defaultLanguage: "EN" },
-      });
+      }));
 
       const voiceUrl = new URL(mockFetch.mock.calls[2][0]);
       expect(voiceUrl.searchParams.get("text")).toBe("The GitHub pull request was updated.");
@@ -587,10 +566,10 @@ describe("Style-Bert-VITS2 speech provider", () => {
       vi.stubGlobal("fetch", mockFetch);
 
       const provider = buildSbv2SpeechProvider();
-      const result = await provider.synthesize({
+      const result = await provider.synthesize(speechRequest({
         text,
         providerConfig: { baseUrl: "http://localhost:5000", defaultLanguage: "EN" },
-      });
+      }));
 
       const voiceUrl = new URL(mockFetch.mock.calls[2][0]);
       expect(voiceUrl.searchParams.get("text")).toBe(expectedText);
@@ -613,13 +592,13 @@ describe("Style-Bert-VITS2 speech provider", () => {
     vi.stubGlobal("fetch", mockFetch);
 
     const provider = buildSbv2SpeechProvider();
-    const result = await provider.synthesize({
+    const result = await provider.synthesize(speechRequest({
       text: [
         "Issue: https://github.com/NEXTAltair/style-bert-vits2-bridge/issues/64",
         "PR: https://github.com/NEXTAltair/style-bert-vits2-bridge/pull/65",
       ].join("\n"),
       providerConfig: { baseUrl: "http://localhost:5000", defaultLanguage: "EN" },
-    });
+    }));
 
     const voiceUrl = new URL(mockFetch.mock.calls[2][0]);
     expect(voiceUrl.searchParams.get("text")).toBe("The GitHub items were updated.");
@@ -641,7 +620,7 @@ describe("Style-Bert-VITS2 speech provider", () => {
     vi.stubGlobal("fetch", mockFetch);
 
     const provider = buildSbv2SpeechProvider();
-    const result = await provider.synthesize({
+    const result = await provider.synthesize(speechRequest({
       text: [
         "Issue: https://github.com/NEXTAltair/style-bert-vits2-bridge/issues/64",
         "Issue: https://github.com/NEXTAltair/style-bert-vits2-bridge/issues/65",
@@ -649,7 +628,7 @@ describe("Style-Bert-VITS2 speech provider", () => {
         "Issue: https://github.com/NEXTAltair/style-bert-vits2-bridge/issues/67",
       ].join("\n"),
       providerConfig: { baseUrl: "http://localhost:5000", defaultLanguage: "EN" },
-    });
+    }));
 
     const voiceUrl = new URL(mockFetch.mock.calls[2][0]);
     expect(voiceUrl.searchParams.get("text")).toBe("The GitHub issue was updated.");
@@ -677,10 +656,10 @@ describe("Style-Bert-VITS2 speech provider", () => {
       vi.stubGlobal("fetch", mockFetch);
 
       const provider = buildSbv2SpeechProvider();
-      const result = await provider.synthesize({
+      const result = await provider.synthesize(speechRequest({
         text,
         providerConfig: { baseUrl: "http://localhost:5000", defaultLanguage: "EN" },
-      });
+      }));
 
       const voiceUrl = new URL(mockFetch.mock.calls[2][0]);
       expect(voiceUrl.searchParams.get("text")).toBe(expectedText);
@@ -712,10 +691,10 @@ describe("Style-Bert-VITS2 speech provider", () => {
       vi.stubGlobal("fetch", mockFetch);
 
       const provider = buildSbv2SpeechProvider();
-      const result = await provider.synthesize({
+      const result = await provider.synthesize(speechRequest({
         text,
         providerConfig: { baseUrl: "http://localhost:5000", defaultLanguage: "EN" },
-      });
+      }));
 
       const voiceUrl = new URL(mockFetch.mock.calls[2][0]);
       const spokenText = voiceUrl.searchParams.get("text");
@@ -747,10 +726,10 @@ describe("Style-Bert-VITS2 speech provider", () => {
       "Please review the repro steps below.",
     ].join("\n");
     const provider = buildSbv2SpeechProvider();
-    const result = await provider.synthesize({
+    const result = await provider.synthesize(speechRequest({
       text,
       providerConfig: { baseUrl: "http://localhost:5000", defaultLanguage: "EN" },
-    });
+    }));
 
     const voiceUrl = new URL(mockFetch.mock.calls[2][0]);
     expect(voiceUrl.searchParams.get("text")).toBe("Please review the repro steps below.");
@@ -772,7 +751,7 @@ describe("Style-Bert-VITS2 speech provider", () => {
     vi.stubGlobal("fetch", mockFetch);
 
     const provider = buildSbv2SpeechProvider();
-    const result = await provider.synthesize({
+    const result = await provider.synthesize(speechRequest({
       text: [
         "作った。",
         "",
@@ -781,7 +760,7 @@ describe("Style-Bert-VITS2 speech provider", () => {
         "内容は確認します。",
       ].join("\n"),
       providerConfig: { baseUrl: "http://localhost:5000" },
-    });
+    }));
 
     const voiceUrl = new URL(mockFetch.mock.calls[2][0]);
     const spokenText = voiceUrl.searchParams.get("text");
@@ -806,10 +785,10 @@ describe("Style-Bert-VITS2 speech provider", () => {
     vi.stubGlobal("fetch", mockFetch);
 
     const provider = buildSbv2SpeechProvider();
-    const result = await provider.synthesize({
+    const result = await provider.synthesize(speechRequest({
       text: "作った。 https://github.com/NEXTAltair/style-bert-vits2-bridge/issues/71",
       providerConfig: { baseUrl: "http://localhost:5000" },
-    });
+    }));
 
     const voiceUrl = new URL(mockFetch.mock.calls[2][0]);
     expect(voiceUrl.searchParams.get("text")).toBe("作った。");
@@ -832,10 +811,10 @@ describe("Style-Bert-VITS2 speech provider", () => {
 
     const provider = buildSbv2SpeechProvider();
     const text = "See https://github.com/org/repo/blob/main/docs/issues/71.md for details.";
-    const result = await provider.synthesize({
+    const result = await provider.synthesize(speechRequest({
       text,
       providerConfig: { baseUrl: "http://localhost:5000" },
-    });
+    }));
 
     const voiceUrl = new URL(mockFetch.mock.calls[2][0]);
     expect(voiceUrl.searchParams.get("text")).toBe(text);
@@ -857,13 +836,13 @@ describe("Style-Bert-VITS2 speech provider", () => {
     vi.stubGlobal("fetch", mockFetch);
 
     const provider = buildSbv2SpeechProvider();
-    const result = await provider.synthesize({
+    const result = await provider.synthesize(speechRequest({
       text: [
         "See <https://github.com/NEXTAltair/style-bert-vits2-bridge/pull/65/files> now",
         "Check `https://github.com/NEXTAltair/style-bert-vits2-bridge/pull/65/checks?check_run_id=123` next",
       ].join("\n"),
       providerConfig: { baseUrl: "http://localhost:5000" },
-    });
+    }));
 
     const voiceUrl = new URL(mockFetch.mock.calls[2][0]);
     const spokenText = voiceUrl.searchParams.get("text");
@@ -890,10 +869,10 @@ describe("Style-Bert-VITS2 speech provider", () => {
     vi.stubGlobal("fetch", mockFetch);
 
     const provider = buildSbv2SpeechProvider();
-    const result = await provider.synthesize({
+    const result = await provider.synthesize(speechRequest({
       text: "Please see [the pull request](https://github.com/org/repo/pull/65) for details.",
       providerConfig: { baseUrl: "http://localhost:5000" },
-    });
+    }));
 
     const voiceUrl = new URL(mockFetch.mock.calls[2][0]);
     const spokenText = voiceUrl.searchParams.get("text");
@@ -917,10 +896,10 @@ describe("Style-Bert-VITS2 speech provider", () => {
     vi.stubGlobal("fetch", mockFetch);
 
     const provider = buildSbv2SpeechProvider();
-    const result = await provider.synthesize({
+    const result = await provider.synthesize(speechRequest({
       text: 'Please see [the PR](https://github.com/org/repo/pull/65 "hidden title") now.',
       providerConfig: { baseUrl: "http://localhost:5000" },
-    });
+    }));
 
     const voiceUrl = new URL(mockFetch.mock.calls[2][0]);
     const spokenText = voiceUrl.searchParams.get("text");
@@ -945,14 +924,14 @@ describe("Style-Bert-VITS2 speech provider", () => {
     vi.stubGlobal("fetch", mockFetch);
 
     const provider = buildSbv2SpeechProvider();
-    const result = await provider.synthesize({
+    const result = await provider.synthesize(speechRequest({
       text: [
         "- [Fixed crash](https://github.com/org/repo/issues/71)",
         "- [issue](https://github.com/org/repo/issues/72)",
         "確認します。",
       ].join("\n"),
       providerConfig: { baseUrl: "http://localhost:5000" },
-    });
+    }));
 
     const voiceUrl = new URL(mockFetch.mock.calls[2][0]);
     const spokenText = voiceUrl.searchParams.get("text");
@@ -977,14 +956,14 @@ describe("Style-Bert-VITS2 speech provider", () => {
     vi.stubGlobal("fetch", mockFetch);
 
     const provider = buildSbv2SpeechProvider();
-    const result = await provider.synthesize({
+    const result = await provider.synthesize(speechRequest({
       text: [
         "対応しました。",
         "[1]: https://github.com/org/repo/issues/71",
         "[pr]: https://github.com/org/repo/pull/65",
       ].join("\n"),
       providerConfig: { baseUrl: "http://localhost:5000" },
-    });
+    }));
 
     const voiceUrl = new URL(mockFetch.mock.calls[2][0]);
     const spokenText = voiceUrl.searchParams.get("text");
@@ -1009,14 +988,14 @@ describe("Style-Bert-VITS2 speech provider", () => {
     vi.stubGlobal("fetch", mockFetch);
 
     const provider = buildSbv2SpeechProvider();
-    const result = await provider.synthesize({
+    const result = await provider.synthesize(speechRequest({
       text: [
         "対応しました。",
         '[1]: https://github.com/org/repo/issues/71 "fix"',
         "[pr]: https://github.com/org/repo/pull/65 'details'",
       ].join("\n"),
       providerConfig: { baseUrl: "http://localhost:5000" },
-    });
+    }));
 
     const voiceUrl = new URL(mockFetch.mock.calls[2][0]);
     const spokenText = voiceUrl.searchParams.get("text");
@@ -1042,13 +1021,13 @@ describe("Style-Bert-VITS2 speech provider", () => {
     vi.stubGlobal("fetch", mockFetch);
 
     const provider = buildSbv2SpeechProvider();
-    const result = await provider.synthesize({
+    const result = await provider.synthesize(speechRequest({
       text: [
         "Please see [the pull request][pr].",
         "[pr]: https://github.com/org/repo/pull/65",
       ].join("\n"),
       providerConfig: { baseUrl: "http://localhost:5000" },
-    });
+    }));
 
     const voiceUrl = new URL(mockFetch.mock.calls[2][0]);
     const spokenText = voiceUrl.searchParams.get("text");
@@ -1073,13 +1052,13 @@ describe("Style-Bert-VITS2 speech provider", () => {
     vi.stubGlobal("fetch", mockFetch);
 
     const provider = buildSbv2SpeechProvider();
-    const result = await provider.synthesize({
+    const result = await provider.synthesize(speechRequest({
       text: [
         "Please see [the pull request][].",
         "[the pull request]: https://github.com/org/repo/pull/65",
       ].join("\n"),
       providerConfig: { baseUrl: "http://localhost:5000" },
-    });
+    }));
 
     const voiceUrl = new URL(mockFetch.mock.calls[2][0]);
     const spokenText = voiceUrl.searchParams.get("text");
@@ -1104,13 +1083,13 @@ describe("Style-Bert-VITS2 speech provider", () => {
     vi.stubGlobal("fetch", mockFetch);
 
     const provider = buildSbv2SpeechProvider();
-    const result = await provider.synthesize({
+    const result = await provider.synthesize(speechRequest({
       text: [
         "Please see [the pull request].",
         "[the pull request]: https://github.com/org/repo/pull/65",
       ].join("\n"),
       providerConfig: { baseUrl: "http://localhost:5000" },
-    });
+    }));
 
     const voiceUrl = new URL(mockFetch.mock.calls[2][0]);
     const spokenText = voiceUrl.searchParams.get("text");
@@ -1135,13 +1114,13 @@ describe("Style-Bert-VITS2 speech provider", () => {
     vi.stubGlobal("fetch", mockFetch);
 
     const provider = buildSbv2SpeechProvider();
-    const result = await provider.synthesize({
+    const result = await provider.synthesize(speechRequest({
       text: [
         "Please see [the pull request][pr].",
         "[pr]: <https://github.com/org/repo/pull/65>",
       ].join("\n"),
       providerConfig: { baseUrl: "http://localhost:5000" },
-    });
+    }));
 
     const voiceUrl = new URL(mockFetch.mock.calls[2][0]);
     const spokenText = voiceUrl.searchParams.get("text");
@@ -1166,13 +1145,13 @@ describe("Style-Bert-VITS2 speech provider", () => {
     vi.stubGlobal("fetch", mockFetch);
 
     const provider = buildSbv2SpeechProvider();
-    const result = await provider.synthesize({
+    const result = await provider.synthesize(speechRequest({
       text: [
         "Please see [the PR][pull   request].",
         "[pull request]: https://github.com/org/repo/pull/65",
       ].join("\n"),
       providerConfig: { baseUrl: "http://localhost:5000" },
-    });
+    }));
 
     const voiceUrl = new URL(mockFetch.mock.calls[2][0]);
     const spokenText = voiceUrl.searchParams.get("text");
@@ -1197,13 +1176,13 @@ describe("Style-Bert-VITS2 speech provider", () => {
     vi.stubGlobal("fetch", mockFetch);
 
     const provider = buildSbv2SpeechProvider();
-    const result = await provider.synthesize({
+    const result = await provider.synthesize(speechRequest({
       text: [
         "![fixed crash][pr]",
         "[pr]: https://github.com/org/repo/pull/65",
       ].join("\n"),
       providerConfig: { baseUrl: "http://localhost:5000" },
-    });
+    }));
 
     const voiceUrl = new URL(mockFetch.mock.calls[2][0]);
     const spokenText = voiceUrl.searchParams.get("text");
@@ -1229,13 +1208,13 @@ describe("Style-Bert-VITS2 speech provider", () => {
     vi.stubGlobal("fetch", mockFetch);
 
     const provider = buildSbv2SpeechProvider();
-    const result = await provider.synthesize({
+    const result = await provider.synthesize(speechRequest({
       text: [
         "See [docs](https://example.com).",
         "[docs]: https://github.com/org/repo/issues/71",
       ].join("\n"),
       providerConfig: { baseUrl: "http://localhost:5000" },
-    });
+    }));
 
     const voiceUrl = new URL(mockFetch.mock.calls[2][0]);
     const spokenText = voiceUrl.searchParams.get("text");
@@ -1259,14 +1238,14 @@ describe("Style-Bert-VITS2 speech provider", () => {
     vi.stubGlobal("fetch", mockFetch);
 
     const provider = buildSbv2SpeechProvider();
-    const result = await provider.synthesize({
+    const result = await provider.synthesize(speechRequest({
       text: [
         "対応しました。",
         "[pr]: https://github.com/org/repo/pull/65",
         '  "details"',
       ].join("\n"),
       providerConfig: { baseUrl: "http://localhost:5000" },
-    });
+    }));
 
     const voiceUrl = new URL(mockFetch.mock.calls[2][0]);
     const spokenText = voiceUrl.searchParams.get("text");
@@ -1291,13 +1270,13 @@ describe("Style-Bert-VITS2 speech provider", () => {
     vi.stubGlobal("fetch", mockFetch);
 
     const provider = buildSbv2SpeechProvider();
-    const result = await provider.synthesize({
+    const result = await provider.synthesize(speechRequest({
       text: [
         "### https://github.com/org/repo/issues/71",
         "### [issue](https://github.com/org/repo/issues/72)",
       ].join("\n"),
       providerConfig: { baseUrl: "http://localhost:5000", defaultLanguage: "EN" },
-    });
+    }));
 
     const voiceUrl = new URL(mockFetch.mock.calls[2][0]);
     const spokenText = voiceUrl.searchParams.get("text");
@@ -1322,13 +1301,13 @@ describe("Style-Bert-VITS2 speech provider", () => {
     vi.stubGlobal("fetch", mockFetch);
 
     const provider = buildSbv2SpeechProvider();
-    const result = await provider.synthesize({
+    const result = await provider.synthesize(speechRequest({
       text: [
         "**https://github.com/org/repo/issues/71**",
         "**[issue](https://github.com/org/repo/issues/72)**",
       ].join("\n"),
       providerConfig: { baseUrl: "http://localhost:5000", defaultLanguage: "EN" },
-    });
+    }));
 
     const voiceUrl = new URL(mockFetch.mock.calls[2][0]);
     const spokenText = voiceUrl.searchParams.get("text");
@@ -1353,13 +1332,13 @@ describe("Style-Bert-VITS2 speech provider", () => {
     vi.stubGlobal("fetch", mockFetch);
 
     const provider = buildSbv2SpeechProvider();
-    const result = await provider.synthesize({
+    const result = await provider.synthesize(speechRequest({
       text: [
         "See (https://github.com/org/repo/issues/71) for details.",
         "See [https://github.com/org/repo/pull/65] for details.",
       ].join("\n"),
       providerConfig: { baseUrl: "http://localhost:5000" },
-    });
+    }));
 
     const voiceUrl = new URL(mockFetch.mock.calls[2][0]);
     const spokenText = voiceUrl.searchParams.get("text");
@@ -1385,13 +1364,13 @@ describe("Style-Bert-VITS2 speech provider", () => {
     vi.stubGlobal("fetch", mockFetch);
 
     const provider = buildSbv2SpeechProvider();
-    const result = await provider.synthesize({
+    const result = await provider.synthesize(speechRequest({
       text: [
         "See [https://github.com/org/repo/issues/71?x=1] now.",
         "See [https://github.com/org/repo/issues/72#comment] next.",
       ].join("\n"),
       providerConfig: { baseUrl: "http://localhost:5000" },
-    });
+    }));
 
     const voiceUrl = new URL(mockFetch.mock.calls[2][0]);
     const spokenText = voiceUrl.searchParams.get("text");
@@ -1417,13 +1396,13 @@ describe("Style-Bert-VITS2 speech provider", () => {
     vi.stubGlobal("fetch", mockFetch);
 
     const provider = buildSbv2SpeechProvider();
-    const result = await provider.synthesize({
+    const result = await provider.synthesize(speechRequest({
       text: [
         "See **https://github.com/org/repo/issues/71** for details.",
         "See **[the PR](https://github.com/org/repo/pull/65)** now.",
       ].join("\n"),
       providerConfig: { baseUrl: "http://localhost:5000" },
-    });
+    }));
 
     const voiceUrl = new URL(mockFetch.mock.calls[2][0]);
     const spokenText = voiceUrl.searchParams.get("text");
@@ -1448,10 +1427,10 @@ describe("Style-Bert-VITS2 speech provider", () => {
     vi.stubGlobal("fetch", mockFetch);
 
     const provider = buildSbv2SpeechProvider();
-    const result = await provider.synthesize({
+    const result = await provider.synthesize(speechRequest({
       text: "Please see [the PR](<https://github.com/org/repo/pull/65>) now.",
       providerConfig: { baseUrl: "http://localhost:5000" },
-    });
+    }));
 
     const voiceUrl = new URL(mockFetch.mock.calls[2][0]);
     const spokenText = voiceUrl.searchParams.get("text");
@@ -1476,10 +1455,10 @@ describe("Style-Bert-VITS2 speech provider", () => {
     vi.stubGlobal("fetch", mockFetch);
 
     const provider = buildSbv2SpeechProvider();
-    const result = await provider.synthesize({
+    const result = await provider.synthesize(speechRequest({
       text: "![fixed crash](https://github.com/org/repo/issues/71)",
       providerConfig: { baseUrl: "http://localhost:5000" },
-    });
+    }));
 
     const voiceUrl = new URL(mockFetch.mock.calls[2][0]);
     const spokenText = voiceUrl.searchParams.get("text");
@@ -1504,7 +1483,7 @@ describe("Style-Bert-VITS2 speech provider", () => {
     vi.stubGlobal("fetch", mockFetch);
 
     const provider = buildSbv2SpeechProvider();
-    const result = await provider.synthesize({
+    const result = await provider.synthesize(speechRequest({
       text: [
         "- https://github.com/NEXTAltair/style-bert-vits2-bridge/issues/71",
         "1. https://github.com/NEXTAltair/style-bert-vits2-bridge/pull/73/files",
@@ -1515,7 +1494,7 @@ describe("Style-Bert-VITS2 speech provider", () => {
         "内容は確認します。",
       ].join("\n"),
       providerConfig: { baseUrl: "http://localhost:5000" },
-    });
+    }));
 
     const voiceUrl = new URL(mockFetch.mock.calls[2][0]);
     const spokenText = voiceUrl.searchParams.get("text");
@@ -1544,13 +1523,13 @@ describe("Style-Bert-VITS2 speech provider", () => {
     vi.stubGlobal("fetch", mockFetch);
 
     const provider = buildSbv2SpeechProvider();
-    const result = await provider.synthesize({
+    const result = await provider.synthesize(speechRequest({
       text: [
         "Call foo() after https://github.com/org/repo/issues/71",
         "Use [] as the default: https://github.com/org/repo/pull/65",
       ].join("\n"),
       providerConfig: { baseUrl: "http://localhost:5000" },
-    });
+    }));
 
     const voiceUrl = new URL(mockFetch.mock.calls[2][0]);
     const spokenText = voiceUrl.searchParams.get("text");
@@ -1576,10 +1555,10 @@ describe("Style-Bert-VITS2 speech provider", () => {
     vi.stubGlobal("fetch", mockFetch);
 
     const provider = buildSbv2SpeechProvider();
-    const result = await provider.synthesize({
+    const result = await provider.synthesize(speechRequest({
       text: "Call __init__ before https://github.com/org/repo/issues/71",
       providerConfig: { baseUrl: "http://localhost:5000" },
-    });
+    }));
 
     const voiceUrl = new URL(mockFetch.mock.calls[2][0]);
     const spokenText = voiceUrl.searchParams.get("text");
@@ -1604,13 +1583,13 @@ describe("Style-Bert-VITS2 speech provider", () => {
     vi.stubGlobal("fetch", mockFetch);
 
     const provider = buildSbv2SpeechProvider();
-    const result = await provider.synthesize({
+    const result = await provider.synthesize(speechRequest({
       text: [
         "Call __init__ before proceeding.",
         "https://github.com/org/repo/issues/71",
       ].join("\n"),
       providerConfig: { baseUrl: "http://localhost:5000" },
-    });
+    }));
 
     const voiceUrl = new URL(mockFetch.mock.calls[2][0]);
     const spokenText = voiceUrl.searchParams.get("text");
@@ -1635,13 +1614,13 @@ describe("Style-Bert-VITS2 speech provider", () => {
     vi.stubGlobal("fetch", mockFetch);
 
     const provider = buildSbv2SpeechProvider();
-    const result = await provider.synthesize({
+    const result = await provider.synthesize(speechRequest({
       text: [
         "PR: https://github.com/org/repo/pull/65.diff",
         "PR: https://github.com/org/repo/pull/66.patch",
       ].join("\n"),
       providerConfig: { baseUrl: "http://localhost:5000", defaultLanguage: "EN" },
-    });
+    }));
 
     const voiceUrl = new URL(mockFetch.mock.calls[2][0]);
     const spokenText = voiceUrl.searchParams.get("text");
@@ -1667,10 +1646,10 @@ describe("Style-Bert-VITS2 speech provider", () => {
     vi.stubGlobal("fetch", mockFetch);
 
     const provider = buildSbv2SpeechProvider();
-    const result = await provider.synthesize({
+    const result = await provider.synthesize(speechRequest({
       text: "https://github.com/NEXTAltair/style-bert-vits2-bridge/issues/71",
       providerConfig: { baseUrl: "http://localhost:5000", defaultLanguage: "EN" },
-    });
+    }));
 
     const voiceUrl = new URL(mockFetch.mock.calls[2][0]);
     expect(voiceUrl.searchParams.get("text")).toBe("The GitHub issue was updated.");
@@ -1692,13 +1671,13 @@ describe("Style-Bert-VITS2 speech provider", () => {
     vi.stubGlobal("fetch", mockFetch);
 
     const provider = buildSbv2SpeechProvider();
-    const result = await provider.synthesize({
+    const result = await provider.synthesize(speechRequest({
       text: [
         "作った。",
         "https://github.com/NEXTAltair/style-bert-vits2-bridge/issues/71?notification_referrer_id=very-long",
       ].join("\n"),
       providerConfig: { baseUrl: "http://localhost:5000" },
-    });
+    }));
 
     const voiceUrl = new URL(mockFetch.mock.calls[2][0]);
     expect(voiceUrl.searchParams.get("text")).toBe("作った。");
@@ -1720,11 +1699,11 @@ describe("Style-Bert-VITS2 speech provider", () => {
     vi.stubGlobal("fetch", mockFetch);
 
     const provider = buildSbv2SpeechProvider();
-    const result = await provider.synthesize({
+    const result = await provider.synthesize(speechRequest({
       text: "https://github.com/NEXTAltair/style-bert-vits2-bridge/issues/71",
       providerConfig: { baseUrl: "http://localhost:5000", defaultLanguage: "EN" },
       providerOverrides: { language: "JP" },
-    });
+    }));
 
     const voiceUrl = new URL(mockFetch.mock.calls[2][0]);
     expect(voiceUrl.searchParams.get("text")).toBe("GitHub の課題を更新しました。");
@@ -1747,11 +1726,11 @@ describe("Style-Bert-VITS2 speech provider", () => {
     vi.stubGlobal("fetch", mockFetch);
 
     const provider = buildSbv2SpeechProvider();
-    const result = await provider.synthesize({
+    const result = await provider.synthesize(speechRequest({
       text: "https://github.com/NEXTAltair/style-bert-vits2-bridge/issues/71",
       providerConfig: { baseUrl: "http://localhost:5000", defaultLanguage: "EN" },
       providerOverrides: { voiceId: "valentina01_bright" },
-    });
+    }));
 
     const voiceUrl = new URL(mockFetch.mock.calls[2][0]);
     expect(voiceUrl.searchParams.get("text")).toBe("GitHub の課題を更新しました。");
@@ -1774,10 +1753,10 @@ describe("Style-Bert-VITS2 speech provider", () => {
     vi.stubGlobal("fetch", mockFetch);
 
     const provider = buildSbv2SpeechProvider();
-    const result = await provider.synthesize({
+    const result = await provider.synthesize(speechRequest({
       text: "Issue: https://github.com/NEXTAltair/style-bert-vits2-bridge/issues/64",
       providerConfig: { baseUrl: "http://localhost:5000", defaultLanguage: "EN" },
-    });
+    }));
 
     const voiceUrl = new URL(mockFetch.mock.calls[2][0]);
     expect(voiceUrl.searchParams.get("text")).toBe("The GitHub issue was updated.");
@@ -1799,10 +1778,10 @@ describe("Style-Bert-VITS2 speech provider", () => {
     vi.stubGlobal("fetch", mockFetch);
 
     const provider = buildSbv2SpeechProvider();
-    const result = await provider.synthesize({
+    const result = await provider.synthesize(speechRequest({
       text: "GitHub issue のクローズに失敗しました。理由を確認します。",
       providerConfig: { baseUrl: "http://localhost:5000" },
-    });
+    }));
 
     const voiceUrl = new URL(mockFetch.mock.calls[2][0]);
     expect(voiceUrl.searchParams.get("text")).toBe("GitHub issue のクローズに失敗しました。理由を確認します。");
@@ -1824,10 +1803,10 @@ describe("Style-Bert-VITS2 speech provider", () => {
     vi.stubGlobal("fetch", mockFetch);
 
     const provider = buildSbv2SpeechProvider();
-    const result = await provider.synthesize({
+    const result = await provider.synthesize(speechRequest({
       text: "The git command failed for NEXTAltair/openclaw, so I will check the repository state.",
       providerConfig: { baseUrl: "http://localhost:5000", defaultLanguage: "EN" },
-    });
+    }));
 
     const voiceUrl = new URL(mockFetch.mock.calls[2][0]);
     expect(voiceUrl.searchParams.get("text")).toBe(
@@ -1851,10 +1830,10 @@ describe("Style-Bert-VITS2 speech provider", () => {
     vi.stubGlobal("fetch", mockFetch);
 
     const provider = buildSbv2SpeechProvider();
-    const result = await provider.synthesize({
+    const result = await provider.synthesize(speechRequest({
       text: "Python failed to parse the file, so I will inspect the syntax.",
       providerConfig: { baseUrl: "http://localhost:5000", defaultLanguage: "EN" },
-    });
+    }));
 
     const voiceUrl = new URL(mockFetch.mock.calls[2][0]);
     expect(voiceUrl.searchParams.get("text")).toBe(
@@ -1878,10 +1857,10 @@ describe("Style-Bert-VITS2 speech provider", () => {
     vi.stubGlobal("fetch", mockFetch);
 
     const provider = buildSbv2SpeechProvider();
-    const result = await provider.synthesize({
+    const result = await provider.synthesize(speechRequest({
       text: "Python script failed to parse the file, and Node process failed to start.",
       providerConfig: { baseUrl: "http://localhost:5000", defaultLanguage: "EN" },
-    });
+    }));
 
     const voiceUrl = new URL(mockFetch.mock.calls[2][0]);
     expect(voiceUrl.searchParams.get("text")).toBe(
@@ -1905,10 +1884,10 @@ describe("Style-Bert-VITS2 speech provider", () => {
     vi.stubGlobal("fetch", mockFetch);
 
     const provider = buildSbv2SpeechProvider();
-    const result = await provider.synthesize({
+    const result = await provider.synthesize(speechRequest({
       text: "git status --bad\nerror: unknown option",
       providerConfig: { baseUrl: "http://localhost:5000", defaultLanguage: "EN" },
-    });
+    }));
 
     const voiceUrl = new URL(mockFetch.mock.calls[2][0]);
     expect(voiceUrl.searchParams.get("text")).toBe("The command failed. I will try another way.");
@@ -1930,10 +1909,10 @@ describe("Style-Bert-VITS2 speech provider", () => {
     vi.stubGlobal("fetch", mockFetch);
 
     const provider = buildSbv2SpeechProvider();
-    const result = await provider.synthesize({
+    const result = await provider.synthesize(speechRequest({
       text: "python -m pytest failed",
       providerConfig: { baseUrl: "http://localhost:5000", defaultLanguage: "EN" },
-    });
+    }));
 
     const voiceUrl = new URL(mockFetch.mock.calls[2][0]);
     expect(voiceUrl.searchParams.get("text")).toBe("The command failed. I will try another way.");
@@ -1955,10 +1934,10 @@ describe("Style-Bert-VITS2 speech provider", () => {
     vi.stubGlobal("fetch", mockFetch);
 
     const provider = buildSbv2SpeechProvider();
-    const result = await provider.synthesize({
+    const result = await provider.synthesize(speechRequest({
       text: "python3.12 -m pytest failed",
       providerConfig: { baseUrl: "http://localhost:5000", defaultLanguage: "EN" },
-    });
+    }));
 
     const voiceUrl = new URL(mockFetch.mock.calls[2][0]);
     expect(voiceUrl.searchParams.get("text")).toBe("The command failed. I will try another way.");
@@ -1983,10 +1962,10 @@ describe("Style-Bert-VITS2 speech provider", () => {
       vi.stubGlobal("fetch", mockFetch);
 
       const provider = buildSbv2SpeechProvider();
-      const result = await provider.synthesize({
+      const result = await provider.synthesize(speechRequest({
         text,
         providerConfig: { baseUrl: "http://localhost:5000", defaultLanguage: "EN" },
-      });
+      }));
 
       const voiceUrl = new URL(mockFetch.mock.calls[2][0]);
       expect(voiceUrl.searchParams.get("text")).toBe(text);
@@ -2012,10 +1991,10 @@ describe("Style-Bert-VITS2 speech provider", () => {
       vi.stubGlobal("fetch", mockFetch);
 
       const provider = buildSbv2SpeechProvider();
-      const result = await provider.synthesize({
+      const result = await provider.synthesize(speechRequest({
         text,
         providerConfig: { baseUrl: "http://localhost:5000", defaultLanguage: "EN" },
-      });
+      }));
 
       const voiceUrl = new URL(mockFetch.mock.calls[2][0]);
       expect(voiceUrl.searchParams.get("text")).toBe("The command failed. I will try another way.");
@@ -2045,10 +2024,10 @@ describe("Style-Bert-VITS2 speech provider", () => {
       vi.stubGlobal("fetch", mockFetch);
 
       const provider = buildSbv2SpeechProvider();
-      const result = await provider.synthesize({
+      const result = await provider.synthesize(speechRequest({
         text,
         providerConfig: { baseUrl: "http://localhost:5000", defaultLanguage: "EN" },
-      });
+      }));
 
       const voiceUrl = new URL(mockFetch.mock.calls[2][0]);
       expect(voiceUrl.searchParams.get("text")).toBe("The command failed. I will try another way.");
@@ -2074,10 +2053,10 @@ describe("Style-Bert-VITS2 speech provider", () => {
       vi.stubGlobal("fetch", mockFetch);
 
       const provider = buildSbv2SpeechProvider();
-      const result = await provider.synthesize({
+      const result = await provider.synthesize(speechRequest({
         text,
         providerConfig: { baseUrl: "http://localhost:5000", defaultLanguage: "EN" },
-      });
+      }));
 
       const voiceUrl = new URL(mockFetch.mock.calls[2][0]);
       expect(voiceUrl.searchParams.get("text")).toBe("The command failed. I will try another way.");
@@ -2106,10 +2085,10 @@ describe("Style-Bert-VITS2 speech provider", () => {
       vi.stubGlobal("fetch", mockFetch);
 
       const provider = buildSbv2SpeechProvider();
-      const result = await provider.synthesize({
+      const result = await provider.synthesize(speechRequest({
         text,
         providerConfig: { baseUrl: "http://localhost:5000", defaultLanguage: "EN" },
-      });
+      }));
 
       const voiceUrl = new URL(mockFetch.mock.calls[2][0]);
       expect(voiceUrl.searchParams.get("text")).toBe("The command failed. I will try another way.");
@@ -2132,10 +2111,10 @@ describe("Style-Bert-VITS2 speech provider", () => {
     vi.stubGlobal("fetch", mockFetch);
 
     const provider = buildSbv2SpeechProvider();
-    const result = await provider.synthesize({
+    const result = await provider.synthesize(speechRequest({
       text: "git status --short\nexit code: 1",
       providerConfig: { baseUrl: "http://localhost:5000", defaultLanguage: "EN" },
-    });
+    }));
 
     const voiceUrl = new URL(mockFetch.mock.calls[2][0]);
     expect(voiceUrl.searchParams.get("text")).toBe("The command failed. I will try another way.");
@@ -2157,10 +2136,10 @@ describe("Style-Bert-VITS2 speech provider", () => {
     vi.stubGlobal("fetch", mockFetch);
 
     const provider = buildSbv2SpeechProvider();
-    const result = await provider.synthesize({
+    const result = await provider.synthesize(speechRequest({
       text: "git status failed",
       providerConfig: { baseUrl: "http://localhost:5000", defaultLanguage: "EN" },
-    });
+    }));
 
     const voiceUrl = new URL(mockFetch.mock.calls[2][0]);
     expect(voiceUrl.searchParams.get("text")).toBe("The command failed. I will try another way.");
@@ -2185,10 +2164,10 @@ describe("Style-Bert-VITS2 speech provider", () => {
       vi.stubGlobal("fetch", mockFetch);
 
       const provider = buildSbv2SpeechProvider();
-      const result = await provider.synthesize({
+      const result = await provider.synthesize(speechRequest({
         text,
         providerConfig: { baseUrl: "http://localhost:5000", defaultLanguage: "EN" },
-      });
+      }));
 
       const voiceUrl = new URL(mockFetch.mock.calls[2][0]);
       expect(voiceUrl.searchParams.get("text")).toBe("The command failed. I will try another way.");
@@ -2211,10 +2190,10 @@ describe("Style-Bert-VITS2 speech provider", () => {
     vi.stubGlobal("fetch", mockFetch);
 
     const provider = buildSbv2SpeechProvider();
-    const result = await provider.synthesize({
+    const result = await provider.synthesize(speechRequest({
       text: "🛠️ git status failed",
       providerConfig: { baseUrl: "http://localhost:5000", defaultLanguage: "EN" },
-    });
+    }));
 
     const voiceUrl = new URL(mockFetch.mock.calls[2][0]);
     expect(voiceUrl.searchParams.get("text")).toBe("The command failed. I will try another way.");
@@ -2236,10 +2215,10 @@ describe("Style-Bert-VITS2 speech provider", () => {
     vi.stubGlobal("fetch", mockFetch);
 
     const provider = buildSbv2SpeechProvider();
-    const result = await provider.synthesize({
+    const result = await provider.synthesize(speechRequest({
       text: "⚠️ High CPU usage detected.",
       providerConfig: { baseUrl: "http://localhost:5000", defaultLanguage: "EN" },
-    });
+    }));
 
     const voiceUrl = new URL(mockFetch.mock.calls[2][0]);
     expect(voiceUrl.searchParams.get("text")).toBe("⚠️ High CPU usage detected.");
@@ -2261,10 +2240,10 @@ describe("Style-Bert-VITS2 speech provider", () => {
     vi.stubGlobal("fetch", mockFetch);
 
     const provider = buildSbv2SpeechProvider();
-    const result = await provider.synthesize({
+    const result = await provider.synthesize(speechRequest({
       text: "⚠️ Database connection failed.",
       providerConfig: { baseUrl: "http://localhost:5000", defaultLanguage: "EN" },
-    });
+    }));
 
     const voiceUrl = new URL(mockFetch.mock.calls[2][0]);
     expect(voiceUrl.searchParams.get("text")).toBe("⚠️ Database connection failed.");
@@ -2286,10 +2265,10 @@ describe("Style-Bert-VITS2 speech provider", () => {
     vi.stubGlobal("fetch", mockFetch);
 
     const provider = buildSbv2SpeechProvider();
-    const result = await provider.synthesize({
+    const result = await provider.synthesize(speechRequest({
       text: "git status --short is not an error.",
       providerConfig: { baseUrl: "http://localhost:5000", defaultLanguage: "EN" },
-    });
+    }));
 
     const voiceUrl = new URL(mockFetch.mock.calls[2][0]);
     expect(voiceUrl.searchParams.get("text")).toBe("git status --short is not an error.");
@@ -2311,10 +2290,10 @@ describe("Style-Bert-VITS2 speech provider", () => {
     vi.stubGlobal("fetch", mockFetch);
 
     const provider = buildSbv2SpeechProvider();
-    const result = await provider.synthesize({
+    const result = await provider.synthesize(speechRequest({
       text: "git status\nfatal: not a git repository",
       providerConfig: { baseUrl: "http://localhost:5000", defaultLanguage: "EN" },
-    });
+    }));
 
     const voiceUrl = new URL(mockFetch.mock.calls[2][0]);
     expect(voiceUrl.searchParams.get("text")).toBe("The command failed. I will try another way.");
@@ -2336,10 +2315,10 @@ describe("Style-Bert-VITS2 speech provider", () => {
     vi.stubGlobal("fetch", mockFetch);
 
     const provider = buildSbv2SpeechProvider();
-    const result = await provider.synthesize({
+    const result = await provider.synthesize(speechRequest({
       text: "Loading config (in /etc/app) failed.",
       providerConfig: { baseUrl: "http://localhost:5000", defaultLanguage: "EN" },
-    });
+    }));
 
     const voiceUrl = new URL(mockFetch.mock.calls[2][0]);
     expect(voiceUrl.searchParams.get("text")).toBe("Loading config (in /etc/app) failed.");
@@ -2361,10 +2340,10 @@ describe("Style-Bert-VITS2 speech provider", () => {
     vi.stubGlobal("fetch", mockFetch);
 
     const provider = buildSbv2SpeechProvider();
-    const result = await provider.synthesize({
+    const result = await provider.synthesize(speechRequest({
       text: "🛠️ git status is still running.",
       providerConfig: { baseUrl: "http://localhost:5000", defaultLanguage: "EN" },
-    });
+    }));
 
     const voiceUrl = new URL(mockFetch.mock.calls[2][0]);
     expect(voiceUrl.searchParams.get("text")).toBe("🛠️ git status is still running.");
@@ -2386,13 +2365,13 @@ describe("Style-Bert-VITS2 speech provider", () => {
     vi.stubGlobal("fetch", mockFetch);
 
     const provider = buildSbv2SpeechProvider();
-    const result = await provider.synthesize({
+    const result = await provider.synthesize(speechRequest({
       text: "[[tts:text]]gh issue close 2 --repo NEXTAltair/openclaw failed[[/tts:text]]",
       providerConfig: {
         baseUrl: "http://localhost:5000",
         pronunciationReplacements: { gh: "ジーエイチ" },
       },
-    });
+    }));
 
     const voiceUrl = new URL(mockFetch.mock.calls[2][0]);
     expect(voiceUrl.searchParams.get("text")).toBe("gh issue close 2 --repo NEXTAltair/openclaw failed");
@@ -2414,10 +2393,10 @@ describe("Style-Bert-VITS2 speech provider", () => {
     vi.stubGlobal("fetch", mockFetch);
 
     const provider = buildSbv2SpeechProvider();
-    const result = await provider.synthesize({
+    const result = await provider.synthesize(speechRequest({
       text: "[[tts:text]]Issue: https://github.com/NEXTAltair/style-bert-vits2-bridge/issues/64[[/tts:text]]",
       providerConfig: { baseUrl: "http://localhost:5000" },
-    });
+    }));
 
     const voiceUrl = new URL(mockFetch.mock.calls[2][0]);
     expect(voiceUrl.searchParams.get("text")).toBe(
@@ -2441,7 +2420,7 @@ describe("Style-Bert-VITS2 speech provider", () => {
     vi.stubGlobal("fetch", mockFetch);
 
     const provider = buildSbv2SpeechProvider();
-    await provider.synthesize({
+    await provider.synthesize(speechRequest({
       text: "こんにちは",
       providerConfig: {
         baseUrl: "http://localhost:5000",
@@ -2449,7 +2428,7 @@ describe("Style-Bert-VITS2 speech provider", () => {
         defaultNoise: 0.45,
         defaultNoisew: 0.55,
       },
-    });
+    }));
 
     const voiceUrl = new URL(mockFetch.mock.calls[2][0]);
     expect(voiceUrl.searchParams.get("sdp_ratio")).toBe("0.15");
@@ -2461,7 +2440,7 @@ describe("Style-Bert-VITS2 speech provider", () => {
     const provider = buildSbv2SpeechProvider();
 
     expect(
-      provider.parseDirectiveToken?.({
+      provider.parseDirectiveToken?.(directiveContext({
         key: "style",
         value: "01_Happy",
         policy: { allowVoiceSettings: true },
@@ -2473,7 +2452,7 @@ describe("Style-Bert-VITS2 speech provider", () => {
           noisew: 0.55,
           noise_w: 0.6,
         },
-      }),
+      })),
     ).toEqual({
       handled: true,
       overrides: {
@@ -2499,7 +2478,7 @@ describe("Style-Bert-VITS2 speech provider", () => {
 
     const debug = vi.fn();
     const provider = buildSbv2SpeechProvider({ logger: { debug } });
-    const result = await provider.synthesize({
+    const result = await provider.synthesize(speechRequest({
       text: "ログに出してはいけない本文",
       providerConfig: {
         baseUrl: "http://user:secret@localhost:5000/api?token=hidden#fragment",
@@ -2510,7 +2489,7 @@ describe("Style-Bert-VITS2 speech provider", () => {
         defaultLength: 1.1,
         defaultAssistText: "ログに出してはいけない補助テキスト",
       },
-    });
+    }));
 
     expect(result.metadata).toEqual({
       provider: "style-bert-vits2",
@@ -2553,7 +2532,7 @@ describe("Style-Bert-VITS2 speech provider", () => {
     vi.stubGlobal("fetch", mockFetch);
 
     const provider = buildSbv2SpeechProvider();
-    await provider.synthesize({
+    await provider.synthesize(speechRequest({
       text: "こんにちは",
       providerConfig: {
         baseUrl: "http://localhost:5000",
@@ -2564,7 +2543,7 @@ describe("Style-Bert-VITS2 speech provider", () => {
       providerOverrides: {
         voiceId: "sbv2:valentina01_bright:valentina01_bright:00_Neutral",
       },
-    });
+    }));
 
     const url = new URL(mockFetch.mock.calls[2][0]);
     expect(url.searchParams.get("model_name")).toBe("valentina01_bright");
@@ -2594,14 +2573,14 @@ describe("Style-Bert-VITS2 speech provider", () => {
     vi.stubGlobal("fetch", mockFetch);
 
     const provider = buildSbv2SpeechProvider();
-    await provider.synthesize({
+    await provider.synthesize(speechRequest({
       text: "こんにちは",
       providerConfig: { baseUrl: "http://localhost:5000" },
       providerOverrides: {
         voiceId: "sbv2:valentina01_bright:valentina01_bright:00_Neutral",
         style: "Happy",
       },
-    });
+    }));
 
     const url = new URL(mockFetch.mock.calls[2][0]);
     expect(url.searchParams.get("model_name")).toBe("valentina01_bright");
@@ -2629,7 +2608,7 @@ describe("Style-Bert-VITS2 speech provider", () => {
     vi.stubGlobal("fetch", mockFetch);
 
     const provider = buildSbv2SpeechProvider();
-    const result = await provider.synthesize({
+    const result = await provider.synthesize(speechRequest({
       text: "こんにちは",
       providerConfig: {
         baseUrl: "http://localhost:5000",
@@ -2639,7 +2618,7 @@ describe("Style-Bert-VITS2 speech provider", () => {
       providerOverrides: {
         voiceId: "sbv2:speakerless::Neutral",
       },
-    });
+    }));
 
     const url = new URL(mockFetch.mock.calls[2][0]);
     expect(url.searchParams.get("model_name")).toBe("speakerless");
@@ -2659,11 +2638,11 @@ describe("Style-Bert-VITS2 speech provider", () => {
 
     const provider = buildSbv2SpeechProvider();
     await expect(
-      provider.synthesize({
+      provider.synthesize(speechRequest({
         text: "こんにちは",
         providerConfig: { baseUrl: "http://localhost:5000" },
         providerOverrides: { voiceId: "sbv2:%E0%A4%A" },
-      }),
+      })),
     ).rejects.toThrow('Malformed SBV2 voice ID "sbv2:%E0%A4%A"');
 
     expect(mockFetch).not.toHaveBeenCalled();
@@ -2673,12 +2652,12 @@ describe("Style-Bert-VITS2 speech provider", () => {
     const provider = buildSbv2SpeechProvider();
 
     expect(
-      provider.parseDirectiveToken?.({
+      provider.parseDirectiveToken?.(directiveContext({
         key: "assist_text",
         value: "happy",
         policy: { allowVoiceSettings: true },
         currentOverrides: { style: "00_Neutral" },
-      }),
+      })),
     ).toEqual({
       handled: true,
       overrides: {
@@ -2692,7 +2671,7 @@ describe("Style-Bert-VITS2 speech provider", () => {
     const provider = buildSbv2SpeechProvider();
 
     expect(
-      provider.resolveTalkOverrides?.({
+      provider.resolveTalkOverrides?.(talkOverridesContext({
         params: {
           voice_id: "sbv2:model:speaker:Neutral",
           model_id: "2",
@@ -2706,7 +2685,7 @@ describe("Style-Bert-VITS2 speech provider", () => {
           assist_text: "cheerful",
           assist_text_weight: "0.8",
         },
-      }),
+      })),
     ).toEqual({
       voiceId: "sbv2:model:speaker:Neutral",
       modelId: 2,
@@ -2721,7 +2700,7 @@ describe("Style-Bert-VITS2 speech provider", () => {
 
   it("inherits Soul emotion profiles from the base TTS provider in Talk mode", () => {
     const provider = buildSbv2SpeechProvider();
-    expect(provider.resolveTalkConfig?.({
+    expect(provider.resolveTalkConfig?.(talkConfigContext({
       baseTtsConfig: {
         auto: "tagged",
         providers: {
@@ -2735,7 +2714,7 @@ describe("Style-Bert-VITS2 speech provider", () => {
       talkProviderConfig: {
         timeoutMs: 120_000,
       },
-    })).toEqual({
+    }))).toEqual({
       baseUrl: "http://localhost:5000",
       emotionStatePath: "/workspace/memory/now-state.json",
       emotionProfiles: { happy: { style: "00_Happy" } },
@@ -2747,12 +2726,12 @@ describe("Style-Bert-VITS2 speech provider", () => {
     const provider = buildSbv2SpeechProvider();
 
     expect(
-      provider.resolveTalkOverrides?.({
+      provider.resolveTalkOverrides?.(talkOverridesContext({
         params: {
           speed: 1.25,
           rate: 180,
         },
-      }),
+      })),
     ).toMatchObject({
       speed: 1.25,
       length: 1,
@@ -2778,7 +2757,7 @@ describe("Style-Bert-VITS2 speech provider", () => {
 
     const provider = buildSbv2SpeechProvider();
     await expect(
-      provider.synthesize({
+      provider.synthesize(speechRequest({
         text: "ログに出してはいけない本文",
         providerConfig: {
           baseUrl: "http://user:secret@localhost:5000?token=hidden",
@@ -2787,20 +2766,20 @@ describe("Style-Bert-VITS2 speech provider", () => {
           defaultStyle: "MissingStyle",
           defaultAssistText: "ログに出してはいけない補助テキスト",
         },
-      }),
+      })),
     ).rejects.toThrow(
       /SBV2 telemetry context: provider=style-bert-vits2, baseUrl=http:\/\/localhost:5000, modelName=missing-model, speakerName=missing-speaker, style=MissingStyle/,
     );
 
     try {
-      await provider.synthesize({
+      await provider.synthesize(speechRequest({
         text: "ログに出してはいけない本文",
         providerConfig: {
           baseUrl: "http://user:secret@localhost:5000?token=hidden",
           defaultModelName: "missing-model",
           defaultAssistText: "ログに出してはいけない補助テキスト",
         },
-      });
+      }));
       throw new Error("expected synthesize to fail");
     } catch (error) {
       expect(error).toBeInstanceOf(Error);
@@ -2831,13 +2810,13 @@ describe("Style-Bert-VITS2 speech provider", () => {
     const provider = buildSbv2SpeechProvider();
 
     await expect(
-      provider.synthesize({
+      provider.synthesize(speechRequest({
         text: "ログに出してはいけない本文",
         providerConfig: {
           baseUrl: "http://user:secret@localhost:5000?token=hidden",
           defaultAssistText: "ログに出してはいけない補助テキスト",
         },
-      }),
+      })),
     ).rejects.toThrow(
       /SBV2 telemetry context: provider=style-bert-vits2, baseUrl=http:\/\/localhost:5000, voiceId=valentina01_bright, modelName=valentina01_bright, speakerName=valentina01_bright, style=00_Neutral/,
     );
@@ -2861,13 +2840,13 @@ describe("Style-Bert-VITS2 speech provider", () => {
     const provider = buildSbv2SpeechProvider();
 
     try {
-      await provider.synthesize({
+      await provider.synthesize(speechRequest({
         text: "ログに出してはいけない本文",
         providerConfig: {
           baseUrl: "http://user:secret@localhost:5000?token=hidden",
           defaultAssistText: "ログに出してはいけない補助テキスト",
         },
-      });
+      }));
       throw new Error("expected synthesize to fail");
     } catch (error) {
       expect(error).toBeInstanceOf(Error);

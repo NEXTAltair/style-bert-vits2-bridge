@@ -31,18 +31,18 @@ package.json              # openclaw metadata block points to dist/index.js
 src/index.ts              # definePluginEntry → registerSpeechProvider
 src/sbv2-client.ts        # Pure HTTP client for SBV2 /voice (no SDK deps)
 src/sbv2-client.test.ts   # Unit tests (vitest, fetch mocked)
-src/openclaw-types.d.ts   # SDK type stubs (replaced by real SDK at runtime)
+src/speech-config.ts      # Sync/async configuration hooks derived from the real SDK
 skills/voice/SKILL.md     # Agent guidance skill (frontmatter: name, description)
 ```
 
 - `sbv2-client.ts` is intentionally SDK-independent — pure `fetch` + `URL` only
 - `src/index.ts` bridges the client to OpenClaw's `registerSpeechProvider` interface
-- Speech provider config comes from `messages.tts.providers.style-bert-vits2` in `openclaw.json`
+- Speech provider config comes from top-level `tts.providers.style-bert-vits2` in `openclaw.json`
 
 ## SBV2 API
 
 One-shot TTS via `POST /voice` with query params. Returns `audio/wav` (PCM 16bit mono 44100Hz). Key params:
-- Required: `text` (1-100 chars, but `auto_split=true` handles longer text)
+- Required: `text` (limit follows the running server's OpenAPI schema)
 - Required for non-ASCII: `encoding=utf-8` (auto-added by client)
 - Optional: `model_name`, `speaker_id`/`speaker_name`, `style`, `style_weight`, `language` (JP/EN/ZH), `length` (speed)
 - Also: `GET /models/info` for loaded models, `GET /status` for health

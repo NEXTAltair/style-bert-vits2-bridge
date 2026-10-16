@@ -22,7 +22,7 @@ OpenClaw は speech request の共通 runtime を担当し、style-bert-vits2-br
 OpenClaw から bridge に渡す情報は次の通りとする。
 
 - `text`: 合成対象テキスト。
-- `providerConfig`: `messages.tts.providers.style-bert-vits2` 由来の durable config。
+- `providerConfig`: トップレベル `tts.providers.style-bert-vits2` 由来の durable config (現行SDK)。
 - `providerOverrides`: `/tts` directive、Talk mode、または UI からの per-request override。
 - `timeoutMs`: OpenClaw runtime または provider config 由来の timeout。
 - `target`: 必要に応じた出力 surface の識別情報。

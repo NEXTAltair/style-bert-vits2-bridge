@@ -1,6 +1,6 @@
-import { definePluginEntry } from "openclaw/plugin-sdk/plugin-entry";
-import type { SpeechProviderPlugin } from "openclaw/plugin-sdk/speech";
+import { definePluginEntry, type SpeechProviderPlugin } from "openclaw/plugin-sdk/plugin-entry";
 import { buildCompatibleSpeechProvider } from "./compatible-speech.js";
+import { speechConfiguredHooks } from "./speech-config.js";
 import { resolveEmotionStateSelection } from "./emotion-state.js";
 import {
   applyPronunciationReplacements,
@@ -569,37 +569,17 @@ function assertSbv2TextWithinHardLimit(text: string, maxInputChars: number | und
   );
 }
 
-export function buildSbv2SpeechProvider(options: Sbv2SpeechProviderOptions = {}): SpeechProviderPlugin {
+export function buildSbv2SpeechProvider(options: Sbv2SpeechProviderOptions = {}) {
   return {
     id: "style-bert-vits2",
     label: "Style-Bert-VITS2",
-    capabilities: {
-      text: {},
-    },
-
-    isConfigured: ({ providerConfig }) => Boolean(trimToUndefined(providerConfig.baseUrl)),
-
-    resolveCapabilities: async (req) => {
-      const config = req.providerConfig ?? {};
-      const baseUrl = trimToUndefined(config.baseUrl) ?? trimToUndefined(req.baseUrl);
-      if (!baseUrl) {
-        return {
-          text: {},
-        };
-      }
-
-      const timeoutMs = asNumber(config.timeoutMs) ?? 30_000;
-      const client = new Sbv2Client({ baseUrl, timeoutMs });
-      return {
-        text: await client.getTextCapabilities(),
-      };
-    },
+    ...speechConfiguredHooks(({ providerConfig }) => Boolean(trimToUndefined(providerConfig.baseUrl))),
 
     parseDirectiveToken: (ctx) => {
       const parsed = parseVoiceDirectiveToken(ctx);
       return parsed
         ? { handled: true, overrides: { ...withoutLowLevelInferenceOverrides(ctx.currentOverrides), ...parsed } }
-        : undefined;
+        : { handled: false };
     },
 
     resolveTalkConfig: ({ baseTtsConfig, talkProviderConfig }) => {
@@ -655,12 +635,12 @@ export function buildSbv2SpeechProvider(options: Sbv2SpeechProviderOptions = {})
 
     listVoices: async (req) => {
       const config = req.providerConfig ?? {};
-      const baseUrl = trimToUndefined(config.baseUrl) ?? trimToUndefined(req.baseUrl);
+      const baseUrl = trimToUndefined(req.baseUrl) ?? trimToUndefined(config.baseUrl);
       if (!baseUrl) {
         throw new Error("Style-Bert-VITS2 baseUrl is not configured");
       }
 
-      const timeoutMs = asNumber(config.timeoutMs) ?? 30_000;
+      const timeoutMs = req.timeoutMs ?? asNumber(config.timeoutMs) ?? 30_000;
       const client = new Sbv2Client({ baseUrl, timeoutMs });
       return listVoiceProfiles(await client.getModelsInfo());
     },
@@ -776,7 +756,7 @@ export function buildSbv2SpeechProvider(options: Sbv2SpeechProviderOptions = {})
         metadata,
       };
     },
-  };
+  } satisfies SpeechProviderPlugin;
 }
 
 export default definePluginEntry({
@@ -784,7 +764,7 @@ export default definePluginEntry({
   name: "Style-Bert-VITS2 Bridge",
   description: "Bridge OpenClaw to a Style-Bert-VITS2 API server for speech generation.",
 
-  register(api: any) {
+  register(api) {
     api?.logger?.info?.("register start");
     api.registerSpeechProvider(buildCompatibleSpeechProvider("irodori"));
     api.registerSpeechProvider(buildCompatibleSpeechProvider("speech-cpp"));

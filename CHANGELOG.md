@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.3.1 - 2026-10-16
+
+### Fixed
+
+- Type-check production code and tests against the real published OpenClaw 2026.10.4 SDK instead of plugin-owned ambient stubs. Use its typed `plugin-entry` facade and a typed registration API.
+- Remove unsupported speech `capabilities` / `resolveCapabilities` fields. Preserve the SBV2 OpenAPI-based input guard immediately before synthesis; the current host does not consume provider-specific input-limit advertisements.
+- Return `{ handled: false }` for unknown or policy-blocked directives.
+- Honor the SDK's direct voice-list URL/key overrides and resolved request timeout.
+- Resolve Irodori/speech.cpp configuration from the host's whole TTS envelope instead of treating that envelope as one provider's settings.
+- Use current top-level `tts.providers` configuration in examples and `OPENCLAW_CONFIG_PATH` in runtime diagnostics.
+- Provide the current-main async configuration hook alongside the synchronous hook still required by the published SDK.
+
+### Compatibility
+
+- Use 2026.9.9 as the modern speech-contract compatibility floor and 2026.10.4 as the pinned development SDK, not an exhaustively tested historical cutoff. Existing names and provider IDs are unchanged.
+- Pin the real SDK as a development dependency; it is not bundled into the release archive. Production code and fixture contexts derive their types from that SDK.
+
 ## 0.3.0 - 2026-10-16
 
 ### Added

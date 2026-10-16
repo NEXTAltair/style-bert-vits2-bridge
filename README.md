@@ -49,8 +49,8 @@ speech.cppは `speech serve` でAPIを提供し、登録声は `/v1/models` か�
 
 ## 前提条件
 
-- OpenClaw `>= 2026.5.28`
-- Node.js `>= 22`
+- OpenClaw `>= 2026.9.9` (現行SDK系列を基準とした互換性下限)
+- Node.js `>= 24.16`
 - Style-Bert-VITS2 API サーバーが起動済みであること（デフォルト `http://127.0.0.1:5000`）
 
 ## インストール
@@ -58,7 +58,7 @@ speech.cppは `speech serve` でAPIを提供し、登録声は `/v1/models` か�
 ビルド済み配布物は [GitHub Releases](https://github.com/NEXTAltair/style-bert-vits2-bridge/releases) から取得できます。
 
 ```bash
-openclaw plugins install ./style-bert-vits2-bridge-0.3.0.tgz
+openclaw plugins install ./style-bert-vits2-bridge-0.3.1.tgz
 ```
 
 変更点は [CHANGELOG](CHANGELOG.md) を参照してください。以下は開発用のリンクインストールです。
@@ -87,22 +87,20 @@ openclaw plugins inspect style-bert-vits2-bridge --runtime --json
 
 ## OpenClaw 設定
 
-`openclaw.json` の `messages.tts.providers` に以下を追加:
+`openclaw.json` のトップレベル `tts.providers` に以下を追加:
 
 ```jsonc
 {
-  "messages": {
-    "tts": {
-      "providers": {
-        "style-bert-vits2": {
-          "baseUrl": "http://127.0.0.1:5000",
-          // オプション
-          "timeoutMs": 30000,
-          "defaultModelName": "valentina01_bright",
-          "defaultSpeakerName": "valentina01_bright",
-          "defaultStyle": "00_Neutral",
-          "defaultLanguage": "JP"
-        }
+  "tts": {
+    "providers": {
+      "style-bert-vits2": {
+        "baseUrl": "http://127.0.0.1:5000",
+        // オプション
+        "timeoutMs": 30000,
+        "defaultModelName": "valentina01_bright",
+        "defaultSpeakerName": "valentina01_bright",
+        "defaultStyle": "00_Neutral",
+        "defaultLanguage": "JP"
       }
     }
   }
@@ -135,9 +133,9 @@ Valentina 系の推奨開始点は次の通りです。
 5. SBV2 が WAV 音声 (PCM 16bit mono 44100Hz) を返却
 6. チャネル（Discord 等）が必要に応じてフォーマット変換して配信
 
-bridge は provider capability として SBV2 `/voice` の読み上げ本文上限を公開します。`/openapi.json` から `text.schema.maxLength` を取得できる場合は、その起動中serverの実効値を使います。OpenAPIへ到達できない場合は、SBV2の起動時設定を推測せず上限不明として扱います。到達可能な `/openapi.json` に `maxLength` が無い場合も、SBV2側でtext limitが無効な設定として扱い、bridge側では上限を広告・強制しません。合成時は、発音置換後にSBV2へ実際に送る本文が取得済みの実効上限を超える場合だけ `/voice` に送信せず、OpenClaw本体側で短いspoken textを準備するための明確なエラーにします。
+bridge は SBV2 `/voice` への送信直前に本文上限を検査します。`/openapi.json` の `text.schema.maxLength` を取得できれば、その起動中serverの実効値を使います。OpenAPIへ到達できない場合は上限不明、到達可能でも `maxLength` が無ければ上限なしとして扱い、数値を推測しません。発音置換後の本文が取得済み上限を超える場合だけ、音声APIへ送信せず明確なエラーにします。
 
-見えるチャット本文を自然な読み上げ文に変換する処理、`tts.maxTextLength` やuser preferenceとprovider hard limitの統合はOpenClaw本体側の責務です。このbridgeはSBV2固有のhard limitを公開し、送信直前の安全ガードを担当します。
+現行SDKには音声providerの `capabilities.text` / `resolveCapabilities` 契約がないため、個別APIの上限をOpenClawへ自動広告しません。OpenClawの `tts.maxTextLength` や読み上げ要約設定は運用側で調整してください。bridgeの送信直前ガードは、それらとは独立して動きます。
 
 ## 設定項目
 
@@ -207,8 +205,8 @@ pnpm run check:sbv2 -- --base-url http://127.0.0.1:5000 --expect-model valentina
 
 このスクリプトは以下を確認します。
 
-- OpenClaw config の `messages.tts.providers.style-bert-vits2`
-- `messages.tts.provider` が未指定、または `style-bert-vits2` であること
+- OpenClaw config の `tts.providers.style-bert-vits2`
+- `tts.provider` が未指定、または `style-bert-vits2` であること
 - SBV2 の `GET /status`
 - SBV2 の `GET /models/info`
 - `/models/info` に期待するモデル名が含まれること
@@ -223,7 +221,7 @@ openclaw plugins inspect style-bert-vits2-bridge --runtime --json
 
 `speechProviderIds` に `style-bert-vits2` が含まれれば、OpenClaw runtime から provider が見えています。`dist/index.js` は OpenClaw plugin runtime から読み込まれる前提の entrypoint です。通常の Node.js script から直接 import すると、`openclaw/plugin-sdk/*` 解決や runtime mock が無いため失敗することがあります。
 
-この bridge は `v0.1.0` から OpenClaw `2026.5.28` を安定版の互換性下限にしています。`openclaw/plugin-sdk/plugin-entry`、`openclaw/plugin-sdk/speech`、`definePluginEntry(...)`、`api.registerSpeechProvider(...)` は 2026.5 系でも継続利用できます。
+`v0.3.1` の互換性下限は、現在の音声SDK契約へ移行済みの `2026.9.9` 系を目安にしています。全過去版の厳密な境界を保証するものではありません。開発時は公開SDK `2026.10.4` をdevDependencyに固定し、公開された `openclaw/plugin-sdk/plugin-entry` の実型でビルド・テストします。独自のSDK簡易型や登録APIの `any` は使いません。最新main向けの非同期 `isConfiguredAsync` と、公開版がまだ要求する同期 `isConfigured` の両方を提供します。
 
 `/tts audio` では、通常合成と voice override の両方を確認します。
 

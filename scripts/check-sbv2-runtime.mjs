@@ -13,7 +13,7 @@ const DEFAULT_TIMEOUT_MS = 30_000;
 
 function parseArgs(argv) {
   const options = {
-    configPath: process.env.OPENCLAW_CONFIG ?? DEFAULT_CONFIG_PATH,
+    configPath: process.env.OPENCLAW_CONFIG_PATH ?? process.env.OPENCLAW_CONFIG ?? DEFAULT_CONFIG_PATH,
     baseUrl: process.env.SBV2_BASE_URL,
     expectedModels: [],
     timeoutMs: undefined,

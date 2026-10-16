@@ -1,4 +1,5 @@
-import type { SpeechProviderPlugin } from "openclaw/plugin-sdk/speech";
+import type { SpeechProviderPlugin } from "openclaw/plugin-sdk/plugin-entry";
+import { speechConfiguredHooks } from "./speech-config.js";
 
 export type CompatibleSpeechEngine = "irodori" | "speech-cpp";
 
@@ -58,16 +59,26 @@ async function request(url: URL, config: Record<string, unknown>, init: RequestI
   return response;
 }
 
-export function buildCompatibleSpeechProvider(engine: CompatibleSpeechEngine): SpeechProviderPlugin {
+export function buildCompatibleSpeechProvider(engine: CompatibleSpeechEngine) {
   return {
     id: engine,
     label: engine === "irodori" ? "Irodori-TTS" : "speech.cpp",
-    capabilities: { text: engine === "irodori" ? { maxInputChars: 4096 } : {} },
-    isConfigured: ({ providerConfig }) => Boolean(string(providerConfig.baseUrl)),
-    resolveConfig: ({ rawConfig }) => rawConfig,
-    listVoices: async ({ providerConfig = {} }) => {
+    defaultTimeoutMs: 120_000,
+    ...speechConfiguredHooks(({ providerConfig }) => Boolean(string(providerConfig.baseUrl))),
+    resolveConfig: ({ rawConfig, timeoutMs }) => {
+      // The SDK passes the whole TTS config, not an already-selected provider.
+      const config = record(record(rawConfig.providers)[engine] ?? rawConfig[engine]);
+      return { ...config, timeoutMs: config.timeoutMs ?? timeoutMs };
+    },
+    listVoices: async ({ providerConfig = {}, baseUrl, apiKey, timeoutMs }) => {
       const route = engine === "irodori" ? "audio/voices" : "models";
-      const response = await request(endpoint(providerConfig.baseUrl, route), providerConfig);
+      const config = {
+        ...providerConfig,
+        baseUrl: baseUrl ?? providerConfig.baseUrl,
+        apiKey: apiKey ?? providerConfig.apiKey,
+        timeoutMs: timeoutMs ?? providerConfig.timeoutMs,
+      };
+      const response = await request(endpoint(config.baseUrl, route), config);
       const body = record(await response.json());
       const rows = Array.isArray(body.data) ? body.data : [];
       if (engine === "irodori") {
@@ -130,5 +141,5 @@ export function buildCompatibleSpeechProvider(engine: CompatibleSpeechEngine): S
         metadata: { provider: engine, model, voice, speed, streaming: false },
       };
     },
-  };
+  } satisfies SpeechProviderPlugin;
 }
