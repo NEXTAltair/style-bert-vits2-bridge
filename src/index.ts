@@ -1,5 +1,7 @@
 import { definePluginEntry } from "openclaw/plugin-sdk/plugin-entry";
 import type { SpeechProviderPlugin } from "openclaw/plugin-sdk/speech";
+import { buildCompatibleSpeechProvider } from "./compatible-speech.js";
+import { resolveEmotionStateSelection } from "./emotion-state.js";
 import {
   applyPronunciationReplacements,
   resolvePronunciationReplacements,
@@ -38,6 +40,8 @@ interface Sbv2TelemetryMetadata extends Record<string, unknown> {
   outputFormat: "wav";
   audioBytes?: number;
   textPreparation?: "explicit" | "tool_status_rewrite" | "metadata_status_rewrite" | "url_sanitize";
+  emotionMood?: string;
+  emotionProfile?: string;
 }
 
 const TOOL_STATUS_REWRITE_TEXT: Record<NonNullable<Sbv2ResolvedVoiceProfile["language"]>, string> = {
@@ -129,6 +133,12 @@ interface PreparedSpeechText {
 
 function trimToUndefined(value: unknown): string | undefined {
   return typeof value === "string" && value.trim() ? value.trim() : undefined;
+}
+
+function asRecord(value: unknown): Record<string, unknown> | undefined {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : undefined;
 }
 
 function asNumber(value: unknown): number | undefined {
@@ -592,10 +602,14 @@ export function buildSbv2SpeechProvider(options: Sbv2SpeechProviderOptions = {})
         : undefined;
     },
 
-    resolveTalkConfig: ({ baseTtsConfig, talkProviderConfig }) => ({
-      ...baseTtsConfig,
-      ...talkProviderConfig,
-    }),
+    resolveTalkConfig: ({ baseTtsConfig, talkProviderConfig }) => {
+      const providers = asRecord(baseTtsConfig.providers);
+      const baseProviderConfig = asRecord(providers?.["style-bert-vits2"]);
+      return {
+        ...baseProviderConfig,
+        ...talkProviderConfig,
+      };
+    },
 
     resolveTalkOverrides: ({ params }) => {
       const overrides: Record<string, unknown> = {};
@@ -661,6 +675,14 @@ export function buildSbv2SpeechProvider(options: Sbv2SpeechProviderOptions = {})
       const timeoutMs = asNumber(config.timeoutMs) ?? req.timeoutMs ?? 30_000;
       const client = new Sbv2Client({ baseUrl, timeoutMs });
       const providerOverrides = normalizeOverrides(req.providerOverrides);
+      let emotionSelection;
+      try {
+        emotionSelection = await resolveEmotionStateSelection(config);
+      } catch (error) {
+        options.logger?.debug?.("style-bert-vits2 emotion state unavailable", {
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
       let resolvedVoice: Sbv2ResolvedVoiceProfile;
       const pronunciationReplacements = resolvePronunciationReplacements(config);
       const textCapabilities = await client.getTextCapabilities();
@@ -679,6 +701,7 @@ export function buildSbv2SpeechProvider(options: Sbv2SpeechProviderOptions = {})
         resolvedVoice = await resolveVoiceProfile({
           client,
           providerConfig: config,
+          providerContextOverrides: emotionSelection?.overrides,
           providerOverrides,
         });
       } catch (error) {
@@ -739,6 +762,10 @@ export function buildSbv2SpeechProvider(options: Sbv2SpeechProviderOptions = {})
         audioBytes: audioBuffer.length,
         textPreparation: preparedText.textPreparation,
       });
+      if (emotionSelection) {
+        metadata.emotionMood = emotionSelection.mood;
+        metadata.emotionProfile = emotionSelection.profileName;
+      }
       options.logger?.debug?.("style-bert-vits2 synthesis resolved", metadata);
 
       return {
@@ -759,6 +786,8 @@ export default definePluginEntry({
 
   register(api: any) {
     api?.logger?.info?.("register start");
+    api.registerSpeechProvider(buildCompatibleSpeechProvider("irodori"));
+    api.registerSpeechProvider(buildCompatibleSpeechProvider("speech-cpp"));
     api.registerSpeechProvider(buildSbv2SpeechProvider({ logger: api?.logger }));
     api?.logger?.info?.("speech provider registered: style-bert-vits2");
   },

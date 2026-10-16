@@ -10,6 +10,7 @@ export interface Sbv2ResolvedVoiceProfile
 export interface ResolveVoiceProfileOptions {
   client: Pick<Sbv2Client, "getModelsInfo">;
   providerConfig: Record<string, unknown>;
+  providerContextOverrides?: Record<string, unknown>;
   providerOverrides?: Record<string, unknown>;
 }
 
@@ -233,9 +234,11 @@ function assertStyle(model: Sbv2ModelInfo, params: Partial<Sbv2ResolvedVoiceProf
 export async function resolveVoiceProfile({
   client,
   providerConfig,
+  providerContextOverrides,
   providerOverrides,
 }: ResolveVoiceProfileOptions): Promise<Sbv2ResolvedVoiceProfile> {
   const configDefaults = readProviderDefaults(providerConfig);
+  const contextOverrides = readOverrides(providerContextOverrides);
   const overrides = readOverrides(providerOverrides);
   const selectedSbv2VoiceId = overrides.voiceId?.startsWith("sbv2:") ? overrides.voiceId : undefined;
   if (
@@ -251,6 +254,7 @@ export async function resolveVoiceProfile({
 
   const resolved: Sbv2ResolvedVoiceProfile = { ...DEFAULT_VOICE_PROFILE };
   applyVoiceLayer(resolved, configDefaults);
+  applyVoiceLayer(resolved, contextOverrides);
   applyVoiceLayer(resolved, explicitProfile);
   applyVoiceLayer(resolved, overrides);
   resolved.voiceId = overrides.voiceId ?? explicitProfile.voiceId ?? DEFAULT_VOICE_PROFILE.voiceId;

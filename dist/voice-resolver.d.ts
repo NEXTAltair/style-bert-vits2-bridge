@@ -6,10 +6,11 @@ export interface Sbv2ResolvedVoiceProfile extends Omit<Sbv2SynthesizeParams, "te
 export interface ResolveVoiceProfileOptions {
     client: Pick<Sbv2Client, "getModelsInfo">;
     providerConfig: Record<string, unknown>;
+    providerContextOverrides?: Record<string, unknown>;
     providerOverrides?: Record<string, unknown>;
 }
 export declare const DEFAULT_VOICE_PROFILE: Sbv2ResolvedVoiceProfile;
-export declare function resolveVoiceProfile({ client, providerConfig, providerOverrides, }: ResolveVoiceProfileOptions): Promise<Sbv2ResolvedVoiceProfile>;
+export declare function resolveVoiceProfile({ client, providerConfig, providerContextOverrides, providerOverrides, }: ResolveVoiceProfileOptions): Promise<Sbv2ResolvedVoiceProfile>;
 export declare function listVoiceProfiles(models: Sbv2ModelInfo[]): Array<{
     id: string;
     name?: string;

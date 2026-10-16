@@ -159,8 +159,9 @@ function assertStyle(model, params) {
         throw new Error(`SBV2 style "${params.style}" is not available for model "${model.name}"`);
     }
 }
-export async function resolveVoiceProfile({ client, providerConfig, providerOverrides, }) {
+export async function resolveVoiceProfile({ client, providerConfig, providerContextOverrides, providerOverrides, }) {
     const configDefaults = readProviderDefaults(providerConfig);
+    const contextOverrides = readOverrides(providerContextOverrides);
     const overrides = readOverrides(providerOverrides);
     const selectedSbv2VoiceId = overrides.voiceId?.startsWith("sbv2:") ? overrides.voiceId : undefined;
     if (selectedSbv2VoiceId &&
@@ -173,6 +174,7 @@ export async function resolveVoiceProfile({ client, providerConfig, providerOver
         : {};
     const resolved = { ...DEFAULT_VOICE_PROFILE };
     applyVoiceLayer(resolved, configDefaults);
+    applyVoiceLayer(resolved, contextOverrides);
     applyVoiceLayer(resolved, explicitProfile);
     applyVoiceLayer(resolved, overrides);
     resolved.voiceId = overrides.voiceId ?? explicitProfile.voiceId ?? DEFAULT_VOICE_PROFILE.voiceId;

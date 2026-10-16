@@ -2,6 +2,7 @@
 import { realpathSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { runIrodoriCli } from "./irodori.js";
 import { ingestDataset, prepareDataset, } from "../datasets.js";
 import { createTrainingPlan, parseTrainingStage, runTraining, } from "../training.js";
 import { evaluateModelCandidate, readEvaluationManifest, updateEvaluationNote, } from "../evaluation.js";
@@ -26,6 +27,7 @@ function printHelp(stdout) {
     writeLine(stdout, `Usage: sbv2-bridge <group> <command> [options]
 
 Commands:
+  irodori <command>       Irodori voice creation, tone variants, training, and auditions (--help).
   datasets ingest        Copy audio into a bridge dataset workspace and write a manifest.
   datasets prepare       Run SBV2 slice/transcribe for an ingested dataset manifest.
   training plan          Print an agent-safe SBV2 training plan without running it.
@@ -917,6 +919,8 @@ function modelRenamePathRoles(result) {
 export async function runCli(argv, io = {}) {
     const stdout = io.stdout ?? process.stdout;
     const stderr = io.stderr ?? process.stderr;
+    if (argv[0] === "irodori")
+        return runIrodoriCli(argv.slice(1), { stdout, stderr });
     try {
         const parsed = parseArgs(argv);
         const { options } = parsed;

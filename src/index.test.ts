@@ -62,9 +62,11 @@ describe("Style-Bert-VITS2 speech provider", () => {
 
   it("registers the speech provider through the plugin entry", () => {
     let provider: unknown;
+    const providers: unknown[] = [];
     pluginEntry.register({
       registerSpeechProvider: (registered: unknown) => {
         provider = registered;
+        providers.push(registered);
       },
     });
 
@@ -75,6 +77,11 @@ describe("Style-Bert-VITS2 speech provider", () => {
         text: {},
       },
     });
+    expect(providers).toEqual(expect.arrayContaining([
+      expect.objectContaining({ id: "irodori" }),
+      expect.objectContaining({ id: "speech-cpp" }),
+      expect.objectContaining({ id: "style-bert-vits2" }),
+    ]));
   });
 
   it("reports dynamic SBV2 text capabilities from OpenAPI when configured", async () => {
@@ -2709,6 +2716,30 @@ describe("Style-Bert-VITS2 speech provider", () => {
       styleWeight: 0.7,
       assistText: "cheerful",
       assistTextWeight: 0.8,
+    });
+  });
+
+  it("inherits Soul emotion profiles from the base TTS provider in Talk mode", () => {
+    const provider = buildSbv2SpeechProvider();
+    expect(provider.resolveTalkConfig?.({
+      baseTtsConfig: {
+        auto: "tagged",
+        providers: {
+          "style-bert-vits2": {
+            baseUrl: "http://localhost:5000",
+            emotionStatePath: "/workspace/memory/now-state.json",
+            emotionProfiles: { happy: { style: "00_Happy" } },
+          },
+        },
+      },
+      talkProviderConfig: {
+        timeoutMs: 120_000,
+      },
+    })).toEqual({
+      baseUrl: "http://localhost:5000",
+      emotionStatePath: "/workspace/memory/now-state.json",
+      emotionProfiles: { happy: { style: "00_Happy" } },
+      timeoutMs: 120_000,
     });
   });
 

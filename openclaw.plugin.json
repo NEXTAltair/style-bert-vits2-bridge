@@ -1,15 +1,16 @@
 {
   "id": "style-bert-vits2-bridge",
   "name": "Style-Bert-VITS2 Bridge",
-  "description": "Bridge OpenClaw to a Style-Bert-VITS2 API server for speech generation.",
-  "version": "0.2.0",
+  "description": "Local speech and voice-production bridge for Style-Bert-VITS2, Irodori-TTS, and speech.cpp.",
+  "version": "0.3.0",
   "contracts": {
-    "speechProviders": ["style-bert-vits2"]
+    "speechProviders": ["style-bert-vits2", "irodori", "speech-cpp"]
   },
   "skills": [
     "./skills/voice",
     "./skills/model-production",
-    "./skills/sbv2-model-ops"
+    "./skills/sbv2-model-ops",
+    "./skills/irodori-production"
   ],
   "configSchema": {
     "type": "object",
@@ -44,6 +45,27 @@
       "defaultAssistText": { "type": "string" },
       "defaultAssistTextWeight": { "type": "number" },
       "pronunciationReplacementsPath": { "type": "string" },
+      "emotionStatePath": { "type": "string" },
+      "emotionProfiles": {
+        "type": "object",
+        "additionalProperties": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "voiceId": { "type": "string" },
+            "modelName": { "type": "string" },
+            "modelId": { "type": "integer" },
+            "speakerName": { "type": "string" },
+            "speakerId": { "type": "integer" },
+            "style": { "type": "string" },
+            "styleWeight": { "type": "number" },
+            "length": { "type": "number" },
+            "language": { "type": "string", "enum": ["JP", "EN", "ZH"] },
+            "assistText": { "type": "string" },
+            "assistTextWeight": { "type": "number" }
+          }
+        }
+      },
       "pronunciationReplacements": {
         "type": "object",
         "additionalProperties": { "type": "string" }
@@ -106,6 +128,10 @@
     "defaultLanguage": {
       "label": "Default Language",
       "placeholder": "JP"
+    },
+    "emotionStatePath": {
+      "label": "Soul-in-Sapphire Emotion State Path",
+      "placeholder": "/path/to/memory/now-state.json"
     }
   }
 }

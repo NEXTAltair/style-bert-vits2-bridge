@@ -1,4 +1,6 @@
 import { definePluginEntry } from "openclaw/plugin-sdk/plugin-entry";
+import { buildCompatibleSpeechProvider } from "./compatible-speech.js";
+import { resolveEmotionStateSelection } from "./emotion-state.js";
 import { applyPronunciationReplacements, resolvePronunciationReplacements, } from "./pronunciation.js";
 import { Sbv2Client } from "./sbv2-client.js";
 import { listVoiceProfiles, parseVoiceDirectiveToken, resolveVoiceProfile, } from "./voice-resolver.js";
@@ -79,6 +81,11 @@ const GITHUB_ISSUE_OR_PR_MARKDOWN_LINK = `\\[([^\\]\\n]*)\\]\\(\\s*${GITHUB_ISSU
 const GITHUB_ISSUE_OR_PR_MARKDOWN_IMAGE = `!${GITHUB_ISSUE_OR_PR_MARKDOWN_LINK}`;
 function trimToUndefined(value) {
     return typeof value === "string" && value.trim() ? value.trim() : undefined;
+}
+function asRecord(value) {
+    return value && typeof value === "object" && !Array.isArray(value)
+        ? value
+        : undefined;
 }
 function asNumber(value) {
     if (typeof value === "number" && Number.isFinite(value))
@@ -444,10 +451,14 @@ export function buildSbv2SpeechProvider(options = {}) {
                 ? { handled: true, overrides: { ...withoutLowLevelInferenceOverrides(ctx.currentOverrides), ...parsed } }
                 : undefined;
         },
-        resolveTalkConfig: ({ baseTtsConfig, talkProviderConfig }) => ({
-            ...baseTtsConfig,
-            ...talkProviderConfig,
-        }),
+        resolveTalkConfig: ({ baseTtsConfig, talkProviderConfig }) => {
+            const providers = asRecord(baseTtsConfig.providers);
+            const baseProviderConfig = asRecord(providers?.["style-bert-vits2"]);
+            return {
+                ...baseProviderConfig,
+                ...talkProviderConfig,
+            };
+        },
         resolveTalkOverrides: ({ params }) => {
             const overrides = {};
             const voiceId = trimToUndefined(params.voiceId) ??
@@ -513,6 +524,15 @@ export function buildSbv2SpeechProvider(options = {}) {
             const timeoutMs = asNumber(config.timeoutMs) ?? req.timeoutMs ?? 30_000;
             const client = new Sbv2Client({ baseUrl, timeoutMs });
             const providerOverrides = normalizeOverrides(req.providerOverrides);
+            let emotionSelection;
+            try {
+                emotionSelection = await resolveEmotionStateSelection(config);
+            }
+            catch (error) {
+                options.logger?.debug?.("style-bert-vits2 emotion state unavailable", {
+                    error: error instanceof Error ? error.message : String(error),
+                });
+            }
             let resolvedVoice;
             const pronunciationReplacements = resolvePronunciationReplacements(config);
             const textCapabilities = await client.getTextCapabilities();
@@ -530,6 +550,7 @@ export function buildSbv2SpeechProvider(options = {}) {
                 resolvedVoice = await resolveVoiceProfile({
                     client,
                     providerConfig: config,
+                    providerContextOverrides: emotionSelection?.overrides,
                     providerOverrides,
                 });
             }
@@ -583,6 +604,10 @@ export function buildSbv2SpeechProvider(options = {}) {
                 audioBytes: audioBuffer.length,
                 textPreparation: preparedText.textPreparation,
             });
+            if (emotionSelection) {
+                metadata.emotionMood = emotionSelection.mood;
+                metadata.emotionProfile = emotionSelection.profileName;
+            }
             options.logger?.debug?.("style-bert-vits2 synthesis resolved", metadata);
             return {
                 audioBuffer,
@@ -600,6 +625,8 @@ export default definePluginEntry({
     description: "Bridge OpenClaw to a Style-Bert-VITS2 API server for speech generation.",
     register(api) {
         api?.logger?.info?.("register start");
+        api.registerSpeechProvider(buildCompatibleSpeechProvider("irodori"));
+        api.registerSpeechProvider(buildCompatibleSpeechProvider("speech-cpp"));
         api.registerSpeechProvider(buildSbv2SpeechProvider({ logger: api?.logger }));
         api?.logger?.info?.("speech provider registered: style-bert-vits2");
     },

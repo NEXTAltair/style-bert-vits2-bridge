@@ -1,7 +1,7 @@
 {
   "name": "style-bert-vits2-bridge",
-  "version": "0.2.0",
-  "description": "Bridge OpenClaw to a Style-Bert-VITS2 API server for speech generation.",
+  "version": "0.3.0",
+  "description": "Local speech and voice-production bridge for Style-Bert-VITS2, Irodori-TTS, and speech.cpp.",
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
@@ -10,9 +10,12 @@
   },
   "files": [
     "dist",
-    "scripts",
+    "scripts/*.mjs",
+    "scripts/irodori-workflow.py",
     "openclaw.plugin.json",
     "skills",
+    "doc",
+    "CHANGELOG.md",
     "README.md",
     "LICENSE"
   ],
@@ -35,6 +38,7 @@
     "prepack": "pnpm run build",
     "sbv2-bridge": "node dist/cli/index.js",
     "test": "vitest run",
+    "test:irodori": "python3 -m unittest discover -s scripts/tests -p 'test_irodori*.py'",
     "test:watch": "vitest"
   },
   "devDependencies": {

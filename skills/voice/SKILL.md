@@ -167,6 +167,16 @@ Valentina などの style 対応モデルでは、まず現在使う `model_name
 5. `style_weight` はエージェントまたは呼び出し側が文脈に応じて決める
 6. 話速は 0.8〜1.2 の範囲が自然
 
+## AivisSpeech Engine への推論 runtime 移行
+
+更新が止まった SBV2 Linux runtime の延命と AivisSpeech の採用を比較する場合は、モデルと runtime を分離して扱います。
+
+1. 既存モデルの `*.safetensors`、`config.json`、`style_vectors.npy` を変換元として保存する。
+2. AIVM Generator で AIVMX (ONNX) へ変換し、Linux ではデスクトップ版ではなく公式の AivisSpeech Engine またはその Docker image を使う。
+3. 同一の短文セットを SBV2 FastAPI と AivisSpeech Engine で合成し、声の同一性、style、読み、速度を比較してから provider backend を切り替える。
+4. SBV2環境は再学習、style調整、再変換、rollback用として残し、通常の推論責務から外す。
+5. AivisSpeech Engine のローカル `/synthesis` は完成音声応答として扱う。低TTFA、streaming、barge-inの改善は runtime移行とは別に、上流のtext chunkingと再生/cancel経路で検証する。Aivis Cloud APIのstreaming機能をローカルEngineの機能と混同しない。
+
 ## 制作系操作の安全確認
 
 音声素材の ingest、dataset prepare、training、evaluation、model promotion、model merge は TTS 再生よりも影響が大きい制作系操作です。長時間処理や GPU/CPU 高負荷処理を開始する前に、入力、出力名、保存先、stage、既存出力に上書きしないことをユーザーへ確認してください。

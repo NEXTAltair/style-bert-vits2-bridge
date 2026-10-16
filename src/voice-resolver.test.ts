@@ -96,6 +96,33 @@ describe("resolveVoiceProfile", () => {
     });
   });
 
+  it("applies emotion context between provider defaults and explicit request overrides", async () => {
+    await expect(
+      resolveVoiceProfile({
+        client: client(),
+        providerConfig: {
+          defaultModelName: "custom-model",
+          defaultSpeakerName: "custom-speaker",
+          defaultStyle: "Neutral",
+        },
+        providerContextOverrides: {
+          modelName: "valentina01_bright",
+          speakerName: "valentina01_bright",
+          style: "00_Neutral",
+        },
+        providerOverrides: {
+          style: "00_Neutral",
+          styleWeight: 0.7,
+        },
+      }),
+    ).resolves.toMatchObject({
+      modelName: "valentina01_bright",
+      speakerName: "valentina01_bright",
+      style: "00_Neutral",
+      styleWeight: 0.7,
+    });
+  });
+
   it("supports legacy README config keys", async () => {
     await expect(
       resolveVoiceProfile({

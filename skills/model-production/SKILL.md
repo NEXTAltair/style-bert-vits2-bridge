@@ -7,6 +7,8 @@ description: Style-Bert-VITS2 の音声素材 ingest から dataset prepare、tr
 
 このスキルは、音声ファイルまたは音声ディレクトリから Style-Bert-VITS2 (SBV2) の学習モデルを作成する制作 workflow をガイドします。TTS 再生や声色選択は `voice` skill、制作系操作の開始前後チェックは `sbv2-model-ops` skill を使います。
 
+Irodori-TTSの素材取り込み・話者学習・話し方調整は、同梱の `irodori-production` skill を使います。SBV2のstyle vector、マージ、学習CLIをIrodoriへ流用しません。
+
 ## 基本方針
 
 音声素材からモデルを作る標準順は次の通りです。

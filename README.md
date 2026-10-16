@@ -2,6 +2,51 @@
 
 OpenClaw の TTS プロバイダープラグイン。ローカルで稼働する [Style-Bert-VITS2](https://github.com/litagin02/Style-Bert-VITS2) API サーバーを呼び出し、日本語音声を生成します。
 
+[Irodori-TTS](https://github.com/Aratako/Irodori-TTS) の制作・調整と、[speech.cpp](https://github.com/nyosegawa/speech.cpp) / Irodori公式APIのWAV合成にも対応します。既存のパッケージID、SBV2 providerと制作CLIは維持します。
+
+## Irodoriの声作成・調整
+
+同梱の [`irodori-production`](skills/irodori-production/SKILL.md) skillが、次のような自然な依頼を制作操作へつなぎます。
+
+- 「この素材の声で読んで」: 参照プロファイルを保存し、試聴音声を作る。
+- 「この素材からモデルを作って」: 素材・台本を準備し、話者埋め込みを学習する。必要に応じてLoRA学習を使う。
+- 「声は変えずに、暗い話し方を少し明るくして」: caption/話速の別バージョンを作り、複数の短文で比較する。
+
+素材の取り込み、tone調整、学習計画、Speaker Inversion/LoRAの実行、試聴、試聴メモ、API設定案の出力は `sbv2-bridge irodori --help` から使えます。既存Irodori環境を利用し、制作にHTTPサーバーの追加導入は不要です。wrapperはPython標準ライブラリ、形式変換が必要な素材にはFFmpegを使います。詳細は[制作workflow](skills/irodori-production/references/workflow.md)。
+
+参照プロファイル、話者埋め込み、LoRA、基盤重みは別の成果物です。取り込みやcaption調整で「基盤を再学習した」とは扱いません。元の素材・モデルは変更せず、調整版は別名で保存します。個別の声候補・人物像・好みはプラグインに埋め込まず、制作プロファイル側で管理します。本番の既定声も自動変更しません。
+
+### Irodori / speech.cpp API provider
+
+provider IDは `irodori` と `speech-cpp`。どちらも `POST /v1/audio/speech` へWAVを要求します。`baseUrl` はサーバーrootまたは `/v1` まで指定可能。基盤モデル・登録声・ファイルパスは各サーバーで有効なものを指定してください。
+
+```jsonc
+{
+  "tts": {
+    "providers": {
+      "irodori": {
+        "baseUrl": "http://127.0.0.1:8088",
+        "model": "irodori-tts",
+        "voice": "sample",
+        "speed": 1.0,
+        "irodori": { "caption": "自然で親しみやすい話し方" }
+      },
+      "speech-cpp": {
+        "baseUrl": "http://127.0.0.1:8080",
+        "voice": "sample",
+        "speechOptions": { "seed": 42 }
+      }
+    }
+  }
+}
+```
+
+`irodori` は作者提供の別プロジェクト [Irodori-TTS-Server](https://github.com/Aratako/Irodori-TTS-Server) 用で、GradioのURLではありません。学習後の `irodori export` は参照/embedding/LoRAを含む設定案を出します。APIサーバーにも同じ基盤checkpointと参照ファイルが必要です。認証がある場合はprovider設定の `apiKey` に対応します。
+
+speech.cppは `speech serve` でAPIを提供し、登録声は `/v1/models` から確認します。GUIでモデルを切り替えた後は声と設定を再確認してください。Python用の埋め込み/LoRAとspeech.cpp用 `voice.gguf` の相互変換はこのプラグインにはありません。
+
+現時点の両providerは完成したWAVを返します。ストリーミング再生や、モデル自体の音質・読みの改善を保証する実装ではありません。
+
 ## 前提条件
 
 - OpenClaw `>= 2026.5.28`
@@ -9,6 +54,14 @@ OpenClaw の TTS プロバイダープラグイン。ローカルで稼働する
 - Style-Bert-VITS2 API サーバーが起動済みであること（デフォルト `http://127.0.0.1:5000`）
 
 ## インストール
+
+ビルド済み配布物は [GitHub Releases](https://github.com/NEXTAltair/style-bert-vits2-bridge/releases) から取得できます。
+
+```bash
+openclaw plugins install ./style-bert-vits2-bridge-0.3.0.tgz
+```
+
+変更点は [CHANGELOG](CHANGELOG.md) を参照してください。以下は開発用のリンクインストールです。
 
 ```bash
 # OpenClaw の拡張ディレクトリにクローン
@@ -104,6 +157,12 @@ bridge は provider capability として SBV2 `/voice` の読み上げ本文上�
 | `defaultLanguage` / `language` | string | 言語 (`JP` / `EN` / `ZH`)。デフォルト `JP` |
 
 `default*` キーを優先します。既存設定との互換性のため、従来の `modelName`、`speakerId`、`speakerName`、`style`、`language` なども fallback として読み取ります。新規設定では `default*` キーを使ってください。
+
+### Soul-in-Sapphire の感情状態連携
+
+`emotionStatePath` に Soul-in-Sapphire の `memory/now-state.json` を指定し、`emotionProfiles` で `mood` と SBV2 voice profile を対応付けると、合成ごとに現在の感情profileを適用します。完全一致を優先し、`quietly happy` のような説明的moodでは最長の部分一致を使い、該当しなければ任意の `default` profileへ落ちます。
+
+感情profileは provider default より優先され、reply内の明示的な `[[tts:...]]` directiveや Talk paramsよりは低い優先順位です。profileの model / speaker / style は `/models/info` に存在する値を指定してください。状態ファイルが読めない場合はprovider defaultへ安全に戻り、Gateway debug logへ理由を残します。
 
 ## Voice profile と directive
 
@@ -425,9 +484,10 @@ OpenClaw 本体側 issue として扱うものは、Control UI / webchat の aud
 ## 開発
 
 ```bash
-pnpm install          # 依存インストール
+pnpm install --frozen-lockfile  # lockfileどおりに依存インストール
 pnpm run check        # 型チェック
 pnpm test             # テスト実行
+pnpm run test:irodori  # Irodori制作wrapperのPython回帰テスト
 pnpm run build        # dist/ に配布用 entrypoint を生成
 ```
 

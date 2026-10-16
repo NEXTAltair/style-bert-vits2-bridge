@@ -101,6 +101,15 @@ describe("sbv2-bridge CLI", () => {
     vi.unstubAllGlobals();
   });
 
+  it("exposes the Irodori workflow through the packaged CLI without loading a model", async () => {
+    const stdout = createWriter();
+    const stderr = createWriter();
+    expect(await runCli(["irodori", "--help"], { stdout: stdout.stream, stderr: stderr.stream })).toBe(0);
+    expect(stdout.output()).toContain("audition");
+    expect(stdout.output()).toContain("train");
+    expect(stderr.output()).toBe("");
+  });
+
   it("detects invocation through a package bin symlink", () => {
     const dir = tempJobsRoot();
     const target = path.join(dir, "index.js");
