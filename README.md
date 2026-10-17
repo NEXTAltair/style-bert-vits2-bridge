@@ -47,6 +47,43 @@ speech.cppは `speech serve` でAPIを提供し、登録声は `/v1/models` か�
 
 現時点の両providerは完成したWAVを返します。ストリーミング再生や、モデル自体の音質・読みの改善を保証する実装ではありません。
 
+## Irodoriの絵文字付き音声専用本文
+
+`plugins.entries.style-bert-vits2-bridge.config.irodoriExpressiveText: true` で、返答を作るLLMへIrodori専用の表現ガイドを渡せます。表示文はそのまま、hostの配信方式に従って音声用の `[[tts:text]]` またはstructured配信の `voiceText` にだけ注釈を付ける方式です。公式の意味付き45種すべてを候補にし、明示入力は追加11種も含む56種を保持します。別LLMへの再生成リクエストはありません。
+
+**既定OFF。ホスト側の `api.runtime.tts.prepareSpeechPromptContext` と `hooks.allowConversationAccess` が必要です。公開済み2026.10.4にはこのhost APIがないため、[同梱の接続パッチ](doc/patches/openclaw-speech-prompt-context.patch) が必要です。** APIがない場合は警告して通常の合成を続け、稼働済みとは扱いません。
+
+対象はIrodoriモデルだけで、speech.cppでは対応Irodoriのmodel IDを明示します。Qwen用ト書きの自動生成・変換はしません。TTSのON/OFFや声も変えません。現時点では `trigger=user` のturnのみが対象で、入力音声の有無を確定できない `auto=inbound` ではガイドを省略し、通常TTSを維持します。モデル判断・手動台本の優先・表示/音声本文の分離・旧hostの挙動は[運用ガイド](skills/irodori-production/references/expressive-speech.md)、責務境界は[ADR 0007](doc/adr/0007-irodori-expressive-speech.md)を参照してください。
+
+## 英単語・略語の読み仮名を登録する (SBV2)
+
+「CUDAや製品名の読みを直したい」場合は、SBV2本体の `user_dict` より先に、bridgeの `tts.providers.style-bert-vits2.pronunciationReplacementsPath` / `pronunciationReplacements` を確認します。これは自然な会話文中の語の置換であり、アクセント辞書ではありません。現状Irodori/speech.cppには適用されません。
+
+既存provider設定へ次のフィールドを追加します。既存の接続先やvoiceを置き換えないでください。
+
+```json
+{
+  "tts": {
+    "providers": {
+      "style-bert-vits2": {
+        "pronunciationReplacementsPath": "~/.openclaw/settings/sbv2-pronunciation.json",
+        "pronunciationReplacements": { "API": "エーピーアイ" }
+      }
+    }
+  }
+}
+```
+
+外部辞書は厳密なJSONの文字列マップです。既存ファイルを読み、既存語を保持して追記します。
+
+```json
+{ "CUDA": "クーダ", "SBV2": "エスビーブイツー" }
+```
+
+ファイルを土台にインライン辞書を重ね、同じキーはインラインを優先します。`~/`はホーム、それ以外の相対パスはGatewayプロセスの作業ディレクトリ基準。大文字小文字を区別したリテラル置換で、長いキーから処理します。URL・ログ・コマンド・JSONを読ませるための辞書にはしません。通常のOC経路では音声専用本文にも適用され得るため、`[[tts:text]]`を辞書回避の手段にしないでください。
+
+エージェント向けの手順・形式・確認方法は[読み仮名登録ガイド](skills/voice/references/pronunciation-replacements.md)。設定項目の説明はmanifestのconfig schema/UI hintsからも参照できます。専用の辞書書込みツールは登録せず、既存のファイル編集・設定管理で扱います。
+
 ## 前提条件
 
 - OpenClaw `>= 2026.9.9` (現行SDK系列を基準とした互換性下限)

@@ -1,0 +1,52 @@
+// Local integration fixture: copy into the patched host's src/tts/ directory.
+// BRIDGE_ROOT must point to a built bridge checkout. No GPU/network calls occur.
+import { writeFileSync } from "node:fs";
+import path from "node:path";
+import { pathToFileURL } from "node:url";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { useAutoCleanupTempDirTracker } from "../../test/helpers/temp-dir.js";
+import { installSpeechProviders, prepareSpeechPromptContext, prepareTtsRequest, synthesizeSpeech } from "./tts-runtime.test-support.js";
+
+vi.mock("./tts-preferences.js", () => ({ prepareTtsPreferences: vi.fn(async () => ({})) }));
+const dirs = useAutoCleanupTempDirTracker(afterEach);
+afterEach(() => { vi.unstubAllEnvs(); vi.unstubAllGlobals(); });
+const bridgeRoot = process.env.BRIDGE_ROOT;
+if (!bridgeRoot) throw new Error("BRIDGE_ROOT is required");
+const load = (file: string) => import(pathToFileURL(path.join(bridgeRoot, "dist", file)).href);
+const { buildCompatibleSpeechProvider } = await load("compatible-speech.js");
+const { registerIrodoriExpressionHook } = await load("irodori-expression-hook.js");
+const { IRODORI_ANNOTATIONS, IRODORI_EXPRESSIONS } = await load("irodori-expressions.js");
+
+describe("compiled bridge with canonical host selection and speech normalization", () => {
+  it("guides the reply and delivers all 56 annotations without changing visible text", async () => {
+    const prefs = path.join(dirs.make("bridge-host-context-"), "prefs.json");
+    writeFileSync(prefs, JSON.stringify({ tts: {} }));
+    vi.stubEnv("OPENCLAW_TTS_PREFS", prefs);
+    installSpeechProviders([buildCompatibleSpeechProvider("irodori")]);
+    const cfg = { tts: { auto: "always" as const, provider: "irodori", providers: { irodori: { baseUrl: "http://127.0.0.1:1", voice: "fixture-voice" } } } };
+    let handler: (event: unknown, context: unknown) => Promise<{ appendSystemContext: string }>;
+    registerIrodoriExpressionHook({
+      pluginConfig: { irodoriExpressiveText: true }, config: cfg,
+      logger: { warn: (message: string) => { throw new Error(message); } },
+      runtime: { tts: { prepareSpeechPromptContext }, agent: { session: { getSessionEntry: () => ({ ttsAuto: "always" }) } } },
+      on: (name: string, callback: typeof handler) => { expect(name).toBe("before_prompt_build"); handler = callback; },
+    });
+    const guide = await handler!({}, { trigger: "user", agentId: "main", sessionKey: "fixture" });
+    for (const [emoji] of IRODORI_EXPRESSIONS) expect(guide.appendSystemContext).toContain(emoji);
+    const visible = "表示本文はそのまま。";
+    const spoken = IRODORI_ANNOTATIONS.map((emoji: string, i: number) => emoji + " 音声確認" + i + "。").join("\n");
+    const prepared = await prepareTtsRequest({ cfg, text: visible + "[[tts:text]]" + spoken + "[[/tts:text]]" });
+    expect(prepared.directives.cleanedText).toBe(visible);
+    expect(prepared.directives.ttsText).toBe(spoken);
+    const wav = Buffer.alloc(44); wav.write("RIFF"); wav.write("WAVE", 8);
+    const fetchMock = vi.fn(async () => new Response(wav, { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+    const result = await synthesizeSpeech({ cfg, text: prepared.directives.ttsText!, disableFallback: true });
+    expect(result.success).toBe(true);
+    const call = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
+    const body = JSON.parse(String(call[1].body));
+    expect(body.input).toBe(spoken);
+    expect(body.voice).toBe("fixture-voice");
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+});

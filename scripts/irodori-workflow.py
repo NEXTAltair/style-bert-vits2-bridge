@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 import argparse
+import codecs
 import copy
 import hashlib
 import json
 import math
 import os
 from pathlib import Path
+import re
 import shutil
 import signal
 import subprocess
@@ -33,6 +35,12 @@ TONES = {
     "neutral": "声の個性は保ち、自然な会話調。感情を誇張せず、聞き取りやすく話す。",
 }
 
+ANSI_ESCAPE = re.compile(r"\x1b\[[0-?]*[ -/]*[@-~]")
+STEP_RATIO = re.compile(r"(?<![/\w.])(\d+)\s*/\s*(\d+)(?![/\w.])")
+STEP_VALUE = re.compile(r"\b(?:step|iteration|iter)[ _:=#-]*(\d+)\b", re.IGNORECASE)
+CHECKPOINT_STEP = re.compile(r"(?:checkpoint|ckpt|step)[_.-]?(\d+)", re.IGNORECASE)
+CHECKPOINT_HINT = re.compile(r"(?:checkpoint|ckpt|step)[_.-]?\d+|checkpoint_final|(?:speaker|adapter).*\.safetensors$", re.IGNORECASE)
+
 
 def load_json(file: Path) -> dict:
     with file.open(encoding="utf-8") as stream:
@@ -46,6 +54,19 @@ def save_new(file: Path, data: dict) -> None:
     with file.open("x", encoding="utf-8") as stream:
         json.dump(data, stream, ensure_ascii=False, indent=2, allow_nan=False)
         stream.write("\n")
+
+
+def write_json(file: Path, data: dict) -> None:
+    """Atomically update a live observation file without replacing a receipt."""
+    file.parent.mkdir(parents=True, exist_ok=True)
+    temporary = file.with_name(f".{file.name}.{uuid.uuid4().hex}.tmp")
+    try:
+        with temporary.open("w", encoding="utf-8") as stream:
+            json.dump(data, stream, ensure_ascii=False, indent=2, allow_nan=False)
+            stream.write("\n")
+        os.replace(temporary, file)
+    finally:
+        temporary.unlink(missing_ok=True)
 
 
 def digest(file: Path) -> str:
@@ -213,24 +234,272 @@ def inference_command(root: Path, python: str, profile: dict, text: str, output:
     return command
 
 
-def run_command(command: list[str], root: Path, log: Path) -> None:
-    with log.open("a", encoding="utf-8") as stream:
+class CommandStalled(RuntimeError):
+    def __init__(self, message: str, progress: dict):
+        super().__init__(message)
+        self.progress = progress
+
+
+def _timestamp() -> str:
+    return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+
+
+def _write_progress(file: Path | None, progress: dict) -> None:
+    if file is None:
+        return
+    # Progress is diagnostic and must not turn a real child result into a wrapper
+    # failure if a filesystem becomes temporarily unavailable.
+    try:
+        write_json(file, progress)
+    except OSError:
+        pass
+
+
+def validate_stall_timeout(value: float) -> float:
+    if not math.isfinite(value) or value < 0:
+        raise ValueError("Stall timeout must be zero (disabled) or a finite positive number of seconds")
+    return value
+
+
+def _checkpoint_evidence(paths: list[Path]) -> tuple[list[dict], list[int]]:
+    evidence: list[dict] = []
+    for root in paths:
+        candidates = [root] if root.is_file() else root.rglob("*") if root.is_dir() else []
+        for file in candidates:
+            try:
+                if not file.is_file() or not CHECKPOINT_HINT.search(file.name):
+                    continue
+                stat = file.stat()
+            except OSError:
+                continue
+            # LoRA stores adapter_model.safetensors below checkpoint_<step>/.
+            relative = file.name if root.is_file() else str(file.relative_to(root))
+            match = CHECKPOINT_STEP.search(relative)
+            evidence.append({
+                "path": str(file),
+                "step": int(match.group(1)) if match else None,
+                "size": stat.st_size,
+                "mtime": stat.st_mtime,
+            })
+    evidence.sort(key=lambda item: item["path"])
+    steps = sorted({item["step"] for item in evidence if item["step"] is not None})
+    return evidence, steps
+
+
+def _terminate_owned_process(child: subprocess.Popen, grace_seconds: float = 10) -> None:
+    """Stop only the child/group created by this wrapper, never other GPU jobs."""
+    if os.name == "nt":
+        if child.poll() is not None:
+            return
+        child.terminate()
+        try:
+            child.wait(timeout=grace_seconds)
+        except subprocess.TimeoutExpired:
+            child.kill()
+            child.wait()
+        return
+    # A leader may exit on SIGTERM while a descendant ignores it. Reap the
+    # leader, but keep ownership of its private group until it also disappears.
+    try:
+        os.killpg(child.pid, signal.SIGTERM)
+    except ProcessLookupError:
+        child.wait()
+        return
+    deadline = time.monotonic() + grace_seconds
+    while time.monotonic() < deadline:
+        child.poll()
+        try:
+            os.killpg(child.pid, 0)
+        except ProcessLookupError:
+            child.wait()
+            return
+        time.sleep(min(0.05, max(0, deadline - time.monotonic())))
+    try:
+        os.killpg(child.pid, signal.SIGKILL)
+    except ProcessLookupError:
+        pass
+    child.wait()
+
+
+def run_command(
+    command: list[str],
+    root: Path,
+    log: Path,
+    *,
+    progress_file: Path | None = None,
+    evidence_paths: list[Path] | None = None,
+    stall_timeout: float = 0.0,
+) -> dict:
+    validate_stall_timeout(stall_timeout)
+    evidence_paths = evidence_paths or []
+    log.parent.mkdir(parents=True, exist_ok=True)
+    env = dict(os.environ, PYTHONUNBUFFERED="1")
+    # Record only non-secret execution controls from the exact child snapshot.
+    # Missing flags stay null; never serialize the full inherited environment.
+    execution_environment = {
+        key: env.get(key) for key in (
+            "HF_HUB_OFFLINE", "TRANSFORMERS_OFFLINE", "HF_DATASETS_OFFLINE",
+            "OMP_NUM_THREADS", "MKL_NUM_THREADS", "OPENBLAS_NUM_THREADS",
+            "PYTHONUNBUFFERED",
+        )
+    }
+    progress = {
+        "state": "starting",
+        "command": command,
+        "startedAt": _timestamp(),
+        "stallTimeout": stall_timeout,
+        "executionEnvironment": execution_environment,
+        "lastOutputAt": None,
+        "lastActivityAt": None,
+        "observedProgress": None,
+        "savedSteps": [],
+        "savedArtifacts": [],
+    }
+    _write_progress(progress_file, progress)
+    stream = None
+    reader = None
+    child = None
+    last_activity = time.monotonic()
+    last_evidence_signature = None
+    pending = ""
+    decoder = codecs.getincrementaldecoder("utf-8")(errors="replace")
+    last_persist = 0.0
+
+    def persist(force: bool = False) -> None:
+        nonlocal last_persist
+        now = time.monotonic()
+        if force or now - last_persist >= 0.5:
+            _write_progress(progress_file, progress)
+            last_persist = now
+
+    def consume_output(final: bool = False) -> bool:
+        nonlocal pending
+        if reader is None:
+            return False
+        chunk = reader.read(65536)
+        if not chunk and not final:
+            return False
+        now = _timestamp()
+        if chunk:
+            progress["lastOutputAt"] = now
+            progress["lastActivityAt"] = now
+        pending += decoder.decode(chunk, final=final)
+        lines = pending.splitlines(keepends=True)
+        pending = ""
+        if lines and not final and not lines[-1].endswith(("\n", "\r")):
+            pending = lines.pop()[-65536:]
+        for raw_line in lines:
+            line = ANSI_ESCAPE.sub("", raw_line).strip()
+            ratios = STEP_RATIO.findall(line)
+            values = STEP_VALUE.findall(line)
+            if ratios:
+                # tqdm includes epoch_step=1/7 after the actual 276/300.
+                step, total = ratios[0]
+                progress["observedProgress"] = {
+                    "step": int(step),
+                    "total": int(total),
+                    "percent": (100.0 * int(step) / int(total)) if int(total) else None,
+                    "line": line[-500:],
+                    "observedAt": now,
+                }
+            elif values:
+                progress["observedProgress"] = {
+                    "step": int(values[-1]),
+                    "total": None,
+                    "percent": None,
+                    "line": line[-500:],
+                    "observedAt": now,
+                }
+        return bool(chunk)
+
+    def drain_output() -> None:
+        while consume_output():
+            pass
+        consume_output(final=True)
+
+    def scan_evidence() -> bool:
+        nonlocal last_evidence_signature
+        artifacts, steps = _checkpoint_evidence(evidence_paths)
+        signature = tuple((item["path"], item["size"], item["mtime"]) for item in artifacts)
+        changed = signature != last_evidence_signature
+        last_evidence_signature = signature
+        progress["savedArtifacts"] = artifacts
+        progress["savedSteps"] = steps
+        if changed:
+            progress["lastEvidenceAt"] = _timestamp()
+            progress["lastActivityAt"] = progress["lastEvidenceAt"]
+        return changed
+
+    try:
+        stream = log.open("a", encoding="utf-8")
         stream.write(json.dumps(command, ensure_ascii=False) + "\n")
         stream.flush()
-        env = dict(os.environ, PYTHONUNBUFFERED="1")
-        with subprocess.Popen(command, cwd=root, stdout=stream, stderr=subprocess.STDOUT, env=env) as child:
-            try:
-                code = child.wait()
-            except BaseException:
-                child.terminate()
-                try:
-                    child.wait(timeout=10)
-                except subprocess.TimeoutExpired:
-                    child.kill()
-                    child.wait()
-                raise
+        reader = log.open("rb")
+        reader.seek(0, os.SEEK_END)
+        popen_options = {
+            "cwd": root,
+            "stdout": stream,
+            "stderr": subprocess.STDOUT,
+            "env": env,
+        }
+        if os.name == "nt":
+            popen_options["creationflags"] = getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
+        else:
+            popen_options["start_new_session"] = True
+        child = subprocess.Popen(command, **popen_options)
+        progress.update(state="running", pid=child.pid, lastActivityAt=_timestamp())
+        persist(force=True)
+        last_activity = time.monotonic()
+        while True:
+            output_changed = consume_output()
+            evidence_changed = scan_evidence()
+            if output_changed or evidence_changed:
+                last_activity = time.monotonic()
+            persist()
+            code = child.poll()
+            if code is not None:
+                break
+            if stall_timeout and time.monotonic() - last_activity >= stall_timeout:
+                progress.update(
+                    state="stalled",
+                    endedAt=_timestamp(),
+                    stallReason=f"No child output or checkpoint evidence for {stall_timeout:g}s",
+                )
+                _terminate_owned_process(child)
+                drain_output()
+                scan_evidence()
+                persist(force=True)
+                raise CommandStalled(
+                    f"Command stalled for {stall_timeout:g}s; see {log} and {progress_file or 'progress'}",
+                    copy.deepcopy(progress),
+                )
+            time.sleep(0.25)
+        # Drain bounded reads and parse a final unterminated progress line.
+        drain_output()
+        scan_evidence()
+        progress.update(state="succeeded" if code == 0 else "failed", endedAt=_timestamp(), exitCode=code)
+        persist(force=True)
         if code != 0:
             raise RuntimeError(f"Command exited {code}; see {log}")
+        return copy.deepcopy(progress)
+    except CommandStalled:
+        raise
+    except BaseException as error:
+        if child is not None and child.poll() is None:
+            _terminate_owned_process(child)
+        if progress["state"] not in {"succeeded", "failed", "stalled", "interrupted"}:
+            progress.update(
+                state="interrupted" if isinstance(error, KeyboardInterrupt) else "failed",
+                endedAt=_timestamp(),
+                error=str(error) or type(error).__name__,
+            )
+            persist(force=True)
+        raise
+    finally:
+        if reader is not None:
+            reader.close()
+        if stream is not None:
+            stream.close()
 
 
 def job_dir(args, prefix: str) -> Path:
@@ -239,6 +508,7 @@ def job_dir(args, prefix: str) -> Path:
 
 def audition(args) -> dict:
     root, python = runtime(args)
+    validate_stall_timeout(args.stall_timeout)
     profiles = [("A", str(Path(args.profile).expanduser().resolve()), read_profile(args.profile))]
     if args.candidate:
         candidate = read_profile(args.candidate)
@@ -258,7 +528,8 @@ def audition(args) -> dict:
             output = dest / name
             commands.append(inference_command(root, python, profile, text, output, args.seed))
             samples.append({"id": name[:-4], "profilePath": file, "text": text, "seed": args.seed, "path": str(output), "decision": "pending"})
-    plan = {"operation": "audition", "outputDir": str(dest), "commands": commands, "samples": samples}
+    plan = {"operation": "audition", "outputDir": str(dest), "commands": commands, "samples": samples,
+            "progressDir": str(dest / "progress"), "stallTimeout": args.stall_timeout}
     if args.plan:
         return plan
     dest.parent.mkdir(parents=True, exist_ok=True)
@@ -267,12 +538,22 @@ def audition(args) -> dict:
     save_new(dest / "plan.json", plan)
     try:
         for command, sample in zip(commands, samples):
-            run_command(command, root, dest / "job.log")
+            progress_file = dest / "progress" / f"{sample['id']}.json"
+            sample["progressPath"] = str(progress_file)
+            progress = run_command(command, root, dest / "job.log",
+                                   progress_file=progress_file, evidence_paths=[dest],
+                                   stall_timeout=args.stall_timeout)
+            receipt.setdefault("commandProgress", []).append(progress)
             sample["seconds"] = wav_seconds(Path(sample["path"]))
             sample["sha256"] = digest(Path(sample["path"]))
         receipt["state"] = "succeeded"
     except BaseException as error:
         receipt.update(state="failed", firstError=str(error) or type(error).__name__)
+        receipt["progressPath"] = str(dest / "progress")
+        if isinstance(error, CommandStalled):
+            receipt.update(lastProgress=error.progress.get("observedProgress"),
+                           savedSteps=error.progress.get("savedSteps", []),
+                           savedArtifacts=error.progress.get("savedArtifacts", []))
         raise
     finally:
         save_new(dest / "audition.json", receipt)
@@ -333,6 +614,7 @@ def training(args) -> dict:
     config = root / "configs" / f"train_v4_small_{'speaker_inversion' if args.method == 'speaker-inversion' else 'lora'}.yaml"
     if not config.is_file():
         raise ValueError(f"Missing upstream training configuration: {config}")
+    validate_stall_timeout(args.stall_timeout)
     transcripts = transcript_map(args.transcripts)
     rows = []
     for asset in profile["assets"]:
@@ -348,7 +630,8 @@ def training(args) -> dict:
     ]
     plan = {"operation": "training", "method": args.method, "baseCheckpoint": str(checkpoint), "baseSha256": digest(checkpoint),
             "outputDir": str(dest), "commands": commands, "missingTranscripts": missing, "clipsOver30Seconds": too_long,
-            "ready": (not missing or bool(args.asr_url)) and not too_long, "autoAdopt": False}
+            "ready": (not missing or bool(args.asr_url)) and not too_long, "autoAdopt": False,
+            "progressDir": str(dest / "progress"), "stallTimeout": args.stall_timeout}
     if args.plan:
         return plan
     if too_long:
@@ -359,6 +642,7 @@ def training(args) -> dict:
     dest.mkdir()
     receipt = {**plan, "state": "running"}
     save_new(dest / "plan.json", plan)
+    progress_files = [dest / "progress" / "prepare.json", dest / "progress" / "train.json"]
     try:
         for row in rows:
             if not row["text"]:
@@ -366,7 +650,11 @@ def training(args) -> dict:
         with (dest / "source.jsonl").open("x", encoding="utf-8") as stream:
             for row in rows:
                 stream.write(json.dumps(row, ensure_ascii=False) + "\n")
-        run_command(commands[0], root, dest / "job.log")
+        prepared_progress = run_command(commands[0], root, dest / "job.log",
+                                        progress_file=progress_files[0],
+                                        evidence_paths=[dest / "latents"],
+                                        stall_timeout=args.stall_timeout)
+        receipt.setdefault("commandProgress", []).append(prepared_progress)
         with (dest / "train.jsonl").open(encoding="utf-8") as stream:
             prepared = [json.loads(line) for line in stream if line.strip()]
         if len(prepared) != len(rows) or not prepared:
@@ -374,7 +662,11 @@ def training(args) -> dict:
         for row in prepared:
             if not row.get("text") or not row.get("num_frames", 0) > 0 or not (dest / row["latent_path"]).is_file():
                 raise ValueError("Upstream preparation returned an incomplete latent row")
-        run_command(commands[1], root, dest / "job.log")
+        trained_progress = run_command(commands[1], root, dest / "job.log",
+                                      progress_file=progress_files[1],
+                                      evidence_paths=[dest / "checkpoints"],
+                                      stall_timeout=args.stall_timeout)
+        receipt.setdefault("commandProgress", []).append(trained_progress)
         trained = copy.deepcopy(profile)
         trained.update(kind=args.method, parentProfile=str(Path(args.profile).expanduser().resolve()),
                        createdAt=time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
@@ -394,6 +686,11 @@ def training(args) -> dict:
         receipt.update(state="succeeded", profilePath=str(dest / "profile.json"), artifactPath=str(artifact))
     except BaseException as error:
         receipt.update(state="failed", firstError=str(error) or type(error).__name__)
+        receipt["progressPath"] = str(dest / "progress")
+        if isinstance(error, CommandStalled):
+            receipt.update(lastProgress=error.progress.get("observedProgress"),
+                           savedSteps=error.progress.get("savedSteps", []),
+                           savedArtifacts=error.progress.get("savedArtifacts", []))
         raise
     finally:
         save_new(dest / "job.json", receipt)
@@ -450,6 +747,8 @@ def main(argv=None) -> int:
         if command in {"audition", "train"}:
             sub.add_argument("--output-dir")
             sub.add_argument("--plan", action="store_true", help="Read-only execution plan")
+            sub.add_argument("--stall-timeout", type=float, default=0.0,
+                             help="Abort after this many seconds without child output or checkpoint evidence (0 disables)")
         if command == "audition":
             sub.add_argument("--candidate", help="Compare delivery changes with identity held fixed")
             texts = sub.add_mutually_exclusive_group()

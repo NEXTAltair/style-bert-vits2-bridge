@@ -60,6 +60,12 @@ irodori train --profile /state/voices/sample/profile.json --checkpoint /models/m
 
 `job.json` は完了/失敗時のreceipt、実行中は `plan.json` と `job.log` を使う。wrapperの途中resume/cancel APIはない。失敗出力を消して同じ場所へ再実行せず、新しいjob folderを使う。学習済みprofileへの追加学習/optimizer resumeは未実装で、新規runは元のreference profileから始める。
 
+### 進捗観測と安全な中断
+
+`train` と `audition` は子プロセスのstdout/stderrを `job.log` に保存し、各コマンドの観測を `progress/prepare.json`、`progress/train.json`（試聴はサンプルごとのJSON）へ定期的に保存する。`observedProgress` はログに現れた `step/total` の観測値、`savedSteps` / `savedArtifacts` は出力先に実際に見つかったcheckpointファイル名・サイズの証拠であり、完成度や重みの有限性を保証しない。ログ停止後も保存済みcheckpointとreceiptを残す。`executionEnvironment` は実際の子プロセスへ渡す環境のうち、HFのoffline指定3項目、OMP/MKL/OpenBLASのスレッド数、`PYTHONUNBUFFERED`だけを記録する。未設定はnull。環境全体やAPI tokenは記録せず、offlineやスレッド数を勝手に変更する機能でもない。
+
+GPU処理の停止原因は未確定で、観測を追加しただけで元の学習・推論停止が解消したとは扱わない。通常は遅いGPU処理を誤って殺さないよう、stall監視は無効（`--stall-timeout 0`）である。必要な診断時だけ秒数を指定する。子プロセスから出力もcheckpoint更新も指定時間なければwrapperがそのrunを失敗扱いにし、Linux/WSLではwrapperが起動した専用プロセスグループだけをSIGTERM（猶予後SIGKILL）で停止する。Windowsでは直接の子プロセスのみが停止対象で、子孫全体の停止は保証しない。出力が続くGPU停滞はこの無出力timeoutでは検出しない。中断後は同じ出力先を再利用せず、receiptの `savedSteps` と `progress/*.json` を確認してから新しいjob folderで再実行する。
+
 学習後は返却された `profilePath` を `audition` に使う。話者埋め込みには `--ref-embed`、LoRAには `--lora-adapter` を自動的に渡す。
 
 ## 試聴メモとAPI設定案

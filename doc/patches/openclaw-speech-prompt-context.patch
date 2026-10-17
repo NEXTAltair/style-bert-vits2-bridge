@@ -1,0 +1,354 @@
+diff --git a/docs/plugins/sdk-runtime/media.md b/docs/plugins/sdk-runtime/media.md
+index b8d2a9664a3..37a8d13d209 100644
+--- a/docs/plugins/sdk-runtime/media.md
++++ b/docs/plugins/sdk-runtime/media.md
+@@ -41,6 +41,16 @@ JavaScript-only host export; its declarations are excluded from the package.
+     Text-to-speech synthesis.
+ 
+     ```typescript
++    // Read-only primary speech selection for provider-aware prompt guidance.
++    const speech = await api.runtime.tts.prepareSpeechPromptContext({
++      cfg: api.config,
++      agentId: ctx.agentId,
++      channelId: ctx.channel,
++      accountId: ctx.accountId,
++    });
++    // speech: { version: 1, ready, provider?, model?, persona?, auto, allowText, maxLength }
++    // No synthesis, fallback attempt, credentials, voice files, or text rewriting.
++
+     // Standard TTS
+     const clip = await api.runtime.tts.textToSpeech({
+       text: "Hello from OpenClaw",
+@@ -62,6 +72,8 @@ JavaScript-only host export; its declarations are excluded from the package.
+ 
+     Uses core `tts` configuration and provider selection. Returns PCM audio buffer + sample rate. `textToSpeechStream` is also available for streaming synthesis.
+ 
++    `prepareSpeechPromptContext` uses the same primary-provider, persona binding, and model resolution as synthesis, including user preferences and agent/channel/account layers. It accepts an optional `sessionAuto` from the current session entry. `ready: false` covers auto-off, disallowed text overrides, and an unavailable primary binding. The result is a per-call snapshot, not authorization to synthesize or a guarantee of later provider health; inbound/tagged delivery rules still apply. Plugins should leave guidance unchanged on older hosts where this capability is absent. The method does not return provider configuration or secrets.
++
+   </Accordion>
+   <Accordion title="api.runtime.mediaUnderstanding">
+     Image, audio, and video analysis.
+diff --git a/src/plugin-sdk/test-helpers/plugin-runtime-mock.ts b/src/plugin-sdk/test-helpers/plugin-runtime-mock.ts
+index ce58628f91d..8615590be43 100644
+--- a/src/plugin-sdk/test-helpers/plugin-runtime-mock.ts
++++ b/src/plugin-sdk/test-helpers/plugin-runtime-mock.ts
+@@ -649,6 +649,7 @@ export function createPluginRuntimeMock(overrides: PluginRuntimeMockOverrides =
+       resizeToJpeg: vi.fn<PluginRuntime["media"]["resizeToJpeg"]>(),
+     },
+     tts: {
++      prepareSpeechPromptContext: vi.fn<PluginRuntime["tts"]["prepareSpeechPromptContext"]>(),
+       prepareTtsRequest: vi.fn<PluginRuntime["tts"]["prepareTtsRequest"]>(),
+       textToSpeech: vi.fn<PluginRuntime["tts"]["textToSpeech"]>(),
+       textToSpeechStream: vi.fn<PluginRuntime["tts"]["textToSpeechStream"]>(),
+diff --git a/src/plugins/runtime/index.ts b/src/plugins/runtime/index.ts
+index 02f217a7bf9..b0fc0061e41 100644
+--- a/src/plugins/runtime/index.ts
++++ b/src/plugins/runtime/index.ts
+@@ -71,6 +71,9 @@ function createRuntimeTts(): PluginRuntime["tts"] {
+   const bindTtsRuntime = createLazyRuntimeMethodBinder(loadTtsRuntime);
+   const bindTtsRequestRuntime = createLazyRuntimeMethodBinder(loadTtsRequestRuntime);
+   return {
++    prepareSpeechPromptContext: bindTtsRequestRuntime(
++      (runtime) => runtime.prepareSpeechPromptContext,
++    ),
+     prepareTtsRequest: bindTtsRequestRuntime((runtime) => runtime.prepareTtsRequest),
+     textToSpeech: bindTtsRuntime((runtime) => runtime.textToSpeech),
+     textToSpeechStream: bindTtsRuntime((runtime) => runtime.textToSpeechStream),
+diff --git a/src/plugins/runtime/types-core.ts b/src/plugins/runtime/types-core.ts
+index 86f53746bd2..7e4d06e6727 100644
+--- a/src/plugins/runtime/types-core.ts
++++ b/src/plugins/runtime/types-core.ts
+@@ -11,6 +11,7 @@ import type { OpenAsyncKeyedStoreOptions } from "../../plugin-state/plugin-state
+ type TtsRuntimeApi = typeof import("../../tts/runtime-api.js");
+ type ListSpeechVoices = TtsRuntimeApi["listSpeechVoices"];
+ type PrepareTtsRequest = TtsRuntimeApi["prepareTtsRequest"];
++type PrepareSpeechPromptContext = TtsRuntimeApi["prepareSpeechPromptContext"];
+ type TextToSpeech = typeof import("../../tts/tts.js").textToSpeech;
+ type TextToSpeechStream = TtsRuntimeApi["textToSpeechStream"];
+ type TextToSpeechTelephony = TtsRuntimeApi["textToSpeechTelephony"];
+@@ -484,6 +485,8 @@ export type PluginRuntimeCore = {
+     resizeToJpeg: typeof import("../../media/media-services.js").resizeToJpeg;
+   };
+   tts: {
++    /** Sanitized, read-only effective primary speech selection for provider-aware prompts. */
++    prepareSpeechPromptContext: PrepareSpeechPromptContext;
+     prepareTtsRequest: PrepareTtsRequest;
+     textToSpeech: TextToSpeech;
+     textToSpeechStream: TextToSpeechStream;
+diff --git a/src/tts/runtime-api.ts b/src/tts/runtime-api.ts
+index eaf9b7d8bcc..6c7f2902338 100644
+--- a/src/tts/runtime-api.ts
++++ b/src/tts/runtime-api.ts
+@@ -43,6 +43,7 @@ export {
+   resolveTtsProviderOrder,
+ } from "./tts-provider-resolution.js";
+ export { prepareTtsRequest, resolveExplicitTtsOverrides } from "./tts-request.js";
++export { prepareSpeechPromptContext, type SpeechPromptContext } from "./tts-prompt-context.js";
+ export { streamSpeech, textToSpeechStream } from "./tts-streaming.js";
+ export { synthesizeSpeech } from "./tts-synthesis.js";
+ export { textToSpeechTelephony } from "./tts-telephony.js";
+diff --git a/src/tts/tts-runtime.test-support.ts b/src/tts/tts-runtime.test-support.ts
+index 230091753f8..d41f7a0fa1f 100644
+--- a/src/tts/tts-runtime.test-support.ts
++++ b/src/tts/tts-runtime.test-support.ts
+@@ -151,6 +151,7 @@ export const {
+   isTtsProviderConfigured,
+   listSpeechVoices,
+   prepareTtsRequest,
++  prepareSpeechPromptContext,
+   resolveTtsConfig,
+   resolveTtsPrefsPath,
+   setTtsMachinePrefsPathResolver,
+diff --git a/src/tts/tts-synthesis-support.ts b/src/tts/tts-synthesis-support.ts
+index c4cf035a936..16b6496c0db 100644
+--- a/src/tts/tts-synthesis-support.ts
++++ b/src/tts/tts-synthesis-support.ts
+@@ -95,7 +95,7 @@ type TtsProviderReadyResolution =
+       personaBinding?: "missing";
+     };
+ 
+-function resolveReadySpeechProvider(params: {
++export function resolveReadySpeechProvider(params: {
+   provider: TtsProvider;
+   cfg: OpenClawConfig;
+   config: ResolvedTtsConfig;
+diff --git a/src/tts/tts-prompt-context.ts b/src/tts/tts-prompt-context.ts
+new file mode 100644
+index 00000000000..95306b573dd
+--- /dev/null
++++ b/src/tts/tts-prompt-context.ts
+@@ -0,0 +1,70 @@
++import { normalizeOptionalString } from "@openclaw/normalization-core/string-coerce";
++import type { OpenClawConfig, TtsAutoMode } from "../config/types.js";
++import { prepareTtsPreferences } from "./tts-preferences.js";
++import { resolveTtsSettingsSnapshot } from "./tts-settings.js";
++import { resolveReadySpeechProvider, withOwnedTtsRequest } from "./tts-synthesis-support.js";
++
++export type SpeechPromptContext = {
++  version: 1;
++  ready: boolean;
++  auto: TtsAutoMode;
++  allowText: boolean;
++  maxLength: number;
++  provider?: string;
++  model?: string;
++  persona?: string;
++};
++
++/** Read-only preparation; selection and provider lifetime are owned by normal TTS. */
++export async function prepareSpeechPromptContext(params: {
++  cfg: OpenClawConfig;
++  agentId?: string;
++  channelId?: string;
++  accountId?: string;
++  sessionAuto?: string;
++}): Promise<SpeechPromptContext> {
++  const settings = resolveTtsSettingsSnapshot({
++    ...params,
++    preparedTtsPreferences: await prepareTtsPreferences(),
++  });
++  const base: SpeechPromptContext = {
++    version: 1,
++    ready: false,
++    auto: settings.autoMode,
++    allowText: settings.config.modelOverrides.allowText,
++    maxLength: Math.min(settings.maxLength, settings.config.maxTextLength),
++    ...(settings.personaId ? { persona: settings.personaId } : {}),
++  };
++  if (base.auto === "off" || !base.allowText) {
++    return base;
++  }
++  return await withOwnedTtsRequest(
++    { ...params, text: "", prefsPath: settings.prefsPath, disableFallback: true },
++    async (setup) => {
++      if ("error" in setup || !setup.providers[0]) {
++        return base;
++      }
++      const candidate = setup.providers[0];
++      const ready = resolveReadySpeechProvider({
++        ...setup,
++        provider: candidate.provider,
++        voiceModel: candidate.voiceModel,
++        target: "audio-file",
++        providerRegistry: await setup.prepareProviderRegistry(),
++      });
++      if (ready.kind !== "ready") {
++        return base;
++      }
++      const model =
++        normalizeOptionalString(ready.providerConfig.model) ??
++        normalizeOptionalString(ready.providerConfig.modelId) ??
++        ready.provider.defaultModel;
++      return {
++        ...base,
++        ready: true,
++        provider: ready.provider.id,
++        ...(model ? { model } : {}),
++      };
++    },
++  );
++}
+diff --git a/src/tts/tts-prompt-context.test.ts b/src/tts/tts-prompt-context.test.ts
+new file mode 100644
+index 00000000000..67b3224413d
+--- /dev/null
++++ b/src/tts/tts-prompt-context.test.ts
+@@ -0,0 +1,158 @@
++import { writeFileSync } from "node:fs";
++import path from "node:path";
++import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
++import { useAutoCleanupTempDirTracker } from "../../test/helpers/temp-dir.js";
++import {
++  prepareSpeechPromptContext,
++  createMockSpeechProvider,
++  installSpeechProviders,
++  synthesizeMock,
++  prepareSynthesisMock,
++  synthesizeSpeech,
++  clearRuntimeConfigSnapshot,
++  type OpenClawConfig,
++} from "./tts-runtime.test-support.js";
++
++// Machine-state worker behavior is independently covered in tts-preferences.worker.test.ts.
++// This boundary fixture isolates speech routing from external process/database startup.
++vi.mock("./tts-preferences.js", () => ({ prepareTtsPreferences: vi.fn(async () => ({})) }));
++
++const tempDirs = useAutoCleanupTempDirTracker(afterEach);
++let prefsPath: string;
++function prefs(tts: Record<string, unknown>) {
++  writeFileSync(prefsPath, JSON.stringify({ tts }));
++}
++function config(): OpenClawConfig {
++  return {
++    tts: {
++      auto: "always",
++      provider: "irodori",
++      providers: {
++        irodori: { model: "irodori-tts", apiKey: "synthetic-private-key" },
++        "speech-cpp": { model: "qwen3-tts-1.7b", apiKey: "synthetic-private-key" },
++      },
++    },
++  };
++}
++
++beforeEach(() => {
++  prefsPath = path.join(tempDirs.make("tts-prompt-context-"), "preferences.json");
++  vi.stubEnv("OPENCLAW_TTS_PREFS", prefsPath);
++  prefs({});
++  installSpeechProviders(["irodori", "speech-cpp"].map((id) => createMockSpeechProvider(id)));
++});
++afterEach(() => {
++  vi.unstubAllEnvs();
++  clearRuntimeConfigSnapshot();
++  synthesizeMock.mockClear();
++  prepareSynthesisMock.mockClear();
++});
++
++describe("provider-aware speech prompt preparation", () => {
++  it("returns only sanitized primary selection without synthesis or model calls", async () => {
++    const result = await prepareSpeechPromptContext({ cfg: config() });
++    expect(result).toEqual({
++      version: 1,
++      ready: true,
++      provider: "irodori",
++      model: "irodori-tts",
++      auto: "always",
++      allowText: true,
++      maxLength: 1500,
++    });
++    expect(JSON.stringify(result)).not.toContain("synthetic-private-key");
++    expect(synthesizeMock).not.toHaveBeenCalled();
++    expect(prepareSynthesisMock).not.toHaveBeenCalled();
++  });
++  it("uses explicit provider preference over the persona and config", async () => {
++    prefs({ provider: "speech-cpp", maxLength: 321 });
++    const cfg = config();
++    cfg.tts = { ...cfg.tts, persona: "sample", personas: { sample: { provider: "irodori" } } };
++    expect(await prepareSpeechPromptContext({ cfg })).toMatchObject({
++      provider: "speech-cpp",
++      model: "qwen3-tts-1.7b",
++      maxLength: 321,
++    });
++  });
++  it("matches the actual synthesis model after persona binding", async () => {
++    const cfg = config();
++    cfg.tts = {
++      ...cfg.tts,
++      persona: "sample",
++      personas: {
++        sample: {
++          provider: "speech-cpp",
++          providers: { "speech-cpp": { model: "irodori-tts-mf" } },
++          fallbackPolicy: "fail",
++        },
++      },
++    };
++    const selected = await prepareSpeechPromptContext({ cfg });
++    expect(selected).toMatchObject({
++      ready: true,
++      provider: "speech-cpp",
++      model: "irodori-tts-mf",
++    });
++    await synthesizeSpeech({ cfg, text: "短い台詞。" });
++    expect(synthesizeMock.mock.calls[0]?.[0].providerConfig.model).toBe(selected.model);
++  });
++  it("does not suggest a fallback when the primary persona binding is missing", async () => {
++    const cfg = config();
++    cfg.tts = {
++      ...cfg.tts,
++      persona: "sample",
++      personas: { sample: { provider: "irodori", fallbackPolicy: "fail", providers: {} } },
++    };
++    expect(await prepareSpeechPromptContext({ cfg })).toMatchObject({ ready: false });
++  });
++  it("honors channel and account layers through the existing owner", async () => {
++    const cfg = config();
++    cfg.channels = {
++      "custom-speech": {
++        tts: { provider: "speech-cpp" },
++        accounts: {
++          example: { tts: { providers: { "speech-cpp": { model: "irodori-tts-large" } } } },
++        },
++      },
++    };
++    expect(
++      await prepareSpeechPromptContext({ cfg, channelId: "custom-speech", accountId: "example" }),
++    ).toMatchObject({ provider: "speech-cpp", model: "irodori-tts-large" });
++  });
++  it("honors session auto mode and user text-override policy", async () => {
++    const cfg = config();
++    expect(await prepareSpeechPromptContext({ cfg, sessionAuto: "off" })).toMatchObject({
++      ready: false,
++      auto: "off",
++    });
++    prefs({ auto: "off" });
++    expect(await prepareSpeechPromptContext({ cfg })).toMatchObject({ ready: false, auto: "off" });
++    expect(await prepareSpeechPromptContext({ cfg, sessionAuto: "tagged" })).toMatchObject({
++      ready: true,
++      auto: "tagged",
++    });
++    cfg.tts = { ...cfg.tts, modelOverrides: { allowText: false } };
++    expect(await prepareSpeechPromptContext({ cfg, sessionAuto: "always" })).toMatchObject({
++      ready: false,
++      allowText: false,
++    });
++  });
++  it("does not cache a selection across preference changes", async () => {
++    const cfg = config();
++    expect(await prepareSpeechPromptContext({ cfg })).toMatchObject({ provider: "irodori" });
++    prefs({ provider: "speech-cpp" });
++    expect(await prepareSpeechPromptContext({ cfg })).toMatchObject({
++      provider: "speech-cpp",
++      model: "qwen3-tts-1.7b",
++    });
++  });
++  it("respects the provider default model and configured hard text limit", async () => {
++    const cfg = config();
++    cfg.tts = { ...cfg.tts, maxTextLength: 120, providers: { irodori: {} } };
++    installSpeechProviders([createMockSpeechProvider("irodori", { defaultModel: "irodori-tts" })]);
++    expect(await prepareSpeechPromptContext({ cfg })).toMatchObject({
++      model: "irodori-tts",
++      maxLength: 120,
++    });
++  });
++});

@@ -1,5 +1,6 @@
 import { definePluginEntry, type SpeechProviderPlugin } from "openclaw/plugin-sdk/plugin-entry";
 import { buildCompatibleSpeechProvider } from "./compatible-speech.js";
+import { registerIrodoriExpressionHook } from "./irodori-expression-hook.js";
 import { speechConfiguredHooks } from "./speech-config.js";
 import { resolveEmotionStateSelection } from "./emotion-state.js";
 import {
@@ -769,6 +770,7 @@ export default definePluginEntry({
     api.registerSpeechProvider(buildCompatibleSpeechProvider("irodori"));
     api.registerSpeechProvider(buildCompatibleSpeechProvider("speech-cpp"));
     api.registerSpeechProvider(buildSbv2SpeechProvider({ logger: api?.logger }));
+    registerIrodoriExpressionHook(api);
     api?.logger?.info?.("speech provider registered: style-bert-vits2");
   },
 });
