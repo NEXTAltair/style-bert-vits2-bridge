@@ -1,11 +1,15 @@
 ---
 name: "voice"
-description: "Style-Bert-VITS2のモデル・speaker・style選択とFastAPIの分離tmux起動・稼働確認"
+description: "Style-Bert-VITS2のモデル・speaker・style選択とFastAPIの分離tmux起動・稼働確認。Irodori/speech.cppの囁き・笑い・感情の絵文字制御はirodori-productionへ振り分ける。"
 ---
 
 # Voice — Style-Bert-VITS2 声色選択ガイド
 
 このスキルは、Style-Bert-VITS2 (SBV2) で音声を生成する際のモデル・スピーカー・スタイル選択をガイドします。
+
+Irodoriやspeech.cpp上のIrodoriで「囁いて」「笑いを交えて」「間を入れて」などを依頼された場合は、SBV2の起動・style選択へ進まず、`irodori-production` の [本文の絵文字制御](../irodori-production/references/emoji-controls.md) を使います。モデルが異なれば絵文字の意味も共通とは限りません。
+
+SBV2の会話文で英単語・略語・固有名詞の読みを直す場合は、bridgeの `pronunciationReplacements` / `pronunciationReplacementsPath` を使います。設定の入口、ファイル形式、読み込み順、対象providerの見分け方は [発音置換の登録と確認](./references/pronunciation-replacements.md) を参照してください。Irodoriやspeech.cppへ同じ辞書が自動適用されるとは扱いません。
 
 ## SBV2 FastAPI の起動確認
 
@@ -31,12 +35,12 @@ systemd-run --user \
   --collect \
   --property=Type=exec \
   --property=Restart=no \
-  /bin/bash -lc 'set -e; /usr/bin/tmux new-session -d -s sbv2-fastapi -c /home/altair/src/Style-Bert-VITS2 "exec /home/altair/.local/bin/uv run server_fastapi.py"; /usr/bin/tmux set-option -t sbv2-fastapi remain-on-exit on; sbv2_tmux_pid=$(/usr/bin/tmux display-message -p -t sbv2-fastapi "#{pid}"); exec /usr/bin/tail --pid="$sbv2_tmux_pid" -f /dev/null'
+  /bin/bash -lc 'set -e; /usr/bin/tmux new-session -d -s sbv2-fastapi -c "$HOME/src/Style-Bert-VITS2" "exec \"$HOME/.local/bin/uv\" run server_fastapi.py"; /usr/bin/tmux set-option -t sbv2-fastapi remain-on-exit on; sbv2_tmux_pid=$(/usr/bin/tmux display-message -p -t sbv2-fastapi "#{pid}"); exec /usr/bin/tail --pid="$sbv2_tmux_pid" -f /dev/null'
 ```
 
-これは一時unitであり、unit fileや自動起動設定は作りません。Gatewayとは別cgroupで動き、tmuxが終了するとunitも回収されます。外部の人間用terminalから起動する場合は通常のdetached tmuxでも構いません。
+上の例はcheckoutが`$HOME/src/Style-Bert-VITS2`、uvが`$HOME/.local/bin/uv`にある場合です。実際の配置を先に確認し、異なる場合は例のパスを置き換えます。これは一時unitであり、unit fileや自動起動設定は作りません。Gatewayとは別cgroupで動き、tmuxが終了するとunitも回収されます。外部の人間用terminalから起動する場合は通常のdetached tmuxでも構いません。
 
-`/mnt/h`上のmodel catalog読み込みは数分かかることがあります。起動後は最大300秒待って`/status`と`/models/info`を確認します。
+Windows側のドライブにあるmodel catalogの読み込みは数分かかることがあります。起動後は最大300秒待って`/status`と`/models/info`を確認します。
 
 ```bash
 for _ in $(seq 1 150); do
@@ -50,7 +54,7 @@ curl --fail --silent --show-error --max-time 5 http://127.0.0.1:5000/models/info
 
 最後まで失敗する場合は、別のTTS providerへ声を切り替えず、`tmux list-panes -t sbv2-fastapi -F '#{pane_pid} #{pane_dead} #{pane_dead_status} #{pane_current_command}'`と`tmux capture-pane -t sbv2-fastapi -p -S - | tail -120`で終了statusとログを確認し、SBV2 unavailableとして扱います。
 
-OpenClaw 2026.7.2以降では、SBV2専用personaへ`fallbackPolicy: "fail"`を設定して後続providerへのfallbackを禁止できます。自動TTSをfail-closedにする場合は、`tts.persona`または`/tts persona <id>`のsession preferenceがSBV2専用personaを指し、そのpersonaが`style-bert-vits2`だけをproviderとして持つことを確認します。現在のValentina設定では`tts.personas.valentina.fallbackPolicy`を`fail`にします。
+OpenClaw 2026.7.2以降では、SBV2専用personaへ`fallbackPolicy: "fail"`を設定して後続providerへのfallbackを禁止できます。自動TTSをfail-closedにする場合は、`tts.persona`または`/tts persona <id>`のsession preferenceがSBV2専用personaを指し、そのpersonaが`style-bert-vits2`だけをproviderとして持つことを確認します。対象personaの実際のIDを確認し、その`fallbackPolicy`だけを設定します。
 
 基本ルール: model / speaker は声の同一性を決め、style は選択済みモデル内の表情・トーンを決めます。別の声にしたい場合は model / speaker を選び直し、現在の声の表現だけを変えたい場合に style を選びます。
 

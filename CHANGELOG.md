@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.4.0 - 2026-10-17
+
+### Added
+
+- Opt-in Irodori-only expressive speech guidance for the same response LLM. Uses separate audio text, offers all 45 documented annotations, and preserves 11 additional explicit annotations. Qwen instructions and existing TTS settings are unchanged.
+- A separately reviewed OpenClaw host patch for a sanitized, canonical speech-selection context. Published SDK 2026.10.4 lacks this capability; older hosts skip the guidance with a warning and retain normal synthesis. This feature is not deployed by installing docs alone.
+- Per-command Irodori workflow progress observations and checkpoint evidence, plus optional `--stall-timeout` (default 0, disabled). Retains failed-job receipts and saved artifacts without adopting incomplete models. This is diagnostic mitigation, not a claimed fix for the unexplained GPU stall (#94).
+
+- Document the verified pull-request, merge, tag, and package-release completion procedure.
+
+### Fixed
+
+- Make SBV2 pronunciation dictionaries discoverable from the README, configuration hints, and bundled voice skill; document strict JSON, precedence, path resolution, and the distinction from upstream accent dictionaries (#93).
+
 ## 0.3.1 - 2026-10-16
 
 ### Fixed

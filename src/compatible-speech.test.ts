@@ -1,6 +1,7 @@
 import { speechRequest } from "./speech.test-support.js";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { buildCompatibleSpeechProvider } from "./compatible-speech.js";
+import { IRODORI_ANNOTATIONS } from "./irodori-expressions.js";
 
 function wav(): Buffer {
   const data = Buffer.alloc(46);
@@ -21,6 +22,19 @@ function wav(): Buffer {
 
 describe("local OpenAI-compatible speech providers", () => {
   afterEach(() => vi.unstubAllGlobals());
+
+  it.each(IRODORI_ANNOTATIONS)("preserves the exact %s annotation through both Irodori transports", async (emoji) => {
+    const fetch = vi.fn().mockImplementation(() => Promise.resolve(new Response(new Uint8Array(wav()))));
+    vi.stubGlobal("fetch", fetch);
+    const text = `${emoji} 数値は42、変更しない。`;
+    for (const engine of ["irodori", "speech-cpp"] as const) {
+      await buildCompatibleSpeechProvider(engine).synthesize(speechRequest({
+        text, providerConfig: { baseUrl: "http://localhost:8088", voice: "sample", model: "irodori-tts" },
+      }));
+    }
+    expect(fetch).toHaveBeenCalledTimes(2);
+    for (const [, init] of fetch.mock.calls) expect(JSON.parse(init.body).input).toBe(text);
+  });
 
   it.each(["irodori", "speech-cpp"] as const)("selects only %s config from the host TTS envelope", (engine) => {
     const provider = buildCompatibleSpeechProvider(engine);

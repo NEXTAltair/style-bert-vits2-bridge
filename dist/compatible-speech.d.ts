@@ -57,6 +57,7 @@ export declare function buildCompatibleSpeechProvider(engine: CompatibleSpeechEn
         };
         timeoutMs: number;
     }) => boolean>[0]) => Promise<boolean>;
+    defaultModel?: string | undefined;
     id: CompatibleSpeechEngine;
     label: string;
     defaultTimeoutMs: number;

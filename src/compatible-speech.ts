@@ -64,6 +64,7 @@ export function buildCompatibleSpeechProvider(engine: CompatibleSpeechEngine) {
     id: engine,
     label: engine === "irodori" ? "Irodori-TTS" : "speech.cpp",
     defaultTimeoutMs: 120_000,
+    ...(engine === "irodori" ? { defaultModel: "irodori-tts" } : {}),
     ...speechConfiguredHooks(({ providerConfig }) => Boolean(string(providerConfig.baseUrl))),
     resolveConfig: ({ rawConfig, timeoutMs }) => {
       // The SDK passes the whole TTS config, not an already-selected provider.

@@ -1,6 +1,7 @@
 {
   "name": "style-bert-vits2-bridge",
-  "version": "0.3.1",
+  "version": "0.4.0",
+  "packageManager": "pnpm@12.4.2",
   "description": "Local speech and voice-production bridge for Style-Bert-VITS2, Irodori-TTS, and speech.cpp.",
   "type": "module",
   "main": "./dist/index.js",

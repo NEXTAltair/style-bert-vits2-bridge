@@ -2,10 +2,11 @@
   "id": "style-bert-vits2-bridge",
   "name": "Style-Bert-VITS2 Bridge",
   "description": "Local speech and voice-production bridge for Style-Bert-VITS2, Irodori-TTS, and speech.cpp.",
-  "version": "0.3.1",
+  "version": "0.4.0",
   "contracts": {
     "speechProviders": ["style-bert-vits2", "irodori", "speech-cpp"]
   },
+  "activation": { "onCapabilities": ["hook"] },
   "skills": [
     "./skills/voice",
     "./skills/model-production",
@@ -16,6 +17,11 @@
     "type": "object",
     "additionalProperties": false,
     "properties": {
+      "irodoriExpressiveText": {
+        "type": "boolean",
+        "default": false,
+        "description": "Opt in to provider-aware Irodori audio-only expression guidance. Requires the host prepareSpeechPromptContext API and conversation/prompt hook permission. Uses all 45 documented annotations; never changes TTS auto mode or adds Qwen stage directions."
+      },
       "baseUrl": { "type": "string", "minLength": 1 },
       "timeoutMs": { "type": "integer", "minimum": 1000 },
       "modelName": { "type": "string" },
@@ -44,7 +50,10 @@
       "defaultLanguage": { "type": "string", "enum": ["JP", "EN", "ZH"] },
       "defaultAssistText": { "type": "string" },
       "defaultAssistTextWeight": { "type": "number" },
-      "pronunciationReplacementsPath": { "type": "string" },
+      "pronunciationReplacementsPath": {
+        "type": "string",
+        "description": "SBV2 bridge pronunciation dictionary: JSON object mapping prose terms to readings. Configure under tts.providers.style-bert-vits2. Read and merge an existing dictionary; ~/ is expanded and relative paths use the Gateway process cwd. Inline pronunciationReplacements take precedence. See skills/voice/references/pronunciation-replacements.md. Not the upstream SBV2 user_dict or an Irodori/speech.cpp setting."
+      },
       "emotionStatePath": { "type": "string" },
       "emotionProfiles": {
         "type": "object",
@@ -68,11 +77,16 @@
       },
       "pronunciationReplacements": {
         "type": "object",
+        "description": "Inline SBV2 prose pronunciation replacements (term -> reading), configured under tts.providers.style-bert-vits2. Override matching entries from pronunciationReplacementsPath. Case-sensitive literal replacement, longer keys first; not for URLs, logs, commands, or JSON. See skills/voice/references/pronunciation-replacements.md.",
         "additionalProperties": { "type": "string" }
       }
     }
   },
   "uiHints": {
+    "irodoriExpressiveText": {
+      "label": "Irodori絵文字付き読み上げ本文",
+      "help": "表示本文とは別に音声専用本文を生成。Irodoriモデルのみ。読み上げON/OFFは変更しません。対応host APIとhooks.allowConversationAccessが必要です。"
+    },
     "baseUrl": {
       "label": "SBV2 API Base URL",
       "placeholder": "http://127.0.0.1:5000"
@@ -122,7 +136,8 @@
       "placeholder": "0.2"
     },
     "pronunciationReplacementsPath": {
-      "label": "Pronunciation Dictionary Path",
+      "label": "SBV2読み仮名辞書 (pronunciationReplacementsPath)",
+      "help": "実効設定は tts.providers.style-bert-vits2。既存JSON辞書を読んで追記し、SBV2本体のuser_dictと混同しない。Irodori/speech.cppには未適用。skills/voice/references/pronunciation-replacements.md を参照。",
       "placeholder": "~/.openclaw/settings/sbv2-pronunciation.json"
     },
     "defaultLanguage": {
