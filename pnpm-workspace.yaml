@@ -9,7 +9,3 @@ allowBuilds:
   protobufjs: false
 
 autoInstallPeers: false
-
-minimumReleaseAgeExclude:
-  - '@openclaw/ai@2026.10.4'
-  - openclaw@2026.10.4

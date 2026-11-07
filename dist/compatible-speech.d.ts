@@ -43,20 +43,20 @@ export declare function buildCompatibleSpeechProvider(engine: CompatibleSpeechEn
             streaming: boolean;
         };
     }>;
-    isConfigured: (ctx: {
+    isConfigured: (context: {
         cfg?: import("openclaw/plugin-sdk/plugin-entry").OpenClawConfig;
         providerConfig: {
             [x: string]: unknown;
         };
         timeoutMs: number;
     }) => boolean;
-    isConfiguredAsync: (context: Parameters<(ctx: {
+    isConfiguredAsync: (context: {
         cfg?: import("openclaw/plugin-sdk/plugin-entry").OpenClawConfig;
         providerConfig: {
             [x: string]: unknown;
         };
         timeoutMs: number;
-    }) => boolean>[0]) => Promise<boolean>;
+    }) => Promise<boolean>;
     defaultModel?: string | undefined;
     id: CompatibleSpeechEngine;
     label: string;

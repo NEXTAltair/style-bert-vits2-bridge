@@ -152,20 +152,20 @@ export declare function buildSbv2SpeechProvider(options?: Sbv2SpeechProviderOpti
         voiceCompatible: false;
         metadata: Sbv2TelemetryMetadata;
     }>;
-    isConfigured: (ctx: {
+    isConfigured: (context: {
         cfg?: import("openclaw/plugin-sdk/plugin-entry").OpenClawConfig;
         providerConfig: {
             [x: string]: unknown;
         };
         timeoutMs: number;
     }) => boolean;
-    isConfiguredAsync: (context: Parameters<(ctx: {
+    isConfiguredAsync: (context: {
         cfg?: import("openclaw/plugin-sdk/plugin-entry").OpenClawConfig;
         providerConfig: {
             [x: string]: unknown;
         };
         timeoutMs: number;
-    }) => boolean>[0]) => Promise<boolean>;
+    }) => Promise<boolean>;
     id: string;
     label: string;
 };
