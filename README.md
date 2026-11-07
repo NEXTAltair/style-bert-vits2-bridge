@@ -51,7 +51,7 @@ speech.cppは `speech serve` でAPIを提供し、登録声は `/v1/models` か�
 
 `plugins.entries.style-bert-vits2-bridge.config.irodoriExpressiveText: true` で、返答を作るLLMへIrodori専用の表現ガイドを渡せます。表示文はそのまま、hostの配信方式に従って音声用の `[[tts:text]]` またはstructured配信の `voiceText` にだけ注釈を付ける方式です。公式の意味付き45種すべてを候補にし、明示入力は追加11種も含む56種を保持します。別LLMへの再生成リクエストはありません。
 
-**既定OFF。ホスト側の `api.runtime.tts.prepareSpeechPromptContext` と `hooks.allowConversationAccess` が必要です。公開済み2026.10.4にはこのhost APIがないため、[同梱の接続パッチ](doc/patches/openclaw-speech-prompt-context.patch) が必要です。** APIがない場合は警告して通常の合成を続け、稼働済みとは扱いません。
+**既定OFF。ホスト側の `api.runtime.tts.prepareSpeechPromptContext` と `hooks.allowConversationAccess` が必要です。公開済み2026.11.1にもこのhost APIがないため、[同梱の接続パッチ](doc/patches/openclaw-speech-prompt-context.patch) が必要です。** APIがない場合は警告して通常の合成を続け、稼働済みとは扱いません。
 
 対象はIrodoriモデルだけで、speech.cppでは対応Irodoriのmodel IDを明示します。Qwen用ト書きの自動生成・変換はしません。TTSのON/OFFや声も変えません。現時点では `trigger=user` のturnのみが対象で、入力音声の有無を確定できない `auto=inbound` ではガイドを省略し、通常TTSを維持します。モデル判断・手動台本の優先・表示/音声本文の分離・旧hostの挙動は[運用ガイド](skills/irodori-production/references/expressive-speech.md)、責務境界は[ADR 0007](doc/adr/0007-irodori-expressive-speech.md)を参照してください。
 
@@ -86,7 +86,7 @@ speech.cppは `speech serve` でAPIを提供し、登録声は `/v1/models` か�
 
 ## 前提条件
 
-- OpenClaw `>= 2026.9.9` (現行SDK系列を基準とした互換性下限)
+- OpenClaw `>= 2026.11.1` (最新の公開版を基準とした互換性下限。古いhost向けの互換分岐は持ちません)
 - Node.js `>= 24.16`
 - Style-Bert-VITS2 API サーバーが起動済みであること（デフォルト `http://127.0.0.1:5000`）
 
@@ -258,7 +258,7 @@ openclaw plugins inspect style-bert-vits2-bridge --runtime --json
 
 `speechProviderIds` に `style-bert-vits2` が含まれれば、OpenClaw runtime から provider が見えています。`dist/index.js` は OpenClaw plugin runtime から読み込まれる前提の entrypoint です。通常の Node.js script から直接 import すると、`openclaw/plugin-sdk/*` 解決や runtime mock が無いため失敗することがあります。
 
-`v0.3.1` の互換性下限は、現在の音声SDK契約へ移行済みの `2026.9.9` 系を目安にしています。全過去版の厳密な境界を保証するものではありません。開発時は公開SDK `2026.10.4` をdevDependencyに固定し、公開された `openclaw/plugin-sdk/plugin-entry` の実型でビルド・テストします。独自のSDK簡易型や登録APIの `any` は使いません。最新main向けの非同期 `isConfiguredAsync` と、公開版がまだ要求する同期 `isConfigured` の両方を提供します。
+互換性下限は最新の公開版 `2026.11.1` です。OpenClawは2026-12-31を最終互換日として同期SQLite系APIを廃止するため、sessionの読み取りは `getSessionEntryAsync` だけを使い、古いhost向けの分岐や同期版へのフォールバックは持ちません。開発時は公開SDK `2026.11.1` をdevDependencyに固定し、公開された `openclaw/plugin-sdk/plugin-entry` の実型でビルド・テストします。独自のSDK簡易型や登録APIの `any` は使いません。hostが優先する非同期 `isConfiguredAsync` と、SDKの型が削除リリースまで要求する同期 `isConfigured` の両方を提供します。
 
 `/tts audio` では、通常合成と voice override の両方を確認します。
 

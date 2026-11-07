@@ -26,7 +26,7 @@
 
 `hooks.allowPromptInjection` がfalseの場合は使えません。conversation accessはホストが要求するprompt hook権限で、この実装はhookへ渡される会話履歴を読んだり外部送信したりしません。現在のsessionのTTS auto overrideと、ホストが解決した音声選択だけを参照します。
 
-**ホスト側に `api.runtime.tts.prepareSpeechPromptContext` が必要です。公開済みOpenClaw 2026.10.4 SDKにはこのメソッドがありません。** 同梱の [host接続パッチ](../../../doc/patches/openclaw-speech-prompt-context.patch) とその [説明](../../../doc/adr/0007-irodori-expressive-speech.md) を確認してください。対応APIがないhostでは理由を警告し、絵文字ガイドだけを無効にします。通常の音声合成は維持します。未対応hostで機能が稼働したとは扱いません。
+**ホスト側に `api.runtime.tts.prepareSpeechPromptContext` が必要です。公開済みOpenClaw 2026.11.1 SDKにもこのメソッドがありません。** 同梱の [host接続パッチ](../../../doc/patches/openclaw-speech-prompt-context.patch) とその [説明](../../../doc/adr/0007-irodori-expressive-speech.md) を確認してください。対応APIがないhostでは理由を警告し、絵文字ガイドだけを無効にします。通常の音声合成は維持します。未対応hostで機能が稼働したとは扱いません。
 
 ホストは既存のTTS選択処理を使い、ユーザーpreference、persona、agent/channel/account設定、sessionのauto設定を反映します。bridgeは選択規則を独自実装せず、provider/モデルが不明、未対応、利用不可の場合はガイドを追加しません。
 

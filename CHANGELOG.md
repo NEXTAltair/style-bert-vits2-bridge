@@ -1,5 +1,16 @@
 # Changelog
 
+## Unreleased
+
+### Changed
+
+- Read the current session with `api.runtime.agent.session.getSessionEntryAsync` in the Irodori expressive-text hook. OpenClaw deprecates the synchronous `getSessionEntry` (final compatibility day 2026-12-31, removal in the first January 2027 stable release). A rejected read skips the guidance with the existing sanitized warning; there is no synchronous fallback (#96).
+- Type the speech configuration hooks from `isConfiguredAsync`. The synchronous `isConfigured` is still supplied because the SDK type requires it until the removal release.
+
+### Compatibility
+
+- Raise the compatibility floor (`peerDependencies.openclaw`, `openclaw.compat.pluginApi`, `openclaw.compat.minGatewayVersion`) to the latest published OpenClaw, 2026.11.1, and pin it as the development SDK. Older hosts are not supported. The optional `prepareSpeechPromptContext` host patch is still required for expressive text.
+
 ## 0.4.0 - 2026-10-17
 
 ### Added

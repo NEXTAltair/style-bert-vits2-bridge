@@ -11,16 +11,18 @@ const ready = { version: 1, ready: true, auto: "always", provider: "irodori", mo
 function fixture(enabled = true, supported = true) {
   const prepare = vi.fn().mockResolvedValue(ready);
   const warn = vi.fn();
-  const getSessionEntry = vi.fn().mockReturnValue({ ttsAuto: "tagged" });
+  const getSessionEntryAsync = vi.fn().mockResolvedValue({ ttsAuto: "tagged" });
+  // Deprecated synchronous reader; present only to prove it is never used as a fallback.
+  const getSessionEntry = vi.fn(() => { throw new Error("synchronous session read"); });
   let hook: Hook | undefined;
   const on = vi.fn((name: string, handler: Hook) => { expect(name).toBe("before_prompt_build"); hook = handler; });
   // The fixture supplies only the public operations this registration uses.
   const api = { pluginConfig: { irodoriExpressiveText: enabled }, config: {},
-    runtime: { tts: supported ? { prepareSpeechPromptContext: prepare } : {}, agent: { session: { getSessionEntry } } },
+    runtime: { tts: supported ? { prepareSpeechPromptContext: prepare } : {}, agent: { session: { getSessionEntryAsync, getSessionEntry } } },
     logger: { warn }, on,
   } as unknown as OpenClawPluginApi;
   registerIrodoriExpressionHook(api);
-  return { prepare, warn, getSessionEntry, on, run: (ctx = {}) => hook!({ prompt: "Do not read or rewrite this input", messages: [] }, { trigger: "user", ...ctx }) };
+  return { prepare, warn, getSessionEntryAsync, getSessionEntry, on, run: (ctx = {}) => hook!({ prompt: "Do not read or rewrite this input", messages: [] }, { trigger: "user", ...ctx }) };
 }
 
 describe("opt-in Irodori prompt hook", () => {
@@ -32,9 +34,35 @@ describe("opt-in Irodori prompt hook", () => {
   });
   it("uses host-owned selection and all documented annotations without touching messages", async () => {
     const f = fixture(); const result = await f.run({ agentId: "main", sessionKey: "agent:main:test", channel: "webchat", accountId: "example" });
+    expect(f.getSessionEntryAsync).toHaveBeenCalledWith({ agentId: "main", sessionKey: "agent:main:test" });
+    expect(f.getSessionEntry).not.toHaveBeenCalled();
     expect(f.prepare).toHaveBeenCalledWith({ cfg: {}, agentId: "main", channelId: "webchat", accountId: "example", sessionAuto: "tagged" });
     for (const [emoji, meaning] of IRODORI_EXPRESSIONS) expect(result?.appendSystemContext).toContain(`${emoji}: ${meaning}`);
     expect(result?.appendSystemContext).not.toContain("Do not read or rewrite this input");
+  });
+  it("does not read session state for a turn without a session key", async () => {
+    const f = fixture(); expect(await f.run({ agentId: "main" })).toBeDefined();
+    expect(f.getSessionEntryAsync).not.toHaveBeenCalled();
+    expect(f.prepare).toHaveBeenCalledWith(expect.objectContaining({ sessionAuto: undefined }));
+  });
+  it("passes no session preference when the async read finds no entry", async () => {
+    const f = fixture(); f.getSessionEntryAsync.mockResolvedValue(undefined);
+    expect(await f.run({ agentId: "main", sessionKey: "agent:main:test" })).toBeDefined();
+    expect(f.prepare).toHaveBeenCalledWith(expect.objectContaining({ sessionAuto: undefined }));
+  });
+  it("skips guidance without a synchronous fallback when the async session read rejects", async () => {
+    const f = fixture(); f.getSessionEntryAsync.mockRejectedValue(new Error("session-store /home/private"));
+    expect(await f.run({ agentId: "main", sessionKey: "agent:main:test" })).toBeUndefined();
+    expect(f.getSessionEntry).not.toHaveBeenCalled();
+    expect(f.prepare).not.toHaveBeenCalled();
+    expect(f.warn).toHaveBeenCalledTimes(1);
+    expect(JSON.stringify(f.warn.mock.calls)).not.toContain("/home/private");
+  });
+  it("does not resolve speech context after the invocation ends during the session read", async () => {
+    const f = fixture(); const assertActive = vi.fn().mockImplementationOnce(() => {}).mockImplementation(() => { throw new Error("ended"); });
+    expect(await f.run({ sessionKey: "agent:main:test", hookInvocation: { assertActive } })).toBeUndefined();
+    expect(f.getSessionEntryAsync).toHaveBeenCalledTimes(1);
+    expect(f.prepare).not.toHaveBeenCalled();
   });
   it("defers to structured voiceText instead of unconditionally requesting inline tags", async () => {
     const result = await fixture().run();

@@ -23,7 +23,7 @@ export function registerIrodoriExpressionHook(api: OpenClawPluginApi): void {
   if (api.pluginConfig?.irodoriExpressiveText !== true) return;
   const runtime = api.runtime.tts;
   // A versioned optional host capability, not a plugin-owned replica of TTS routing.
-  // The published 2026.10.4 SDK predates it; keep ordinary synthesis working there.
+  // The published 2026.11.1 SDK still lacks it; keep ordinary synthesis working there.
   if (!("prepareSpeechPromptContext" in runtime)
       || typeof runtime.prepareSpeechPromptContext !== "function") {
     api.logger.warn("Irodori expressive text is enabled but this host lacks api.runtime.tts.prepareSpeechPromptContext; update the host capability. Ordinary speech is unchanged.");
@@ -36,9 +36,11 @@ export function registerIrodoriExpressionHook(api: OpenClawPluginApi): void {
     if (ctx.trigger !== "user") return;
     try {
       ctx.hookInvocation?.assertActive();
+      // Async session read; a rejection skips guidance and never retries a synchronous reader.
       const session = ctx.sessionKey
-        ? api.runtime.agent.session.getSessionEntry({ agentId: ctx.agentId, sessionKey: ctx.sessionKey })
+        ? await api.runtime.agent.session.getSessionEntryAsync({ agentId: ctx.agentId, sessionKey: ctx.sessionKey })
         : undefined;
+      ctx.hookInvocation?.assertActive();
       const raw: unknown = await prepare({
         cfg: api.config, agentId: ctx.agentId,
         channelId: ctx.channel ?? ctx.messageProvider, accountId: ctx.accountId,
