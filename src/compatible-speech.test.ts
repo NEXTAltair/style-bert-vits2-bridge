@@ -2,7 +2,7 @@ import { speechRequest } from "./speech.test-support.js";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { buildCompatibleSpeechProvider } from "./compatible-speech.js";
 import { IRODORI_ANNOTATIONS } from "./irodori-expressions.js";
-import { mkdtempSync, writeFileSync } from "node:fs";
+import { mkdtempSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
@@ -120,6 +120,21 @@ describe("local OpenAI-compatible speech providers", () => {
       },
     }));
     expect(JSON.parse(fetch.mock.calls[0][1].body).input).toBe("ハーダーと ハーダー プローブ、ハーダー、herdr");
+  });
+
+  it.each(["irodori", "speech-cpp"] as const)("reads a shared %s dictionary through a symlinked path", async (engine) => {
+    const fetch = vi.fn().mockImplementation(() => Promise.resolve(new Response(new Uint8Array(wav()))));
+    vi.stubGlobal("fetch", fetch);
+    const directory = mkdtempSync(path.join(tmpdir(), "speech-pronunciation-shared-"));
+    const shared = path.join(directory, "shared.json");
+    const link = path.join(directory, "engine.json");
+    writeFileSync(shared, JSON.stringify({ Herdr: "ハーダー" }));
+    symlinkSync("shared.json", link);
+    await buildCompatibleSpeechProvider(engine).synthesize(speechRequest({
+      text: "Herdrを確認する。",
+      providerConfig: { baseUrl: "http://localhost:8766", voice: "B", pronunciationReplacementsPath: link },
+    }));
+    expect(JSON.parse(fetch.mock.calls[0][1].body).input).toBe("ハーダーを確認する。");
   });
 
   it.each(["irodori", "speech-cpp"] as const)("rejects invalid %s dictionaries before contacting the speech server", async (engine) => {
