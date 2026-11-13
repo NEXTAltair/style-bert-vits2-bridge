@@ -52,7 +52,7 @@
       "defaultAssistTextWeight": { "type": "number" },
       "pronunciationReplacementsPath": {
         "type": "string",
-        "description": "SBV2 bridge pronunciation dictionary: JSON object mapping prose terms to readings. Configure under tts.providers.style-bert-vits2. Read and merge an existing dictionary; ~/ is expanded and relative paths use the Gateway process cwd. Inline pronunciationReplacements take precedence. See skills/voice/references/pronunciation-replacements.md. Not the upstream SBV2 user_dict or an Irodori/speech.cpp setting."
+        "description": "Bridge pronunciation dictionary: JSON object mapping prose terms to readings. Configure under tts.providers.<provider> for style-bert-vits2, irodori, or speech-cpp. Each provider reads its own configuration per synthesis; ~/ is expanded and relative paths use the Gateway process cwd. Inline pronunciationReplacements take precedence. See skills/voice/references/pronunciation-replacements.md. Not an engine user_dict or pitch-accent control."
       },
       "emotionStatePath": { "type": "string" },
       "emotionProfiles": {
@@ -77,7 +77,7 @@
       },
       "pronunciationReplacements": {
         "type": "object",
-        "description": "Inline SBV2 prose pronunciation replacements (term -> reading), configured under tts.providers.style-bert-vits2. Override matching entries from pronunciationReplacementsPath. Case-sensitive literal replacement, longer keys first; not for URLs, logs, commands, or JSON. See skills/voice/references/pronunciation-replacements.md.",
+        "description": "Inline prose pronunciation replacements (term -> reading), configured under tts.providers.<provider> for style-bert-vits2, irodori, or speech-cpp. Override matching entries from pronunciationReplacementsPath. Case-sensitive literal replacement, longer keys first; not for URLs, logs, commands, or JSON. See skills/voice/references/pronunciation-replacements.md.",
         "additionalProperties": { "type": "string" }
       }
     }
@@ -136,8 +136,8 @@
       "placeholder": "0.2"
     },
     "pronunciationReplacementsPath": {
-      "label": "SBV2読み仮名辞書 (pronunciationReplacementsPath)",
-      "help": "実効設定は tts.providers.style-bert-vits2。既存JSON辞書を読んで追記し、SBV2本体のuser_dictと混同しない。Irodori/speech.cppには未適用。skills/voice/references/pronunciation-replacements.md を参照。",
+      "label": "読み仮名辞書 (pronunciationReplacementsPath)",
+      "help": "実効設定は tts.providers.<provider>。SBV2・Irodori・speech.cppが対応し、各providerの設定は独立。既存JSON辞書を読んで追記し、エンジンのuser_dictやアクセント制御と混同しない。skills/voice/references/pronunciation-replacements.md を参照。",
       "placeholder": "~/.openclaw/settings/sbv2-pronunciation.json"
     },
     "defaultLanguage": {

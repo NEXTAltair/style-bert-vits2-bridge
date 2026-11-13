@@ -1,4 +1,5 @@
 import { speechConfiguredHooks } from "./speech-config.js";
+import { applyPronunciationReplacements, resolvePronunciationReplacements } from "./pronunciation.js";
 function record(value) {
     return value && typeof value === "object" && !Array.isArray(value)
         ? value
@@ -100,6 +101,12 @@ export function buildCompatibleSpeechProvider(engine) {
                 throw new Error("speech.cpp voice must name an existing registered voice");
             if (!req.text.trim())
                 throw new Error("Speech text must not be empty");
+            const input = applyPronunciationReplacements(req.text, resolvePronunciationReplacements({
+                pronunciationReplacements: config.pronunciationReplacements,
+                pronunciationReplacementsPath: config.pronunciationReplacementsPath,
+            }));
+            if (!input.trim())
+                throw new Error("Speech text must not be empty after pronunciation replacements");
             const speed = overrides.speed ?? config.speed ?? 1;
             if (typeof speed !== "number" || !Number.isFinite(speed) || speed < 0.25 || speed > 4) {
                 throw new Error("Speech speed must be between 0.25 and 4");
@@ -122,7 +129,7 @@ export function buildCompatibleSpeechProvider(engine) {
             const payload = {
                 ...(engine === "speech-cpp" ? options : {}),
                 ...(model ? { model } : {}),
-                input: req.text,
+                input,
                 voice,
                 speed,
                 response_format: "wav",

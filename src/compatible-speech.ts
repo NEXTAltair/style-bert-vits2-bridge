@@ -1,5 +1,6 @@
 import type { SpeechProviderPlugin } from "openclaw/plugin-sdk/plugin-entry";
 import { speechConfiguredHooks } from "./speech-config.js";
+import { applyPronunciationReplacements, resolvePronunciationReplacements } from "./pronunciation.js";
 
 export type CompatibleSpeechEngine = "irodori" | "speech-cpp";
 
@@ -105,6 +106,11 @@ export function buildCompatibleSpeechProvider(engine: CompatibleSpeechEngine) {
       const voice = string(overrides.voice) ?? string(config.voice) ?? (engine === "irodori" ? "none" : undefined);
       if (!voice) throw new Error("speech.cpp voice must name an existing registered voice");
       if (!req.text.trim()) throw new Error("Speech text must not be empty");
+      const input = applyPronunciationReplacements(req.text, resolvePronunciationReplacements({
+        pronunciationReplacements: config.pronunciationReplacements,
+        pronunciationReplacementsPath: config.pronunciationReplacementsPath,
+      }));
+      if (!input.trim()) throw new Error("Speech text must not be empty after pronunciation replacements");
       const speed = overrides.speed ?? config.speed ?? 1;
       if (typeof speed !== "number" || !Number.isFinite(speed) || speed < 0.25 || speed > 4) {
         throw new Error("Speech speed must be between 0.25 and 4");
@@ -124,7 +130,7 @@ export function buildCompatibleSpeechProvider(engine: CompatibleSpeechEngine) {
       const payload = {
         ...(engine === "speech-cpp" ? options : {}),
         ...(model ? { model } : {}),
-        input: req.text,
+        input,
         voice,
         speed,
         response_format: "wav",
