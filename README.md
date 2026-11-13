@@ -86,6 +86,8 @@ speech.cppは `speech serve` でAPIを提供し、登録声は `/v1/models` か�
 
 speech.cppでは同じフィールドを `tts.providers.speech-cpp` に設定します。たとえば `"pronunciationReplacementsPath": "~/.openclaw/settings/speech-cpp-pronunciation.json"` と指定し、辞書に `{"Malwarebytes":"マルウェアバイツ"}` を登録します。辞書は合成ごとに再読込するため、登録語の追加にサーバーやGatewayの再起動は不要です。Irodoriの表現注釈は、登録語に一致しない限りそのまま保持します。
 
+複数のproviderで読みをそろえたい場合は、各providerの `pronunciationReplacementsPath` に同じファイルを指定します。providerごとの設定は独立したままなので、共有は明示的なパス指定だけで成立します。Herdrのように大文字小文字違いが別キーになる点は共通です。
+
 ## 前提条件
 
 - OpenClaw `>= 2026.11.1` (最新の公開版を基準とした互換性下限。古いhost向けの互換分岐は持ちません)
