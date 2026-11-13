@@ -2,15 +2,15 @@
 
 ## まず対象のエンジンを分ける
 
-英単語、略語、製品名、モデル名などを、自然な会話文の中で意図した読み方に直したい場合は、まず実際に選ばれている provider を確認します。この bridge の **style-bert-vits2** provider には、bridge 側の **pronunciationReplacements** と **pronunciationReplacementsPath** が適用されます。
+英単語、略語、製品名、モデル名などを、自然な会話文の中で意図した読み方に直したい場合は、まず実際に選ばれている provider を確認します。この bridge の **style-bert-vits2**、**irodori**、**speech-cpp** provider は、bridge 側の **pronunciationReplacements** と **pronunciationReplacementsPath** に対応します。
 
 これは SBV2 本体の user_dict ではありません。SBV2 の user_dict は OpenJTalk / pyopenjtalk 側の日本語辞書で、表記、読み、アクセント、品詞、優先度などを持つエンジン用データです。bridge の辞書は、合成前の本文に対する単純な文字列置換であり、アクセントや品詞を登録したり、SBV2 サーバーの辞書を更新したりしません。user_dict 用の JSON、CSV、コンパイル済み辞書を **pronunciationReplacementsPath** に指定してはいけません。
 
-現状の **irodori** と **speech-cpp** provider には、この SBV2 用置換処理はありません。両 provider は受け取った本文をそれぞれの API へ渡すため、style-bert-vits2 用設定に辞書を足しても Irodori や speech.cpp の読みは変わりません。Irodori の囁き、笑い、間などは、引き続き **irodori-production** の本文制御を使い、発音辞書の効果を別エンジンへ推測で広げないでください。
+辞書設定はproviderごとに独立しています。**irodori** と **speech-cpp** は、自身のprovider設定から辞書を合成ごとに読み、APIへ渡す `input` だけを置換します。style-bert-vits2用の設定を自動継承しないため、利用中providerに明示設定してください。Irodori の囁き、笑い、間などは、引き続き **irodori-production** の本文制御を使います。登録語に一致しない注釈や本文は保持し、表示文・声・モデル・話速は変更しません。
 
 ## 設定の入口
 
-設定は OpenClaw の **tts.providers.style-bert-vits2** に置きます。既存の provider 設定を先に読み、共有したい辞書は **pronunciationReplacementsPath**、少数の設定をその場で持たせる場合は **pronunciationReplacements** を使います。両方を同時に指定できます。
+設定は OpenClaw の **tts.providers.<利用中provider>** に置きます。既存の provider 設定を先に読み、共有したい辞書は **pronunciationReplacementsPath**、少数の設定をその場で持たせる場合は **pronunciationReplacements** を使います。両方を同時に指定できます。以下はSBV2の例です。Irodoriは `tts.providers.irodori`、speech.cppは `tts.providers.speech-cpp` に同じフィールドを設定します。
 
 外部ファイルを使う最小の provider 設定は次の形です。これは既存の style-bert-vits2 設定にフィールドを追加する例で、既存の接続先や voice 設定を置き換える例ではありません。
 
@@ -67,11 +67,11 @@ SBV2 の合成要求ごとに、bridge は次の順で処理します。
 
 ## エージェントの運用手順
 
-1. 読み上げに使われる provider が **style-bert-vits2** かを確認します。別 provider なら、この辞書を編集しても効果はありません。
+1. 読み上げに使われる provider を確認します。対応する **style-bert-vits2** / **irodori** / **speech-cpp** 自身の設定と辞書パスだけを使います。旧版のbridgeでIrodori/speech.cpp経路に読み置換が未実装なら、辞書編集だけで反映済みと扱わないでください。
 2. その語が自然な会話文として読み上げたい対象かを確認します。製品名、固有名詞、略語、専門語を繰り返し誤読する場合だけ登録候補にします。
 3. 既存の **pronunciationReplacementsPath** があれば、先にファイル全体を読み、既存エントリを保持してから追加します。新しい共有辞書を作る場合は、値が文字列だけの JSON オブジェクトにします。
 4. 本文に現れる表記と、実際に聞かせたい読みを一組で登録します。大文字小文字、空白、ハイフンなどが違う表記は別のキーとして必要です。置換後の読みで別の登録語を意図せず変えないよう、重なった辞書は避けます。
-5. 短い自然文を同じ provider で試し、実際に SBV2 へ送られる本文の読みを確認します。設定が有効でも、Irodori や speech.cpp の音声を SBV2 の結果として扱わないでください。
+5. 短い自然文を同じ provider で試し、実際に利用中APIへ送られる本文の読みを確認します。辞書追加だけなら音声の再生成やサービス再起動は不要で、JSONの再読込と既存語の保持を確認します。初回の経路実装・設定変更は、ビルド・反映・送信本文の検証まで分けて確認してください。
 
 URL、ログ、コマンド、JSON、ファイルパス、リポジトリ識別子、stack trace、GitHub の status 行を読みやすくするために、この辞書へ大量に登録してはいけません。それらは読み上げ対象から外す、要約する、自然な説明文へ書き換えるといった本文準備の問題です。辞書は、読み上げると決めた自然文の中の語の読みだけを直す場所です。
 
@@ -90,4 +90,4 @@ URL、ログ、コマンド、JSON、ファイルパス、リポジトリ識別�
 }
 ```
 
-この辞書はSBV2への合成本文に適用され、表示本文や別providerは変更しません。英語のまま読ませたい文を自動判定して置換対象から外す機能はありません。その必要がある語は共通辞書への無条件登録を避け、用途別の設定を使います。読み間違いが語の置換ではなくアクセントや日本語の形態解析に由来するなら、bridge 辞書を増やす前に SBV2 側の user_dict を検討します。
+この辞書は設定したproviderへの合成本文に適用され、表示本文や別providerは変更しません。英語のまま読ませたい文を自動判定して置換対象から外す機能はありません。その必要がある語は共通辞書への無条件登録を避け、用途別の設定を使います。読み間違いが語の置換ではなくアクセントや日本語の形態解析に由来するなら、bridge 辞書を増やす前に利用中エンジンの対応範囲を確認します。SBV2ではuser_dictを検討できますが、Irodori/speech.cppの厳密なピッチアクセント制御に流用しません。

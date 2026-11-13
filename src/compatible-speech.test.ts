@@ -2,6 +2,9 @@ import { speechRequest } from "./speech.test-support.js";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { buildCompatibleSpeechProvider } from "./compatible-speech.js";
 import { IRODORI_ANNOTATIONS } from "./irodori-expressions.js";
+import { mkdtempSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import path from "node:path";
 
 function wav(): Buffer {
   const data = Buffer.alloc(46);
@@ -78,6 +81,59 @@ describe("local OpenAI-compatible speech providers", () => {
       text: "本来の本文", providerConfig: { baseUrl: "http://localhost:8766", voice: "B", speechOptions: { steps: 4, input: "wrong", response_format: "mp3" } },
     }));
     expect(JSON.parse(fetch.mock.calls[0][1].body)).toEqual({ steps: 4, input: "本来の本文", voice: "B", speed: 1, response_format: "wav" });
+  });
+
+  it.each(["irodori", "speech-cpp"] as const)("applies only configured %s pronunciation replacements to speech text", async (engine) => {
+    const fetch = vi.fn().mockImplementation(() => Promise.resolve(new Response(new Uint8Array(wav()))));
+    vi.stubGlobal("fetch", fetch);
+    const directory = mkdtempSync(path.join(tmpdir(), "speech-pronunciation-"));
+    const dictionary = path.join(directory, "readings.json");
+    writeFileSync(dictionary, JSON.stringify({ Malwarebytes: "マルウェアバイツ", API: "エーピーアイ" }));
+    const provider = buildCompatibleSpeechProvider(engine);
+    const text = "🍵 MalwarebytesのAPIを確認する。";
+    const req = speechRequest({
+      text,
+      providerConfig: {
+        baseUrl: "http://localhost:8766", voice: "B", model: "irodori-test", speed: 1,
+        pronunciationReplacementsPath: dictionary,
+        pronunciationReplacements: { API: "エーピーアイ接続" },
+      },
+    });
+    await provider.synthesize(req);
+    expect(JSON.parse(fetch.mock.calls[0][1].body)).toMatchObject({
+      input: "🍵 マルウェアバイツのエーピーアイ接続を確認する。", voice: "B", model: "irodori-test", speed: 1, response_format: "wav",
+    });
+    expect(req.text).toBe(text);
+    writeFileSync(dictionary, JSON.stringify({ Malwarebytes: "別の読み" }));
+    await provider.synthesize(req);
+    expect(JSON.parse(fetch.mock.calls[1][1].body).input).toBe("🍵 別の読みのエーピーアイ接続を確認する。");
+  });
+
+  it.each(["irodori", "speech-cpp"] as const)("matches %s replacements case-sensitively with longer keys first", async (engine) => {
+    const fetch = vi.fn().mockImplementation(() => Promise.resolve(new Response(new Uint8Array(wav()))));
+    vi.stubGlobal("fetch", fetch);
+    await buildCompatibleSpeechProvider(engine).synthesize(speechRequest({
+      text: "Herdrと HERDR_PROBE、HERDR、herdr",
+      providerConfig: {
+        baseUrl: "http://localhost:8766", voice: "B",
+        pronunciationReplacements: { HERDR: "ハーダー", Herdr: "ハーダー", HERDR_PROBE: "ハーダー プローブ" },
+      },
+    }));
+    expect(JSON.parse(fetch.mock.calls[0][1].body).input).toBe("ハーダーと ハーダー プローブ、ハーダー、herdr");
+  });
+
+  it.each(["irodori", "speech-cpp"] as const)("rejects invalid %s dictionaries before contacting the speech server", async (engine) => {
+    const fetch = vi.fn();
+    vi.stubGlobal("fetch", fetch);
+    const directory = mkdtempSync(path.join(tmpdir(), "speech-pronunciation-invalid-"));
+    const dictionary = path.join(directory, "readings.json");
+    writeFileSync(dictionary, JSON.stringify({ Malwarebytes: 42 }));
+    await expect(buildCompatibleSpeechProvider(engine).synthesize(speechRequest({
+      text: "Malwarebytesを確認する。", providerConfig: {
+        baseUrl: "http://localhost:8766", voice: "B", pronunciationReplacementsPath: dictionary,
+      },
+    }))).rejects.toThrow("JSON object of string values");
+    expect(fetch).not.toHaveBeenCalled();
   });
 
   it("retains reverse-proxy prefixes", async () => {

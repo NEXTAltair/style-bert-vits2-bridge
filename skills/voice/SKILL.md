@@ -9,7 +9,7 @@ description: "Style-Bert-VITS2のモデル・speaker・style選択とFastAPIの�
 
 Irodoriやspeech.cpp上のIrodoriで「囁いて」「笑いを交えて」「間を入れて」などを依頼された場合は、SBV2の起動・style選択へ進まず、`irodori-production` の [本文の絵文字制御](../irodori-production/references/emoji-controls.md) を使います。モデルが異なれば絵文字の意味も共通とは限りません。
 
-SBV2の会話文で英単語・略語・固有名詞の読みを直す場合は、bridgeの `pronunciationReplacements` / `pronunciationReplacementsPath` を使います。設定の入口、ファイル形式、読み込み順、対象providerの見分け方は [発音置換の登録と確認](./references/pronunciation-replacements.md) を参照してください。Irodoriやspeech.cppへ同じ辞書が自動適用されるとは扱いません。
+会話文で英単語・略語・固有名詞の読みを直す場合は、bridgeの `pronunciationReplacements` / `pronunciationReplacementsPath` を使います。SBV2・Irodori・speech.cppの各providerが対応しますが、辞書設定はproviderごとに独立しています。設定の入口、ファイル形式、読み込み順、対象providerの見分け方は [発音置換の登録と確認](./references/pronunciation-replacements.md) を参照してください。別providerの設定を自動継承するとは扱いません。
 
 ## SBV2 FastAPI の起動確認
 

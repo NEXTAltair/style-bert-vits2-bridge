@@ -55,9 +55,9 @@ speech.cppは `speech serve` でAPIを提供し、登録声は `/v1/models` か�
 
 対象はIrodoriモデルだけで、speech.cppでは対応Irodoriのmodel IDを明示します。Qwen用ト書きの自動生成・変換はしません。TTSのON/OFFや声も変えません。現時点では `trigger=user` のturnのみが対象で、入力音声の有無を確定できない `auto=inbound` ではガイドを省略し、通常TTSを維持します。モデル判断・手動台本の優先・表示/音声本文の分離・旧hostの挙動は[運用ガイド](skills/irodori-production/references/expressive-speech.md)、責務境界は[ADR 0007](doc/adr/0007-irodori-expressive-speech.md)を参照してください。
 
-## 英単語・略語の読み仮名を登録する (SBV2)
+## 英単語・略語の読み仮名を登録する
 
-「CUDAや製品名の読みを直したい」場合は、SBV2本体の `user_dict` より先に、bridgeの `tts.providers.style-bert-vits2.pronunciationReplacementsPath` / `pronunciationReplacements` を確認します。これは自然な会話文中の語の置換であり、アクセント辞書ではありません。現状Irodori/speech.cppには適用されません。
+「CUDAや製品名の読みを直したい」場合は、利用中providerの `tts.providers.<provider>.pronunciationReplacementsPath` / `pronunciationReplacements` を確認します。`style-bert-vits2`、`irodori`、`speech-cpp` が対応しています。これは自然な会話文中の語の置換であり、アクセント辞書ではありません。各providerは自身の設定だけを読み、別providerの辞書を自動継承しません。
 
 既存provider設定へ次のフィールドを追加します。既存の接続先やvoiceを置き換えないでください。
 
@@ -83,6 +83,8 @@ speech.cppは `speech serve` でAPIを提供し、登録声は `/v1/models` か�
 ファイルを土台にインライン辞書を重ね、同じキーはインラインを優先します。`~/`はホーム、それ以外の相対パスはGatewayプロセスの作業ディレクトリ基準。大文字小文字を区別したリテラル置換で、長いキーから処理します。URL・ログ・コマンド・JSONを読ませるための辞書にはしません。通常のOC経路では音声専用本文にも適用され得るため、`[[tts:text]]`を辞書回避の手段にしないでください。
 
 エージェント向けの手順・形式・確認方法は[読み仮名登録ガイド](skills/voice/references/pronunciation-replacements.md)。設定項目の説明はmanifestのconfig schema/UI hintsからも参照できます。専用の辞書書込みツールは登録せず、既存のファイル編集・設定管理で扱います。
+
+speech.cppでは同じフィールドを `tts.providers.speech-cpp` に設定します。たとえば `"pronunciationReplacementsPath": "~/.openclaw/settings/speech-cpp-pronunciation.json"` と指定し、辞書に `{"Malwarebytes":"マルウェアバイツ"}` を登録します。辞書は合成ごとに再読込するため、登録語の追加にサーバーやGatewayの再起動は不要です。Irodoriの表現注釈は、登録語に一致しない限りそのまま保持します。
 
 ## 前提条件
 
