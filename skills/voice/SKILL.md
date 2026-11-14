@@ -116,7 +116,7 @@ SBV2 の style は `style_vectors.npy` の行と `config.json` の `data.style2i
 辞書に追加してよいもの:
 
 - 製品名: `Style-Bert-VITS2`, `OpenClaw`
-- モデル名: `SBV2`, `Valentina`
+- モデル種別・略称: `SBV2`, `Jvnv`
 - よく使う略語: `API`, `TTS`
 - 固有名詞や専門語で、モデルが自然な会話文の中で繰り返し読み間違えるもの
 
@@ -141,11 +141,11 @@ SBV2 の style は `style_vectors.npy` の行と `config.json` の `data.style2i
 3. 会話文中の固有名詞、製品名、略語、専門語の継続的な読み間違いなら辞書に追加する。
 4. 置換後の文が SBV2 `/voice` の text hard limit を超えないことを確認する。
 
-## Valentina style / emotion 選択
+## カスタムモデルの style / emotion 選択
 
-Valentina 系モデルの style は SBV2 共通の emotion taxonomy ではなく、モデルごとの `style2id` に定義された style 名です。`/docs` は API 仕様確認用であり、ロード済みモデル情報は `/models/info` で確認できます。
+各モデルの style は SBV2 共通の emotion taxonomy ではなく、モデルごとの `style2id` に定義された style 名です。`/docs` は API 仕様確認用であり、ロード済みモデル情報は `/models/info` で確認できます。
 
-Valentina などの style 対応モデルでは、まず現在使う `model_name` と `speaker_name` を声の同一性として固定します。その後、現在の感情、文脈、応答温度に合わせて `style2id` 内の style を動的に選びます。
+複数 style に対応するモデルでは、まず現在使う `model_name` と `speaker_name` を声の同一性として固定します。その後、現在の感情、文脈、応答温度に合わせて `style2id` 内の style を動的に選びます。
 
 `clear`、`soft`、`serious`、`alert` などの tone は、エージェントが文脈に応じて style を選ぶための分類名です。該当する実 style が無いモデルでは `Neutral` を使い、必要なら推論パラメータで控えめに調整します。
 
@@ -167,7 +167,7 @@ Valentina などの style 対応モデルでは、まず現在使う `model_name
 1. まず `/models/info` でロード済みモデルとスピーカーを確認する
 2. ユーザーの要望に近い声色の model / speaker を選ぶ
 3. 同じ声の表情だけを変える場合は model / speaker を維持し、style だけを変える
-4. Valentina 系は `style2id` に存在する style だけを候補にする
+4. style 対応モデルは `style2id` に存在する style だけを候補にする
 5. `style_weight` はエージェントまたは呼び出し側が文脈に応じて決める
 6. 話速は 0.8〜1.2 の範囲が自然
 

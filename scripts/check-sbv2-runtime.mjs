@@ -8,7 +8,7 @@ import { resolveVoiceProfile } from "../dist/voice-resolver.js";
 
 const DEFAULT_BASE_URL = "http://127.0.0.1:5000";
 const DEFAULT_CONFIG_PATH = `${homedir()}/.openclaw/openclaw.json`;
-const DEFAULT_EXPECTED_MODELS = ["valentina01_bright"];
+const DEFAULT_EXPECTED_MODELS = [];
 const DEFAULT_TIMEOUT_MS = 30_000;
 
 function parseArgs(argv) {
@@ -61,7 +61,7 @@ Options:
                             OpenClaw provider config, then ${DEFAULT_BASE_URL}
   --config <path>           OpenClaw config path. Defaults to ${DEFAULT_CONFIG_PATH}
   --expect-model <name>     Model name expected in /models/info. Repeatable or comma-separated.
-                            Defaults to ${DEFAULT_EXPECTED_MODELS.join(", ")}
+                            Defaults to the configured default model when set.
   --timeout-ms <ms>         Request timeout in milliseconds. Defaults to ${DEFAULT_TIMEOUT_MS}.
   --json                    Print machine-readable JSON.
   -h, --help                Show this help.

@@ -9,8 +9,8 @@ import {
 
 const modelInfo: Sbv2ModelInfo[] = [
   {
-    name: "valentina01_bright",
-    speakers: [{ id: 0, name: "valentina01_bright" }],
+    name: "sample_voice",
+    speakers: [{ id: 0, name: "sample_voice" }],
     styles: [{ id: 0, name: "00_Neutral" }],
     raw: {},
   },
@@ -29,16 +29,79 @@ function client(models = modelInfo) {
 }
 
 describe("resolveVoiceProfile", () => {
-  it("resolves the Valentina hard default without explicit config", async () => {
+  it("resolves the first loaded model from /models/info without explicit config", async () => {
+    expect(DEFAULT_VOICE_PROFILE).toEqual({
+      voiceId: "default",
+      language: "JP",
+    });
+
     await expect(
       resolveVoiceProfile({
         client: client(),
         providerConfig: {},
       }),
-    ).resolves.toEqual(DEFAULT_VOICE_PROFILE);
+    ).resolves.toEqual({
+      voiceId: "default",
+      modelName: "sample_voice",
+      speakerName: "sample_voice",
+      style: "00_Neutral",
+      language: "JP",
+    });
   });
 
-  it("lets provider config defaults override bridge hard defaults", async () => {
+  it("prefers Neutral over 00_Neutral and falls back to first style when resolving default model", async () => {
+    await expect(
+      resolveVoiceProfile({
+        client: client([
+          {
+            name: "first-model",
+            speakers: [{ id: 0, name: "first-speaker" }],
+            styles: [
+              { id: 0, name: "Happy" },
+              { id: 1, name: "00_Neutral" },
+              { id: 2, name: "Neutral" },
+            ],
+            raw: {},
+          },
+        ]),
+        providerConfig: {},
+      }),
+    ).resolves.toEqual({
+      voiceId: "default",
+      modelName: "first-model",
+      speakerName: "first-speaker",
+      style: "Neutral",
+      language: "JP",
+    });
+
+    await expect(
+      resolveVoiceProfile({
+        client: client([
+          {
+            name: "expressive-only",
+            speakers: [],
+            styles: [{ id: 0, name: "Calm" }],
+            raw: {},
+          },
+        ]),
+        providerConfig: {},
+      }),
+    ).resolves.toEqual({
+      voiceId: "default",
+      modelName: "expressive-only",
+      style: "Calm",
+      language: "JP",
+    });
+
+    await expect(
+      resolveVoiceProfile({
+        client: client([]),
+        providerConfig: {},
+      }),
+    ).rejects.toThrow("SBV2 model could not be resolved from the selected voice profile");
+  });
+
+  it("lets provider config defaults override bridge defaults", async () => {
     await expect(
       resolveVoiceProfile({
         client: client(),
@@ -74,8 +137,8 @@ describe("resolveVoiceProfile", () => {
           defaultNoisew: 0.55,
         },
         providerOverrides: {
-          modelName: "valentina01_bright",
-          speakerName: "valentina01_bright",
+          modelName: "sample_voice",
+          speakerName: "sample_voice",
           style: "00_Neutral",
           styleWeight: 0.7,
           sdpRatio: 0.1,
@@ -85,8 +148,8 @@ describe("resolveVoiceProfile", () => {
         },
       }),
     ).resolves.toMatchObject({
-      modelName: "valentina01_bright",
-      speakerName: "valentina01_bright",
+      modelName: "sample_voice",
+      speakerName: "sample_voice",
       style: "00_Neutral",
       styleWeight: 0.7,
       sdpRatio: 0.15,
@@ -106,8 +169,8 @@ describe("resolveVoiceProfile", () => {
           defaultStyle: "Neutral",
         },
         providerContextOverrides: {
-          modelName: "valentina01_bright",
-          speakerName: "valentina01_bright",
+          modelName: "sample_voice",
+          speakerName: "sample_voice",
           style: "00_Neutral",
         },
         providerOverrides: {
@@ -116,8 +179,8 @@ describe("resolveVoiceProfile", () => {
         },
       }),
     ).resolves.toMatchObject({
-      modelName: "valentina01_bright",
-      speakerName: "valentina01_bright",
+      modelName: "sample_voice",
+      speakerName: "sample_voice",
       style: "00_Neutral",
       styleWeight: 0.7,
     });
@@ -170,9 +233,9 @@ describe("resolveVoiceProfile", () => {
     const result = await resolveVoiceProfile({
       client: client([
         {
-          name: "valentina01_bright",
+          name: "sample_voice",
           speakers: [
-            { id: 0, name: "valentina01_bright" },
+            { id: 0, name: "sample_voice" },
             { id: 1, name: "second-speaker" },
           ],
           styles: [{ id: 0, name: "00_Neutral" }],
@@ -296,8 +359,8 @@ describe("voice resolver helpers", () => {
         name: "custom-speaker (custom-model)",
       },
       {
-        id: "sbv2:valentina01_bright:valentina01_bright:00_Neutral",
-        name: "valentina01_bright (valentina01_bright)",
+        id: "sbv2:sample_voice:sample_voice:00_Neutral",
+        name: "sample_voice (sample_voice)",
       },
     ]);
   });

@@ -250,10 +250,10 @@ describe("Sbv2Client", () => {
       ok: true,
       json: () =>
         Promise.resolve({
-          valentina01_bright: {
+          sample_voice: {
             id: 2,
-            spk2id: { valentina01_bright: 0 },
-            id2spk: { "0": "valentina01_bright" },
+            spk2id: { sample_voice: 0 },
+            id2spk: { "0": "sample_voice" },
             style2id: { "00_Neutral": 0, Happy: 1 },
           },
         }),
@@ -268,10 +268,10 @@ describe("Sbv2Client", () => {
     expect(url.pathname).toBe("/models/info");
     expect(result).toMatchObject([
       {
-        sourceId: "valentina01_bright",
-        name: "valentina01_bright",
+        sourceId: "sample_voice",
+        name: "sample_voice",
         id: 2,
-        speakers: [{ id: 0, name: "valentina01_bright" }],
+        speakers: [{ id: 0, name: "sample_voice" }],
         styles: [
           { id: 0, name: "00_Neutral" },
           { id: 1, name: "Happy" },
@@ -393,16 +393,16 @@ describe("Sbv2Client", () => {
     expect(
       normalizeModelsInfo({
         "2": {
-          config_path: "model_assets/valentina01_bright/config.json",
-          spk2id: { valentina01_bright: 0 },
+          config_path: "model_assets/sample_voice/config.json",
+          spk2id: { sample_voice: 0 },
         },
       }),
     ).toMatchObject([
       {
         sourceId: "2",
         id: 2,
-        name: "valentina01_bright",
-        speakers: [{ id: 0, name: "valentina01_bright" }],
+        name: "sample_voice",
+        speakers: [{ id: 0, name: "sample_voice" }],
       },
     ]);
   });
