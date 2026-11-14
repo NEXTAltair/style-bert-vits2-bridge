@@ -29,7 +29,7 @@ OpenClaw の config や directive からこれらを直接すべて露出する�
 
 Bridge は SBV2 parameter を直接公開するのではなく、voice profile resolver を中心に解決する。
 
-この方針は第二段階の `/models/info` 検証、Valentina 既定 profile、directive whitelist、Talk params override 実装で採用済みとする。
+この方針は `/models/info` 検証、既定 profile 解決、directive whitelist、Talk params override 実装で採用済みとする。
 
 Voice profile は、OpenClaw 側から扱いやすい `voice` または `voiceId` を、SBV2 の具体的な model/speaker/style defaults に変換する単位とする。
 
@@ -58,7 +58,7 @@ Parameter precedence は次の順にする。
 3. provider config defaults。
 4. bridge hard defaults。
 
-Bridge hard defaults は、SBV2 が暗黙に `model_id=0` へ落ちることを避けるため、設定または profile resolver が利用できる場合は明示的な Valentina 系 profile を優先する。現時点の既定候補は `valentina01_bright` / `valentina01_bright` / `00_Neutral` とする。
+Bridge defaults (`voiceId: "default"`, `language: "JP"`) は配布物に個人環境固有のモデル名を埋め込まず、operator config で `defaultModelName` / `defaultModelId` が未指定の場合は `/models/info` の先頭モデル（話者は先頭スピーカー、スタイルは `Neutral` → `00_Neutral` → 先頭スタイルの順）を解決する。ロード順に依存せず特定の声を固定したい環境では、operator が `defaultModelName` / `defaultSpeakerName` / `defaultStyle` を明示する。
 
 `/models/info` を使って、少なくとも次を検証する。
 
@@ -96,7 +96,7 @@ Voice profile resolver を中心にすると、`/tts` directive、Talk mode、UI
 
 良い点:
 
-- `amitaro` など SBV2 の `model_id=0` fallback に意図せず落ちる問題を避けやすい。
+- 個人モデル名をハードコードせず `/models/info` から安全に既定解決しつつ、`defaultModelName` 明示時はロード順 fallback に意図せず落ちる問題を避けられる。
 - directive、Talk、UI が同じ voice/profile semantics を共有できる。
 - 不正な model/speaker/style を SBV2 の 422 生ログではなく operator-friendly error にできる。
 - provider config と per-request override の優先順位が明確になる。

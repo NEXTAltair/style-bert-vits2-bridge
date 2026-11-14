@@ -99,7 +99,7 @@ speech.cppでは同じフィールドを `tts.providers.speech-cpp` に設定し
 ビルド済み配布物は [GitHub Releases](https://github.com/NEXTAltair/style-bert-vits2-bridge/releases) から取得できます。
 
 ```bash
-openclaw plugins install ./style-bert-vits2-bridge-0.3.1.tgz
+openclaw plugins install ./style-bert-vits2-bridge-0.5.1.tgz
 ```
 
 変更点は [CHANGELOG](CHANGELOG.md) を参照してください。以下は開発用のリンクインストールです。
@@ -138,9 +138,9 @@ openclaw plugins inspect style-bert-vits2-bridge --runtime --json
         "baseUrl": "http://127.0.0.1:5000",
         // オプション
         "timeoutMs": 30000,
-        "defaultModelName": "valentina01_bright",
-        "defaultSpeakerName": "valentina01_bright",
-        "defaultStyle": "00_Neutral",
+        "defaultModelName": "my_voice",
+        "defaultSpeakerName": "my_speaker",
+        "defaultStyle": "Neutral",
         "defaultLanguage": "JP"
       }
     }
@@ -148,19 +148,19 @@ openclaw plugins inspect style-bert-vits2-bridge --runtime --json
 }
 ```
 
-`baseUrl` が設定されていればプロバイダーは有効になります。明示指定がない場合、bridge は `valentina01_bright` / `valentina01_bright` / `00_Neutral` を既定 profile として解決します。
+`baseUrl` が設定されていればプロバイダーは有効になります。明示指定がない場合、bridge は `/models/info` の先頭モデル（話者は先頭スピーカー、スタイルは `Neutral` → `00_Neutral` → 先頭スタイルの順）を既定 profile (`voiceId: "default"`) として解決します。
 
-SBV2 側の暗黙既定に任せると `model_id=0` に落ちます。観測環境では `model_id=0` が `amitaro` だったため、Valentina 系を使いたい場合は上のように `defaultModelName`、`defaultSpeakerName`、`defaultStyle` を明示してください。
+モデルのロード順（先頭モデル）に依存せず特定の声を固定したい場合は、上のように `defaultModelName`、`defaultSpeakerName`、`defaultStyle` を明示してください。
 
 `defaultModelName` と `defaultSpeakerName` は声の同一性を決めます。`defaultStyle` はそのモデル内の初期表情です。別の声にしたい場合は model / speaker を変え、同じ声の表情だけを変えたい場合は `/models/info` の `style2id` に存在する style を directive や Talk params から切り替えます。
 
-Valentina 系の推奨開始点は次の通りです。
+明示設定を行う場合の推奨開始点は次の通りです。
 
 | キー | 推奨値 | 備考 |
 |------|------|------|
-| `defaultModelName` | `valentina01_bright` | `/models/info` の model name と一致させる |
-| `defaultSpeakerName` | `valentina01_bright` | speaker name を優先して指定する |
-| `defaultStyle` | `00_Neutral` | まず neutral で確認してから style を変える |
+| `defaultModelName` | `my_voice` | `/models/info` の model name と一致させる |
+| `defaultSpeakerName` | `my_speaker` | speaker name を優先して指定する |
+| `defaultStyle` | `Neutral` | まず neutral 系（`Neutral` または `00_Neutral`）で確認してから style を変える |
 | `defaultLanguage` | `JP` | 日本語入力の通常値 |
 | `defaultStyleWeight` | 未指定または控えめな値 | 強くしすぎると音声が崩れやすい |
 | `defaultLength` | 未指定または `1` 前後 | 大きいほど遅く、小さいほど速い |
@@ -188,7 +188,7 @@ bridge は SBV2 `/voice` への送信直前に本文上限を検査します。`
 | `defaultModelId` / `modelId` | integer | デフォルトのモデル ID（0 始まり） |
 | `defaultSpeakerId` / `speakerId` | integer | デフォルトのスピーカー ID（0 始まり） |
 | `defaultSpeakerName` / `speakerName` | string | デフォルトのスピーカー名（`speakerId` より優先） |
-| `defaultStyle` / `style` | string | デフォルトのスタイル。bridge 既定は `"00_Neutral"` |
+| `defaultStyle` / `style` | string | デフォルトのスタイル。未指定時はモデルの `Neutral` → `00_Neutral` → 先頭スタイル |
 | `defaultStyleWeight` / `styleWeight` | number | スタイルの強さ |
 | `defaultLength` / `length` | number | 話速相当。大きいほど遅く、小さいほど速い |
 | `defaultAssistText` / `assistText` | string | 感情補助テキスト |
@@ -241,7 +241,7 @@ curl -fsS http://127.0.0.1:5000/models/info
 
 ```bash
 pnpm run check:sbv2
-pnpm run check:sbv2 -- --base-url http://127.0.0.1:5000 --expect-model valentina01_bright
+pnpm run check:sbv2 -- --base-url http://127.0.0.1:5000 --expect-model my_voice
 ```
 
 このスクリプトは以下を確認します。
@@ -268,9 +268,9 @@ openclaw plugins inspect style-bert-vits2-bridge --runtime --json
 
 ```text
 /tts audio こんにちは。これは Style-Bert-VITS2 の確認です。
-/tts voice=sbv2:valentina01_bright:valentina01_bright:00_Neutral audio こんにちは。Valentina 指定の確認です。
-/tts model_name=valentina01_bright speaker_name=valentina01_bright style=00_Neutral audio こんにちは。
-/tts model_name=valentina01_bright speaker_name=valentina01_bright style=01_Bright audio こんにちは。同じモデルとスピーカーで style だけを変えた確認です。
+/tts voice=sbv2:my_voice:my_speaker:Neutral audio こんにちは。voice 指定の確認です。
+/tts model_name=my_voice speaker_name=my_speaker style=Neutral audio こんにちは。
+/tts model_name=my_voice speaker_name=my_speaker style=Happy audio こんにちは。同じモデルとスピーカーで style だけを変えた確認です。
 ```
 
 Talk mode では provider config の既定値に加えて、Talk params から `voice_id`、`model_name`、`speaker_name`、`style`、`rate`、`style_weight`、`assist_text` などを渡せます。`rate` は WPM として扱われ、SBV2 の `length` に変換されます。指定した model / speaker / style が `/models/info` に無い場合は、operator 向けに整形された validation error が返ります。
@@ -443,7 +443,7 @@ sbv2-bridge models merge-run \
 ```bash
 sbv2-bridge models rename-plan \
   --from-model-name voice_mp3_pathcheck_20260603_1828 \
-  --to-model-name valentina_custom \
+  --to-model-name my_voice_custom \
   --json
 ```
 
@@ -452,8 +452,8 @@ sbv2-bridge models rename-plan \
 ```bash
 sbv2-bridge models rename-run \
   --from-model-name voice_mp3_pathcheck_20260603_1828 \
-  --to-model-name valentina_custom \
-  --confirm-to-model-name valentina_custom \
+  --to-model-name my_voice_custom \
+  --confirm-to-model-name my_voice_custom \
   --base-url http://127.0.0.1:5000 \
   --json
 ```
@@ -470,7 +470,7 @@ sbv2-bridge models rename-run \
 
 ```bash
 sbv2-bridge evaluation run \
-  --model-name valentina_custom \
+  --model-name my_voice_custom \
   --base-url http://127.0.0.1:5000 \
   --json
 ```
@@ -512,9 +512,9 @@ debug log と telemetry には、読み上げ本文、`assistText`、音声バ�
 | `GET /status` が失敗する | SBV2 server 未起動、`baseUrl` 誤り、port違い | SBV2 FastAPI server を起動し、`baseUrl` を `http://127.0.0.1:5000` など実際のURLに合わせる |
 | `GET /models/info` が失敗する | モデル未ロード、SBV2 API 側のエラー | SBV2 側でモデル配置とロード状態を確認する |
 | `style-bert-vits2` が使われない | OpenClaw provider config、selected provider、fallback | `pnpm run check:sbv2` と `/tts status` の `Fallback` / `Attempts` を確認する |
-| Valentina のつもりが別声になる | SBV2 の `model_id=0` fallback、default profile 未指定 | `defaultModelName` / `defaultSpeakerName` を明示する。style 変更では声の同一性は変わらない |
+| 意図したモデルと別の声になる | `/models/info` の先頭モデル自動選択、default profile 未指定 | `defaultModelName` / `defaultSpeakerName` を明示する。style 変更では声の同一性は変わらない |
 | model / speaker / style validation error | `/models/info` と config / directive の不一致 | 実在する model / speaker / style 名に合わせる。style は agent が選ぶため bridge 側で重み付けしない |
-| 音声が不自然、感情が強すぎる | `style_weight`、`length`、`assist_text`、入力文 | まず `00_Neutral` と控えめな `style_weight` で確認し、その後に style や補助テキストを調整する |
+| 音声が不自然、感情が強すぎる | `style_weight`、`length`、`assist_text`、入力文 | まず `Neutral`（または `00_Neutral`）と控えめな `style_weight` で確認し、その後に style や補助テキストを調整する |
 | `/tts audio` は成功するが Control UI で見えない | OpenClaw surface 側の audio artifact 表示 | bridge ではなく OpenClaw 本体または surface 側 issue として扱う |
 | channel によって再生可否が違う | channel delivery、codec変換、voice-compatible artifact | bridge は `wav` を返し、必要な変換は OpenClaw channel 側で扱う |
 
@@ -553,7 +553,7 @@ dataset ingest workspace も agent workspace ではなく plugin runtime state �
 ```bash
 pnpm run build
 pnpm run sbv2-bridge -- datasets ingest \
-  --model-name valentina_custom \
+  --model-name my_voice_custom \
   --source /path/to/raw-audio-or-directory \
   --language ja \
   --use-jp-extra

@@ -15,10 +15,7 @@ export interface ResolveVoiceProfileOptions {
 }
 
 export const DEFAULT_VOICE_PROFILE: Sbv2ResolvedVoiceProfile = {
-  voiceId: "valentina01_bright",
-  modelName: "valentina01_bright",
-  speakerName: "valentina01_bright",
-  style: "00_Neutral",
+  voiceId: "default",
   language: "JP",
 };
 
@@ -91,14 +88,18 @@ function readOverrides(overrides: Record<string, unknown> | undefined): Partial<
     return {};
   }
 
+  const voice = trimToUndefined(overrides.voice);
+  const nonProfileVoiceSpeaker =
+    voice && !(voice in FIXED_PROFILES) && !voice.startsWith("sbv2:") ? voice : undefined;
+
   return withoutUndefined({
-    voiceId: trimToUndefined(overrides.voiceId) ?? trimToUndefined(overrides.voice),
+    voiceId: trimToUndefined(overrides.voiceId) ?? voice,
     modelName: trimToUndefined(overrides.modelName) ?? trimToUndefined(overrides.model),
     modelId: asNumber(overrides.modelId),
     speakerName:
       trimToUndefined(overrides.speakerName) ??
       trimToUndefined(overrides.speaker) ??
-      trimToUndefined(overrides.voice),
+      nonProfileVoiceSpeaker,
     speakerId: asNumber(overrides.speakerId),
     style: trimToUndefined(overrides.style),
     styleWeight: asNumber(overrides.styleWeight),
@@ -231,6 +232,23 @@ function assertStyle(model: Sbv2ModelInfo, params: Partial<Sbv2ResolvedVoiceProf
   }
 }
 
+function buildDefaultVoiceProfile(models: Sbv2ModelInfo[]): Sbv2ResolvedVoiceProfile {
+  const firstModel = models[0];
+  if (!firstModel) {
+    return { ...DEFAULT_VOICE_PROFILE };
+  }
+
+  const defaultSpeaker = firstModel.speakers[0];
+  const defaultStyle = pickDefaultStyle(firstModel.styles);
+  return withoutUndefined({
+    voiceId: DEFAULT_VOICE_PROFILE.voiceId,
+    modelName: firstModel.name,
+    speakerName: defaultSpeaker?.name,
+    style: defaultStyle?.name,
+    language: DEFAULT_VOICE_PROFILE.language,
+  }) as Sbv2ResolvedVoiceProfile;
+}
+
 export async function resolveVoiceProfile({
   client,
   providerConfig,
@@ -248,18 +266,39 @@ export async function resolveVoiceProfile({
   ) {
     throw new Error(`Malformed SBV2 voice ID "${selectedSbv2VoiceId}"`);
   }
-  const explicitProfile: Partial<Sbv2ResolvedVoiceProfile> = overrides.voiceId && !selectedSbv2VoiceId
-    ? findProfile(overrides.voiceId)
+  const requestedContextFixedProfile =
+    contextOverrides.voiceId && !contextOverrides.voiceId.startsWith("sbv2:")
+      ? findProfile(contextOverrides.voiceId)
+      : undefined;
+  const requestedFixedProfile =
+    overrides.voiceId && !selectedSbv2VoiceId ? findProfile(overrides.voiceId) : undefined;
+
+  const models = await client.getModelsInfo();
+  const defaultProfile = buildDefaultVoiceProfile(models);
+  const contextExplicitProfile: Partial<Sbv2ResolvedVoiceProfile> = requestedContextFixedProfile
+    ? requestedContextFixedProfile.voiceId === DEFAULT_VOICE_PROFILE.voiceId
+      ? defaultProfile
+      : requestedContextFixedProfile
+    : {};
+  const explicitProfile: Partial<Sbv2ResolvedVoiceProfile> = requestedFixedProfile
+    ? requestedFixedProfile.voiceId === DEFAULT_VOICE_PROFILE.voiceId
+      ? defaultProfile
+      : requestedFixedProfile
     : {};
 
-  const resolved: Sbv2ResolvedVoiceProfile = { ...DEFAULT_VOICE_PROFILE };
+  const resolved: Sbv2ResolvedVoiceProfile = { ...defaultProfile };
   applyVoiceLayer(resolved, configDefaults);
+  applyVoiceLayer(resolved, contextExplicitProfile);
   applyVoiceLayer(resolved, contextOverrides);
   applyVoiceLayer(resolved, explicitProfile);
   applyVoiceLayer(resolved, overrides);
-  resolved.voiceId = overrides.voiceId ?? explicitProfile.voiceId ?? DEFAULT_VOICE_PROFILE.voiceId;
+  resolved.voiceId =
+    overrides.voiceId ??
+    explicitProfile.voiceId ??
+    contextOverrides.voiceId ??
+    contextExplicitProfile.voiceId ??
+    defaultProfile.voiceId;
 
-  const models = await client.getModelsInfo();
   const model = findModel(models, resolved);
   assertSpeaker(model, resolved);
   assertStyle(model, resolved);

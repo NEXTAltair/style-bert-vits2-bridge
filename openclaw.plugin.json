@@ -2,7 +2,7 @@
   "id": "style-bert-vits2-bridge",
   "name": "Style-Bert-VITS2 Bridge",
   "description": "Local speech and voice-production bridge for Style-Bert-VITS2, Irodori-TTS, and speech.cpp.",
-  "version": "0.5.0",
+  "version": "0.5.1",
   "contracts": {
     "speechProviders": ["style-bert-vits2", "irodori", "speech-cpp"]
   },
@@ -109,7 +109,7 @@
     },
     "defaultModelName": {
       "label": "Default Model Name",
-      "placeholder": "valentina01_bright"
+      "placeholder": "my_voice"
     },
     "defaultSpeakerId": {
       "label": "Default Speaker ID",
@@ -117,11 +117,11 @@
     },
     "defaultSpeakerName": {
       "label": "Default Speaker Name",
-      "placeholder": "valentina01_bright"
+      "placeholder": "my_speaker"
     },
     "defaultStyle": {
       "label": "Default Style",
-      "placeholder": "00_Neutral"
+      "placeholder": "Neutral"
     },
     "defaultNoise": {
       "label": "Default Noise",

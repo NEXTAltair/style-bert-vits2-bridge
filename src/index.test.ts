@@ -13,10 +13,10 @@ const wavBytes = new Uint8Array([
   0x57, 0x41, 0x56, 0x45,
 ]);
 
-const valentinaModelsInfo = {
-  valentina01_bright: {
-    spk2id: { valentina01_bright: 0 },
-    id2spk: { "0": "valentina01_bright" },
+const sampleModelsInfo = {
+  sample_voice: {
+    spk2id: { sample_voice: 0 },
+    id2spk: { "0": "sample_voice" },
     style2id: { "00_Neutral": 0, "01_Bright": 1 },
   },
 };
@@ -98,7 +98,7 @@ describe("Style-Bert-VITS2 speech provider", () => {
       .mockRejectedValueOnce(new Error("connect ECONNREFUSED"))
       .mockResolvedValueOnce({
         ok: true,
-        json: () => Promise.resolve(valentinaModelsInfo),
+        json: () => Promise.resolve(sampleModelsInfo),
       })
       .mockResolvedValueOnce({
         ok: true,
@@ -140,7 +140,7 @@ describe("Style-Bert-VITS2 speech provider", () => {
       .mockResolvedValueOnce(openApiTextLimit(400))
       .mockResolvedValueOnce({
         ok: true,
-        json: () => Promise.resolve(valentinaModelsInfo),
+        json: () => Promise.resolve(sampleModelsInfo),
       })
       .mockResolvedValueOnce({
         ok: true,
@@ -182,7 +182,7 @@ describe("Style-Bert-VITS2 speech provider", () => {
       .mockResolvedValueOnce(openApiTextLimit(100))
       .mockResolvedValueOnce({
         ok: true,
-        json: () => Promise.resolve(valentinaModelsInfo),
+        json: () => Promise.resolve(sampleModelsInfo),
       })
       .mockResolvedValueOnce({
         ok: true,
@@ -238,7 +238,7 @@ describe("Style-Bert-VITS2 speech provider", () => {
       .mockResolvedValueOnce(openApiUnlimitedText())
       .mockResolvedValueOnce({
         ok: true,
-        json: () => Promise.resolve(valentinaModelsInfo),
+        json: () => Promise.resolve(sampleModelsInfo),
       })
       .mockResolvedValueOnce({
         ok: true,
@@ -262,7 +262,7 @@ describe("Style-Bert-VITS2 speech provider", () => {
       ok: true,
       json: () =>
         Promise.resolve({
-          ...valentinaModelsInfo,
+          ...sampleModelsInfo,
           amitaro: {
             spk2id: { amitaro: 0 },
             id2spk: { "0": "amitaro" },
@@ -280,8 +280,8 @@ describe("Style-Bert-VITS2 speech provider", () => {
     expect(voices).toEqual([
       { id: "sbv2:amitaro:amitaro:Neutral", name: "amitaro (amitaro)" },
       {
-        id: "sbv2:valentina01_bright:valentina01_bright:00_Neutral",
-        name: "valentina01_bright (valentina01_bright)",
+        id: "sbv2:sample_voice:sample_voice:00_Neutral",
+        name: "sample_voice (sample_voice)",
       },
     ]);
   });
@@ -294,8 +294,8 @@ describe("Style-Bert-VITS2 speech provider", () => {
         json: () =>
           Promise.resolve({
             "2": {
-              config_path: "model_assets/valentina01_bright/config.json",
-              spk2id: { valentina01_bright: 0 },
+              config_path: "model_assets/sample_voice/config.json",
+              spk2id: { sample_voice: 0 },
               style2id: { "00_Neutral": 0 },
             },
           }),
@@ -307,8 +307,8 @@ describe("Style-Bert-VITS2 speech provider", () => {
       provider.listVoices?.({ providerConfig: { baseUrl: "http://localhost:5000" } }),
     ).resolves.toEqual([
       {
-        id: "sbv2:valentina01_bright:valentina01_bright:00_Neutral",
-        name: "valentina01_bright (valentina01_bright)",
+        id: "sbv2:sample_voice:sample_voice:00_Neutral",
+        name: "sample_voice (sample_voice)",
       },
     ]);
   });
@@ -345,7 +345,7 @@ describe("Style-Bert-VITS2 speech provider", () => {
       .mockResolvedValueOnce(openApiTextLimit(400))
       .mockResolvedValueOnce({
         ok: true,
-        json: () => Promise.resolve(valentinaModelsInfo),
+        json: () => Promise.resolve(sampleModelsInfo),
       })
       .mockResolvedValueOnce({
         ok: true,
@@ -368,8 +368,8 @@ describe("Style-Bert-VITS2 speech provider", () => {
     expect(openApiUrl.pathname).toBe("/openapi.json");
     expect(modelsUrl.pathname).toBe("/models/info");
     expect(voiceUrl.pathname).toBe("/voice");
-    expect(voiceUrl.searchParams.get("model_name")).toBe("valentina01_bright");
-    expect(voiceUrl.searchParams.get("speaker_name")).toBe("valentina01_bright");
+    expect(voiceUrl.searchParams.get("model_name")).toBe("sample_voice");
+    expect(voiceUrl.searchParams.get("speaker_name")).toBe("sample_voice");
     expect(voiceUrl.searchParams.get("style")).toBe("00_Neutral");
     expect(voiceUrl.searchParams.get("language")).toBe("JP");
   });
@@ -380,7 +380,7 @@ describe("Style-Bert-VITS2 speech provider", () => {
       .mockResolvedValueOnce(openApiTextLimit(400))
       .mockResolvedValueOnce({
         ok: true,
-        json: () => Promise.resolve(valentinaModelsInfo),
+        json: () => Promise.resolve(sampleModelsInfo),
       })
       .mockResolvedValueOnce({
         ok: true,
@@ -410,7 +410,7 @@ describe("Style-Bert-VITS2 speech provider", () => {
       .mockResolvedValueOnce(openApiTextLimit(400))
       .mockResolvedValueOnce({
         ok: true,
-        json: () => Promise.resolve(valentinaModelsInfo),
+        json: () => Promise.resolve(sampleModelsInfo),
       })
       .mockResolvedValueOnce({
         ok: true,
@@ -435,7 +435,7 @@ describe("Style-Bert-VITS2 speech provider", () => {
       .mockResolvedValueOnce(openApiTextLimit(400))
       .mockResolvedValueOnce({
         ok: true,
-        json: () => Promise.resolve(valentinaModelsInfo),
+        json: () => Promise.resolve(sampleModelsInfo),
       })
       .mockResolvedValueOnce({
         ok: true,
@@ -464,7 +464,7 @@ describe("Style-Bert-VITS2 speech provider", () => {
       .mockResolvedValueOnce(openApiTextLimit(400))
       .mockResolvedValueOnce({
         ok: true,
-        json: () => Promise.resolve(valentinaModelsInfo),
+        json: () => Promise.resolve(sampleModelsInfo),
       })
       .mockResolvedValueOnce({
         ok: true,
@@ -493,7 +493,7 @@ describe("Style-Bert-VITS2 speech provider", () => {
       .mockResolvedValueOnce(openApiTextLimit(400))
       .mockResolvedValueOnce({
         ok: true,
-        json: () => Promise.resolve(valentinaModelsInfo),
+        json: () => Promise.resolve(sampleModelsInfo),
       })
       .mockResolvedValueOnce({
         ok: true,
@@ -524,7 +524,7 @@ describe("Style-Bert-VITS2 speech provider", () => {
         .mockResolvedValueOnce(openApiTextLimit(400))
         .mockResolvedValueOnce({
           ok: true,
-          json: () => Promise.resolve(valentinaModelsInfo),
+          json: () => Promise.resolve(sampleModelsInfo),
         })
         .mockResolvedValueOnce({
           ok: true,
@@ -557,7 +557,7 @@ describe("Style-Bert-VITS2 speech provider", () => {
         .mockResolvedValueOnce(openApiTextLimit(400))
         .mockResolvedValueOnce({
           ok: true,
-          json: () => Promise.resolve(valentinaModelsInfo),
+          json: () => Promise.resolve(sampleModelsInfo),
         })
         .mockResolvedValueOnce({
           ok: true,
@@ -583,7 +583,7 @@ describe("Style-Bert-VITS2 speech provider", () => {
       .mockResolvedValueOnce(openApiTextLimit(400))
       .mockResolvedValueOnce({
         ok: true,
-        json: () => Promise.resolve(valentinaModelsInfo),
+        json: () => Promise.resolve(sampleModelsInfo),
       })
       .mockResolvedValueOnce({
         ok: true,
@@ -611,7 +611,7 @@ describe("Style-Bert-VITS2 speech provider", () => {
       .mockResolvedValueOnce(openApiTextLimit(40))
       .mockResolvedValueOnce({
         ok: true,
-        json: () => Promise.resolve(valentinaModelsInfo),
+        json: () => Promise.resolve(sampleModelsInfo),
       })
       .mockResolvedValueOnce({
         ok: true,
@@ -647,7 +647,7 @@ describe("Style-Bert-VITS2 speech provider", () => {
         .mockResolvedValueOnce(openApiTextLimit(400))
         .mockResolvedValueOnce({
           ok: true,
-          json: () => Promise.resolve(valentinaModelsInfo),
+          json: () => Promise.resolve(sampleModelsInfo),
         })
         .mockResolvedValueOnce({
           ok: true,
@@ -682,7 +682,7 @@ describe("Style-Bert-VITS2 speech provider", () => {
         .mockResolvedValueOnce(openApiTextLimit(400))
         .mockResolvedValueOnce({
           ok: true,
-          json: () => Promise.resolve(valentinaModelsInfo),
+          json: () => Promise.resolve(sampleModelsInfo),
         })
         .mockResolvedValueOnce({
           ok: true,
@@ -713,7 +713,7 @@ describe("Style-Bert-VITS2 speech provider", () => {
       .mockResolvedValueOnce(openApiTextLimit(400))
       .mockResolvedValueOnce({
         ok: true,
-        json: () => Promise.resolve(valentinaModelsInfo),
+        json: () => Promise.resolve(sampleModelsInfo),
       })
       .mockResolvedValueOnce({
         ok: true,
@@ -742,7 +742,7 @@ describe("Style-Bert-VITS2 speech provider", () => {
       .mockResolvedValueOnce(openApiTextLimit(400))
       .mockResolvedValueOnce({
         ok: true,
-        json: () => Promise.resolve(valentinaModelsInfo),
+        json: () => Promise.resolve(sampleModelsInfo),
       })
       .mockResolvedValueOnce({
         ok: true,
@@ -776,7 +776,7 @@ describe("Style-Bert-VITS2 speech provider", () => {
       .mockResolvedValueOnce(openApiTextLimit(400))
       .mockResolvedValueOnce({
         ok: true,
-        json: () => Promise.resolve(valentinaModelsInfo),
+        json: () => Promise.resolve(sampleModelsInfo),
       })
       .mockResolvedValueOnce({
         ok: true,
@@ -801,7 +801,7 @@ describe("Style-Bert-VITS2 speech provider", () => {
       .mockResolvedValueOnce(openApiTextLimit(400))
       .mockResolvedValueOnce({
         ok: true,
-        json: () => Promise.resolve(valentinaModelsInfo),
+        json: () => Promise.resolve(sampleModelsInfo),
       })
       .mockResolvedValueOnce({
         ok: true,
@@ -827,7 +827,7 @@ describe("Style-Bert-VITS2 speech provider", () => {
       .mockResolvedValueOnce(openApiTextLimit(400))
       .mockResolvedValueOnce({
         ok: true,
-        json: () => Promise.resolve(valentinaModelsInfo),
+        json: () => Promise.resolve(sampleModelsInfo),
       })
       .mockResolvedValueOnce({
         ok: true,
@@ -860,7 +860,7 @@ describe("Style-Bert-VITS2 speech provider", () => {
       .mockResolvedValueOnce(openApiTextLimit(400))
       .mockResolvedValueOnce({
         ok: true,
-        json: () => Promise.resolve(valentinaModelsInfo),
+        json: () => Promise.resolve(sampleModelsInfo),
       })
       .mockResolvedValueOnce({
         ok: true,
@@ -887,7 +887,7 @@ describe("Style-Bert-VITS2 speech provider", () => {
       .mockResolvedValueOnce(openApiTextLimit(400))
       .mockResolvedValueOnce({
         ok: true,
-        json: () => Promise.resolve(valentinaModelsInfo),
+        json: () => Promise.resolve(sampleModelsInfo),
       })
       .mockResolvedValueOnce({
         ok: true,
@@ -915,7 +915,7 @@ describe("Style-Bert-VITS2 speech provider", () => {
       .mockResolvedValueOnce(openApiTextLimit(400))
       .mockResolvedValueOnce({
         ok: true,
-        json: () => Promise.resolve(valentinaModelsInfo),
+        json: () => Promise.resolve(sampleModelsInfo),
       })
       .mockResolvedValueOnce({
         ok: true,
@@ -947,7 +947,7 @@ describe("Style-Bert-VITS2 speech provider", () => {
       .mockResolvedValueOnce(openApiTextLimit(400))
       .mockResolvedValueOnce({
         ok: true,
-        json: () => Promise.resolve(valentinaModelsInfo),
+        json: () => Promise.resolve(sampleModelsInfo),
       })
       .mockResolvedValueOnce({
         ok: true,
@@ -979,7 +979,7 @@ describe("Style-Bert-VITS2 speech provider", () => {
       .mockResolvedValueOnce(openApiTextLimit(400))
       .mockResolvedValueOnce({
         ok: true,
-        json: () => Promise.resolve(valentinaModelsInfo),
+        json: () => Promise.resolve(sampleModelsInfo),
       })
       .mockResolvedValueOnce({
         ok: true,
@@ -1012,7 +1012,7 @@ describe("Style-Bert-VITS2 speech provider", () => {
       .mockResolvedValueOnce(openApiTextLimit(400))
       .mockResolvedValueOnce({
         ok: true,
-        json: () => Promise.resolve(valentinaModelsInfo),
+        json: () => Promise.resolve(sampleModelsInfo),
       })
       .mockResolvedValueOnce({
         ok: true,
@@ -1043,7 +1043,7 @@ describe("Style-Bert-VITS2 speech provider", () => {
       .mockResolvedValueOnce(openApiTextLimit(400))
       .mockResolvedValueOnce({
         ok: true,
-        json: () => Promise.resolve(valentinaModelsInfo),
+        json: () => Promise.resolve(sampleModelsInfo),
       })
       .mockResolvedValueOnce({
         ok: true,
@@ -1074,7 +1074,7 @@ describe("Style-Bert-VITS2 speech provider", () => {
       .mockResolvedValueOnce(openApiTextLimit(400))
       .mockResolvedValueOnce({
         ok: true,
-        json: () => Promise.resolve(valentinaModelsInfo),
+        json: () => Promise.resolve(sampleModelsInfo),
       })
       .mockResolvedValueOnce({
         ok: true,
@@ -1105,7 +1105,7 @@ describe("Style-Bert-VITS2 speech provider", () => {
       .mockResolvedValueOnce(openApiTextLimit(400))
       .mockResolvedValueOnce({
         ok: true,
-        json: () => Promise.resolve(valentinaModelsInfo),
+        json: () => Promise.resolve(sampleModelsInfo),
       })
       .mockResolvedValueOnce({
         ok: true,
@@ -1136,7 +1136,7 @@ describe("Style-Bert-VITS2 speech provider", () => {
       .mockResolvedValueOnce(openApiTextLimit(400))
       .mockResolvedValueOnce({
         ok: true,
-        json: () => Promise.resolve(valentinaModelsInfo),
+        json: () => Promise.resolve(sampleModelsInfo),
       })
       .mockResolvedValueOnce({
         ok: true,
@@ -1167,7 +1167,7 @@ describe("Style-Bert-VITS2 speech provider", () => {
       .mockResolvedValueOnce(openApiTextLimit(400))
       .mockResolvedValueOnce({
         ok: true,
-        json: () => Promise.resolve(valentinaModelsInfo),
+        json: () => Promise.resolve(sampleModelsInfo),
       })
       .mockResolvedValueOnce({
         ok: true,
@@ -1199,7 +1199,7 @@ describe("Style-Bert-VITS2 speech provider", () => {
       .mockResolvedValueOnce(openApiTextLimit(400))
       .mockResolvedValueOnce({
         ok: true,
-        json: () => Promise.resolve(valentinaModelsInfo),
+        json: () => Promise.resolve(sampleModelsInfo),
       })
       .mockResolvedValueOnce({
         ok: true,
@@ -1229,7 +1229,7 @@ describe("Style-Bert-VITS2 speech provider", () => {
       .mockResolvedValueOnce(openApiTextLimit(400))
       .mockResolvedValueOnce({
         ok: true,
-        json: () => Promise.resolve(valentinaModelsInfo),
+        json: () => Promise.resolve(sampleModelsInfo),
       })
       .mockResolvedValueOnce({
         ok: true,
@@ -1261,7 +1261,7 @@ describe("Style-Bert-VITS2 speech provider", () => {
       .mockResolvedValueOnce(openApiTextLimit(400))
       .mockResolvedValueOnce({
         ok: true,
-        json: () => Promise.resolve(valentinaModelsInfo),
+        json: () => Promise.resolve(sampleModelsInfo),
       })
       .mockResolvedValueOnce({
         ok: true,
@@ -1292,7 +1292,7 @@ describe("Style-Bert-VITS2 speech provider", () => {
       .mockResolvedValueOnce(openApiTextLimit(400))
       .mockResolvedValueOnce({
         ok: true,
-        json: () => Promise.resolve(valentinaModelsInfo),
+        json: () => Promise.resolve(sampleModelsInfo),
       })
       .mockResolvedValueOnce({
         ok: true,
@@ -1323,7 +1323,7 @@ describe("Style-Bert-VITS2 speech provider", () => {
       .mockResolvedValueOnce(openApiTextLimit(400))
       .mockResolvedValueOnce({
         ok: true,
-        json: () => Promise.resolve(valentinaModelsInfo),
+        json: () => Promise.resolve(sampleModelsInfo),
       })
       .mockResolvedValueOnce({
         ok: true,
@@ -1355,7 +1355,7 @@ describe("Style-Bert-VITS2 speech provider", () => {
       .mockResolvedValueOnce(openApiTextLimit(400))
       .mockResolvedValueOnce({
         ok: true,
-        json: () => Promise.resolve(valentinaModelsInfo),
+        json: () => Promise.resolve(sampleModelsInfo),
       })
       .mockResolvedValueOnce({
         ok: true,
@@ -1387,7 +1387,7 @@ describe("Style-Bert-VITS2 speech provider", () => {
       .mockResolvedValueOnce(openApiTextLimit(400))
       .mockResolvedValueOnce({
         ok: true,
-        json: () => Promise.resolve(valentinaModelsInfo),
+        json: () => Promise.resolve(sampleModelsInfo),
       })
       .mockResolvedValueOnce({
         ok: true,
@@ -1418,7 +1418,7 @@ describe("Style-Bert-VITS2 speech provider", () => {
       .mockResolvedValueOnce(openApiTextLimit(400))
       .mockResolvedValueOnce({
         ok: true,
-        json: () => Promise.resolve(valentinaModelsInfo),
+        json: () => Promise.resolve(sampleModelsInfo),
       })
       .mockResolvedValueOnce({
         ok: true,
@@ -1446,7 +1446,7 @@ describe("Style-Bert-VITS2 speech provider", () => {
       .mockResolvedValueOnce(openApiTextLimit(400))
       .mockResolvedValueOnce({
         ok: true,
-        json: () => Promise.resolve(valentinaModelsInfo),
+        json: () => Promise.resolve(sampleModelsInfo),
       })
       .mockResolvedValueOnce({
         ok: true,
@@ -1474,7 +1474,7 @@ describe("Style-Bert-VITS2 speech provider", () => {
       .mockResolvedValueOnce(openApiTextLimit(400))
       .mockResolvedValueOnce({
         ok: true,
-        json: () => Promise.resolve(valentinaModelsInfo),
+        json: () => Promise.resolve(sampleModelsInfo),
       })
       .mockResolvedValueOnce({
         ok: true,
@@ -1514,7 +1514,7 @@ describe("Style-Bert-VITS2 speech provider", () => {
       .mockResolvedValueOnce(openApiTextLimit(400))
       .mockResolvedValueOnce({
         ok: true,
-        json: () => Promise.resolve(valentinaModelsInfo),
+        json: () => Promise.resolve(sampleModelsInfo),
       })
       .mockResolvedValueOnce({
         ok: true,
@@ -1546,7 +1546,7 @@ describe("Style-Bert-VITS2 speech provider", () => {
       .mockResolvedValueOnce(openApiTextLimit(400))
       .mockResolvedValueOnce({
         ok: true,
-        json: () => Promise.resolve(valentinaModelsInfo),
+        json: () => Promise.resolve(sampleModelsInfo),
       })
       .mockResolvedValueOnce({
         ok: true,
@@ -1574,7 +1574,7 @@ describe("Style-Bert-VITS2 speech provider", () => {
       .mockResolvedValueOnce(openApiTextLimit(400))
       .mockResolvedValueOnce({
         ok: true,
-        json: () => Promise.resolve(valentinaModelsInfo),
+        json: () => Promise.resolve(sampleModelsInfo),
       })
       .mockResolvedValueOnce({
         ok: true,
@@ -1605,7 +1605,7 @@ describe("Style-Bert-VITS2 speech provider", () => {
       .mockResolvedValueOnce(openApiTextLimit(400))
       .mockResolvedValueOnce({
         ok: true,
-        json: () => Promise.resolve(valentinaModelsInfo),
+        json: () => Promise.resolve(sampleModelsInfo),
       })
       .mockResolvedValueOnce({
         ok: true,
@@ -1637,7 +1637,7 @@ describe("Style-Bert-VITS2 speech provider", () => {
       .mockResolvedValueOnce(openApiTextLimit(400))
       .mockResolvedValueOnce({
         ok: true,
-        json: () => Promise.resolve(valentinaModelsInfo),
+        json: () => Promise.resolve(sampleModelsInfo),
       })
       .mockResolvedValueOnce({
         ok: true,
@@ -1662,7 +1662,7 @@ describe("Style-Bert-VITS2 speech provider", () => {
       .mockResolvedValueOnce(openApiTextLimit(20))
       .mockResolvedValueOnce({
         ok: true,
-        json: () => Promise.resolve(valentinaModelsInfo),
+        json: () => Promise.resolve(sampleModelsInfo),
       })
       .mockResolvedValueOnce({
         ok: true,
@@ -1690,7 +1690,7 @@ describe("Style-Bert-VITS2 speech provider", () => {
       .mockResolvedValueOnce(openApiTextLimit(20))
       .mockResolvedValueOnce({
         ok: true,
-        json: () => Promise.resolve(valentinaModelsInfo),
+        json: () => Promise.resolve(sampleModelsInfo),
       })
       .mockResolvedValueOnce({
         ok: true,
@@ -1717,7 +1717,7 @@ describe("Style-Bert-VITS2 speech provider", () => {
       .mockResolvedValueOnce(openApiTextLimit(20))
       .mockResolvedValueOnce({
         ok: true,
-        json: () => Promise.resolve(valentinaModelsInfo),
+        json: () => Promise.resolve(sampleModelsInfo),
       })
       .mockResolvedValueOnce({
         ok: true,
@@ -1729,7 +1729,7 @@ describe("Style-Bert-VITS2 speech provider", () => {
     const result = await provider.synthesize(speechRequest({
       text: "https://github.com/NEXTAltair/style-bert-vits2-bridge/issues/71",
       providerConfig: { baseUrl: "http://localhost:5000", defaultLanguage: "EN" },
-      providerOverrides: { voiceId: "valentina01_bright" },
+      providerOverrides: { voiceId: "default" },
     }));
 
     const voiceUrl = new URL(mockFetch.mock.calls[2][0]);
@@ -1738,13 +1738,51 @@ describe("Style-Bert-VITS2 speech provider", () => {
     expect(result.metadata).toMatchObject({ textPreparation: "metadata_status_rewrite" });
   });
 
+  it("resolves providerOverrides.voice='default' without treating 'default' as a speaker name", async () => {
+    const mockFetch = vi
+      .fn()
+      .mockResolvedValueOnce(openApiTextLimit(400))
+      .mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.resolve(sampleModelsInfo),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        arrayBuffer: () => Promise.resolve(wavBytes.buffer),
+      });
+    vi.stubGlobal("fetch", mockFetch);
+
+    const provider = buildSbv2SpeechProvider();
+    const result = await provider.synthesize(speechRequest({
+      text: "こんにちは",
+      providerConfig: {
+        baseUrl: "http://localhost:5000",
+        defaultModelName: "configured-model",
+        defaultSpeakerName: "configured-speaker",
+        defaultStyle: "Neutral",
+      },
+      providerOverrides: { voice: "default" },
+    }));
+
+    const voiceUrl = new URL(mockFetch.mock.calls[2][0]);
+    expect(voiceUrl.searchParams.get("model_name")).toBe("sample_voice");
+    expect(voiceUrl.searchParams.get("speaker_name")).toBe("sample_voice");
+    expect(voiceUrl.searchParams.get("style")).toBe("00_Neutral");
+    expect(result.metadata).toMatchObject({
+      voiceId: "default",
+      modelName: "sample_voice",
+      speakerName: "sample_voice",
+      style: "00_Neutral",
+    });
+  });
+
   it("defers SBV2 text limit checks for long metadata that will be rewritten", async () => {
     const mockFetch = vi
       .fn()
       .mockResolvedValueOnce(openApiTextLimit(40))
       .mockResolvedValueOnce({
         ok: true,
-        json: () => Promise.resolve(valentinaModelsInfo),
+        json: () => Promise.resolve(sampleModelsInfo),
       })
       .mockResolvedValueOnce({
         ok: true,
@@ -1769,7 +1807,7 @@ describe("Style-Bert-VITS2 speech provider", () => {
       .mockResolvedValueOnce(openApiTextLimit(400))
       .mockResolvedValueOnce({
         ok: true,
-        json: () => Promise.resolve(valentinaModelsInfo),
+        json: () => Promise.resolve(sampleModelsInfo),
       })
       .mockResolvedValueOnce({
         ok: true,
@@ -1794,7 +1832,7 @@ describe("Style-Bert-VITS2 speech provider", () => {
       .mockResolvedValueOnce(openApiTextLimit(400))
       .mockResolvedValueOnce({
         ok: true,
-        json: () => Promise.resolve(valentinaModelsInfo),
+        json: () => Promise.resolve(sampleModelsInfo),
       })
       .mockResolvedValueOnce({
         ok: true,
@@ -1821,7 +1859,7 @@ describe("Style-Bert-VITS2 speech provider", () => {
       .mockResolvedValueOnce(openApiTextLimit(400))
       .mockResolvedValueOnce({
         ok: true,
-        json: () => Promise.resolve(valentinaModelsInfo),
+        json: () => Promise.resolve(sampleModelsInfo),
       })
       .mockResolvedValueOnce({
         ok: true,
@@ -1848,7 +1886,7 @@ describe("Style-Bert-VITS2 speech provider", () => {
       .mockResolvedValueOnce(openApiTextLimit(400))
       .mockResolvedValueOnce({
         ok: true,
-        json: () => Promise.resolve(valentinaModelsInfo),
+        json: () => Promise.resolve(sampleModelsInfo),
       })
       .mockResolvedValueOnce({
         ok: true,
@@ -1875,7 +1913,7 @@ describe("Style-Bert-VITS2 speech provider", () => {
       .mockResolvedValueOnce(openApiTextLimit(400))
       .mockResolvedValueOnce({
         ok: true,
-        json: () => Promise.resolve(valentinaModelsInfo),
+        json: () => Promise.resolve(sampleModelsInfo),
       })
       .mockResolvedValueOnce({
         ok: true,
@@ -1900,7 +1938,7 @@ describe("Style-Bert-VITS2 speech provider", () => {
       .mockResolvedValueOnce(openApiTextLimit(400))
       .mockResolvedValueOnce({
         ok: true,
-        json: () => Promise.resolve(valentinaModelsInfo),
+        json: () => Promise.resolve(sampleModelsInfo),
       })
       .mockResolvedValueOnce({
         ok: true,
@@ -1925,7 +1963,7 @@ describe("Style-Bert-VITS2 speech provider", () => {
       .mockResolvedValueOnce(openApiTextLimit(400))
       .mockResolvedValueOnce({
         ok: true,
-        json: () => Promise.resolve(valentinaModelsInfo),
+        json: () => Promise.resolve(sampleModelsInfo),
       })
       .mockResolvedValueOnce({
         ok: true,
@@ -1953,7 +1991,7 @@ describe("Style-Bert-VITS2 speech provider", () => {
         .mockResolvedValueOnce(openApiTextLimit(400))
         .mockResolvedValueOnce({
           ok: true,
-          json: () => Promise.resolve(valentinaModelsInfo),
+          json: () => Promise.resolve(sampleModelsInfo),
         })
         .mockResolvedValueOnce({
           ok: true,
@@ -1982,7 +2020,7 @@ describe("Style-Bert-VITS2 speech provider", () => {
         .mockResolvedValueOnce(openApiTextLimit(400))
         .mockResolvedValueOnce({
           ok: true,
-          json: () => Promise.resolve(valentinaModelsInfo),
+          json: () => Promise.resolve(sampleModelsInfo),
         })
         .mockResolvedValueOnce({
           ok: true,
@@ -2015,7 +2053,7 @@ describe("Style-Bert-VITS2 speech provider", () => {
         .mockResolvedValueOnce(openApiTextLimit(400))
         .mockResolvedValueOnce({
           ok: true,
-          json: () => Promise.resolve(valentinaModelsInfo),
+          json: () => Promise.resolve(sampleModelsInfo),
         })
         .mockResolvedValueOnce({
           ok: true,
@@ -2044,7 +2082,7 @@ describe("Style-Bert-VITS2 speech provider", () => {
         .mockResolvedValueOnce(openApiTextLimit(400))
         .mockResolvedValueOnce({
           ok: true,
-          json: () => Promise.resolve(valentinaModelsInfo),
+          json: () => Promise.resolve(sampleModelsInfo),
         })
         .mockResolvedValueOnce({
           ok: true,
@@ -2076,7 +2114,7 @@ describe("Style-Bert-VITS2 speech provider", () => {
         .mockResolvedValueOnce(openApiTextLimit(400))
         .mockResolvedValueOnce({
           ok: true,
-          json: () => Promise.resolve(valentinaModelsInfo),
+          json: () => Promise.resolve(sampleModelsInfo),
         })
         .mockResolvedValueOnce({
           ok: true,
@@ -2102,7 +2140,7 @@ describe("Style-Bert-VITS2 speech provider", () => {
       .mockResolvedValueOnce(openApiTextLimit(400))
       .mockResolvedValueOnce({
         ok: true,
-        json: () => Promise.resolve(valentinaModelsInfo),
+        json: () => Promise.resolve(sampleModelsInfo),
       })
       .mockResolvedValueOnce({
         ok: true,
@@ -2127,7 +2165,7 @@ describe("Style-Bert-VITS2 speech provider", () => {
       .mockResolvedValueOnce(openApiTextLimit(400))
       .mockResolvedValueOnce({
         ok: true,
-        json: () => Promise.resolve(valentinaModelsInfo),
+        json: () => Promise.resolve(sampleModelsInfo),
       })
       .mockResolvedValueOnce({
         ok: true,
@@ -2155,7 +2193,7 @@ describe("Style-Bert-VITS2 speech provider", () => {
         .mockResolvedValueOnce(openApiTextLimit(400))
         .mockResolvedValueOnce({
           ok: true,
-          json: () => Promise.resolve(valentinaModelsInfo),
+          json: () => Promise.resolve(sampleModelsInfo),
         })
         .mockResolvedValueOnce({
           ok: true,
@@ -2181,7 +2219,7 @@ describe("Style-Bert-VITS2 speech provider", () => {
       .mockResolvedValueOnce(openApiTextLimit(400))
       .mockResolvedValueOnce({
         ok: true,
-        json: () => Promise.resolve(valentinaModelsInfo),
+        json: () => Promise.resolve(sampleModelsInfo),
       })
       .mockResolvedValueOnce({
         ok: true,
@@ -2206,7 +2244,7 @@ describe("Style-Bert-VITS2 speech provider", () => {
       .mockResolvedValueOnce(openApiTextLimit(400))
       .mockResolvedValueOnce({
         ok: true,
-        json: () => Promise.resolve(valentinaModelsInfo),
+        json: () => Promise.resolve(sampleModelsInfo),
       })
       .mockResolvedValueOnce({
         ok: true,
@@ -2231,7 +2269,7 @@ describe("Style-Bert-VITS2 speech provider", () => {
       .mockResolvedValueOnce(openApiTextLimit(400))
       .mockResolvedValueOnce({
         ok: true,
-        json: () => Promise.resolve(valentinaModelsInfo),
+        json: () => Promise.resolve(sampleModelsInfo),
       })
       .mockResolvedValueOnce({
         ok: true,
@@ -2256,7 +2294,7 @@ describe("Style-Bert-VITS2 speech provider", () => {
       .mockResolvedValueOnce(openApiTextLimit(400))
       .mockResolvedValueOnce({
         ok: true,
-        json: () => Promise.resolve(valentinaModelsInfo),
+        json: () => Promise.resolve(sampleModelsInfo),
       })
       .mockResolvedValueOnce({
         ok: true,
@@ -2281,7 +2319,7 @@ describe("Style-Bert-VITS2 speech provider", () => {
       .mockResolvedValueOnce(openApiTextLimit(400))
       .mockResolvedValueOnce({
         ok: true,
-        json: () => Promise.resolve(valentinaModelsInfo),
+        json: () => Promise.resolve(sampleModelsInfo),
       })
       .mockResolvedValueOnce({
         ok: true,
@@ -2306,7 +2344,7 @@ describe("Style-Bert-VITS2 speech provider", () => {
       .mockResolvedValueOnce(openApiTextLimit(400))
       .mockResolvedValueOnce({
         ok: true,
-        json: () => Promise.resolve(valentinaModelsInfo),
+        json: () => Promise.resolve(sampleModelsInfo),
       })
       .mockResolvedValueOnce({
         ok: true,
@@ -2331,7 +2369,7 @@ describe("Style-Bert-VITS2 speech provider", () => {
       .mockResolvedValueOnce(openApiTextLimit(400))
       .mockResolvedValueOnce({
         ok: true,
-        json: () => Promise.resolve(valentinaModelsInfo),
+        json: () => Promise.resolve(sampleModelsInfo),
       })
       .mockResolvedValueOnce({
         ok: true,
@@ -2356,7 +2394,7 @@ describe("Style-Bert-VITS2 speech provider", () => {
       .mockResolvedValueOnce(openApiTextLimit(400))
       .mockResolvedValueOnce({
         ok: true,
-        json: () => Promise.resolve(valentinaModelsInfo),
+        json: () => Promise.resolve(sampleModelsInfo),
       })
       .mockResolvedValueOnce({
         ok: true,
@@ -2384,7 +2422,7 @@ describe("Style-Bert-VITS2 speech provider", () => {
       .mockResolvedValueOnce(openApiTextLimit(400))
       .mockResolvedValueOnce({
         ok: true,
-        json: () => Promise.resolve(valentinaModelsInfo),
+        json: () => Promise.resolve(sampleModelsInfo),
       })
       .mockResolvedValueOnce({
         ok: true,
@@ -2411,7 +2449,7 @@ describe("Style-Bert-VITS2 speech provider", () => {
       .mockResolvedValueOnce(openApiTextLimit(400))
       .mockResolvedValueOnce({
         ok: true,
-        json: () => Promise.resolve(valentinaModelsInfo),
+        json: () => Promise.resolve(sampleModelsInfo),
       })
       .mockResolvedValueOnce({
         ok: true,
@@ -2468,7 +2506,7 @@ describe("Style-Bert-VITS2 speech provider", () => {
       .mockResolvedValueOnce(openApiTextLimit(400))
       .mockResolvedValueOnce({
         ok: true,
-        json: () => Promise.resolve(valentinaModelsInfo),
+        json: () => Promise.resolve(sampleModelsInfo),
       })
       .mockResolvedValueOnce({
         ok: true,
@@ -2494,9 +2532,9 @@ describe("Style-Bert-VITS2 speech provider", () => {
     expect(result.metadata).toEqual({
       provider: "style-bert-vits2",
       baseUrl: "http://localhost:5000/api",
-      voiceId: "valentina01_bright",
-      modelName: "valentina01_bright",
-      speakerName: "valentina01_bright",
+      voiceId: "default",
+      modelName: "sample_voice",
+      speakerName: "sample_voice",
       style: "00_Neutral",
       styleWeight: 0.7,
       sdpRatio: 0.15,
@@ -2523,7 +2561,7 @@ describe("Style-Bert-VITS2 speech provider", () => {
       .mockResolvedValueOnce(openApiTextLimit(400))
       .mockResolvedValueOnce({
         ok: true,
-        json: () => Promise.resolve(valentinaModelsInfo),
+        json: () => Promise.resolve(sampleModelsInfo),
       })
       .mockResolvedValueOnce({
         ok: true,
@@ -2541,13 +2579,13 @@ describe("Style-Bert-VITS2 speech provider", () => {
         defaultStyle: "Neutral",
       },
       providerOverrides: {
-        voiceId: "sbv2:valentina01_bright:valentina01_bright:00_Neutral",
+        voiceId: "sbv2:sample_voice:sample_voice:00_Neutral",
       },
     }));
 
     const url = new URL(mockFetch.mock.calls[2][0]);
-    expect(url.searchParams.get("model_name")).toBe("valentina01_bright");
-    expect(url.searchParams.get("speaker_name")).toBe("valentina01_bright");
+    expect(url.searchParams.get("model_name")).toBe("sample_voice");
+    expect(url.searchParams.get("speaker_name")).toBe("sample_voice");
     expect(url.searchParams.get("speaker_id")).toBeNull();
     expect(url.searchParams.get("style")).toBe("00_Neutral");
   });
@@ -2560,8 +2598,8 @@ describe("Style-Bert-VITS2 speech provider", () => {
         ok: true,
         json: () =>
           Promise.resolve({
-            valentina01_bright: {
-              spk2id: { valentina01_bright: 0 },
+            sample_voice: {
+              spk2id: { sample_voice: 0 },
               style2id: { "00_Neutral": 0, Happy: 1 },
             },
           }),
@@ -2577,14 +2615,14 @@ describe("Style-Bert-VITS2 speech provider", () => {
       text: "こんにちは",
       providerConfig: { baseUrl: "http://localhost:5000" },
       providerOverrides: {
-        voiceId: "sbv2:valentina01_bright:valentina01_bright:00_Neutral",
+        voiceId: "sbv2:sample_voice:sample_voice:00_Neutral",
         style: "Happy",
       },
     }));
 
     const url = new URL(mockFetch.mock.calls[2][0]);
-    expect(url.searchParams.get("model_name")).toBe("valentina01_bright");
-    expect(url.searchParams.get("speaker_name")).toBe("valentina01_bright");
+    expect(url.searchParams.get("model_name")).toBe("sample_voice");
+    expect(url.searchParams.get("speaker_name")).toBe("sample_voice");
     expect(url.searchParams.get("style")).toBe("Happy");
   });
 
@@ -2751,7 +2789,7 @@ describe("Style-Bert-VITS2 speech provider", () => {
       "fetch",
       vi.fn().mockResolvedValue({
         ok: true,
-        json: () => Promise.resolve(valentinaModelsInfo),
+        json: () => Promise.resolve(sampleModelsInfo),
       }),
     );
 
@@ -2797,7 +2835,7 @@ describe("Style-Bert-VITS2 speech provider", () => {
       .mockResolvedValueOnce(openApiTextLimit(400))
       .mockResolvedValueOnce({
         ok: true,
-        json: () => Promise.resolve(valentinaModelsInfo),
+        json: () => Promise.resolve(sampleModelsInfo),
       })
       .mockResolvedValueOnce({
         ok: false,
@@ -2818,7 +2856,7 @@ describe("Style-Bert-VITS2 speech provider", () => {
         },
       })),
     ).rejects.toThrow(
-      /SBV2 telemetry context: provider=style-bert-vits2, baseUrl=http:\/\/localhost:5000, voiceId=valentina01_bright, modelName=valentina01_bright, speakerName=valentina01_bright, style=00_Neutral/,
+      /SBV2 telemetry context: provider=style-bert-vits2, baseUrl=http:\/\/localhost:5000, voiceId=default, modelName=sample_voice, speakerName=sample_voice, style=00_Neutral/,
     );
   });
 
@@ -2828,7 +2866,7 @@ describe("Style-Bert-VITS2 speech provider", () => {
       .mockResolvedValueOnce(openApiTextLimit(400))
       .mockResolvedValueOnce({
         ok: true,
-        json: () => Promise.resolve(valentinaModelsInfo),
+        json: () => Promise.resolve(sampleModelsInfo),
       })
       .mockRejectedValueOnce(
         Object.assign(new TypeError("fetch failed"), {
@@ -2856,9 +2894,9 @@ describe("Style-Bert-VITS2 speech provider", () => {
       );
       expect(message).toContain("provider=style-bert-vits2");
       expect(message).toContain("baseUrl=http://localhost:5000");
-      expect(message).toContain("voiceId=valentina01_bright");
-      expect(message).toContain("modelName=valentina01_bright");
-      expect(message).toContain("speakerName=valentina01_bright");
+      expect(message).toContain("voiceId=default");
+      expect(message).toContain("modelName=sample_voice");
+      expect(message).toContain("speakerName=sample_voice");
       expect(message).toContain("style=00_Neutral");
       expect(message).toContain("ECONNREFUSED");
       expect(message).not.toContain("ログに出してはいけない本文");

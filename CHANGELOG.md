@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.5.1 - 2026-11-14
+
+### Fixed
+
+- Remove personal model names from the distributed SBV2 default voice profile, plugin UI placeholders, runtime healthcheck script, bundled voice skill, ADR, and documentation. When `defaultModelName` / `defaultModelId` is not configured, resolve the default SBV2 voice profile (`voiceId: "default"`, `language: "JP"`) from the first model returned by `/models/info`, preferring `Neutral`, `00_Neutral`, or the model's first available style (#101).
+
 ## 0.5.0 - 2026-11-14
 
 ### Added
