@@ -1738,6 +1738,44 @@ describe("Style-Bert-VITS2 speech provider", () => {
     expect(result.metadata).toMatchObject({ textPreparation: "metadata_status_rewrite" });
   });
 
+  it("resolves providerOverrides.voice='default' without treating 'default' as a speaker name", async () => {
+    const mockFetch = vi
+      .fn()
+      .mockResolvedValueOnce(openApiTextLimit(400))
+      .mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.resolve(sampleModelsInfo),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        arrayBuffer: () => Promise.resolve(wavBytes.buffer),
+      });
+    vi.stubGlobal("fetch", mockFetch);
+
+    const provider = buildSbv2SpeechProvider();
+    const result = await provider.synthesize(speechRequest({
+      text: "こんにちは",
+      providerConfig: {
+        baseUrl: "http://localhost:5000",
+        defaultModelName: "configured-model",
+        defaultSpeakerName: "configured-speaker",
+        defaultStyle: "Neutral",
+      },
+      providerOverrides: { voice: "default" },
+    }));
+
+    const voiceUrl = new URL(mockFetch.mock.calls[2][0]);
+    expect(voiceUrl.searchParams.get("model_name")).toBe("sample_voice");
+    expect(voiceUrl.searchParams.get("speaker_name")).toBe("sample_voice");
+    expect(voiceUrl.searchParams.get("style")).toBe("00_Neutral");
+    expect(result.metadata).toMatchObject({
+      voiceId: "default",
+      modelName: "sample_voice",
+      speakerName: "sample_voice",
+      style: "00_Neutral",
+    });
+  });
+
   it("defers SBV2 text limit checks for long metadata that will be rewritten", async () => {
     const mockFetch = vi
       .fn()

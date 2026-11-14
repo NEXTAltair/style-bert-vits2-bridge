@@ -101,6 +101,36 @@ describe("resolveVoiceProfile", () => {
     ).rejects.toThrow("SBV2 model could not be resolved from the selected voice profile");
   });
 
+  it("treats { voice: 'default' } identically to { voiceId: 'default' } without overriding speakerName", async () => {
+    const byVoiceId = await resolveVoiceProfile({
+      client: client(),
+      providerConfig: {
+        defaultModelName: "custom-model",
+        defaultSpeakerName: "custom-speaker",
+        defaultStyle: "Neutral",
+      },
+      providerOverrides: { voiceId: "default" },
+    });
+    const byVoiceAlias = await resolveVoiceProfile({
+      client: client(),
+      providerConfig: {
+        defaultModelName: "custom-model",
+        defaultSpeakerName: "custom-speaker",
+        defaultStyle: "Neutral",
+      },
+      providerOverrides: { voice: "default" },
+    });
+
+    expect(byVoiceAlias).toEqual(byVoiceId);
+    expect(byVoiceAlias).toEqual({
+      voiceId: "default",
+      modelName: "sample_voice",
+      speakerName: "sample_voice",
+      style: "00_Neutral",
+      language: "JP",
+    });
+  });
+
   it("lets provider config defaults override bridge defaults", async () => {
     await expect(
       resolveVoiceProfile({
