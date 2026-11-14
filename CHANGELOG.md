@@ -1,6 +1,11 @@
 # Changelog
 
-## Unreleased
+## 0.5.0 - 2026-11-14
+
+### Added
+
+- Pronunciation replacements (`pronunciationReplacements` / `pronunciationReplacementsPath`) now apply to the Irodori and speech.cpp providers as well as SBV2. Each provider reads its own configuration on every synthesis and replaces only the text sent to the engine; settings are not inherited between providers, and an invalid dictionary fails before the speech server is contacted (#98).
+- Document sharing one dictionary across providers by pointing each provider's `pronunciationReplacementsPath` at the same file, and how to merge existing dictionaries safely (#99).
 
 ### Changed
 
