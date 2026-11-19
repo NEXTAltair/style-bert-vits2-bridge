@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.5.2 - 2026-11-19
+
+### Fixed
+
+- Skip registration during `cli-metadata` and `setup-only` loads. With `irodoriExpressiveText` enabled, the expressive-text hook read `api.runtime.tts` during CLI metadata collection, where the host intentionally withholds runtime, and plugin registration failed. The plugin declares no CLI commands, so nothing is registered in those modes.
+
 ## 0.5.1 - 2026-11-14
 
 ### Fixed

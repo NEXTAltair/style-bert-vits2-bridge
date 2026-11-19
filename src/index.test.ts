@@ -84,6 +84,19 @@ describe("Style-Bert-VITS2 speech provider", () => {
     ]));
   });
 
+  it.each(["cli-metadata", "setup-only"])("does not touch runtime during %s registration", (mode) => {
+    const registered: unknown[] = [];
+    const api = {
+      registrationMode: mode,
+      pluginConfig: { irodoriExpressiveText: true },
+      registerSpeechProvider: (p: unknown) => registered.push(p),
+      on: () => { throw new Error("hook registered"); },
+      get runtime(): never { throw new Error(`runtime unavailable during ${mode}`); },
+    } as unknown as Parameters<typeof pluginEntry.register>[0];
+    expect(() => pluginEntry.register(api)).not.toThrow();
+    expect(registered).toEqual([]);
+  });
+
   it("returns an explicit unhandled result for unknown or disallowed directives", () => {
     const provider = buildSbv2SpeechProvider();
     for (const [key, value] of [["unknown_option", "x"], ["style", "Happy"], ["voice", ""]]) {
