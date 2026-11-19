@@ -766,6 +766,9 @@ export default definePluginEntry({
   description: "Bridge OpenClaw to a Style-Bert-VITS2 API server for speech generation.",
 
   register(api) {
+    // CLI metadata / setup-only loads expose no runtime; this plugin has no CLI
+    // descriptors, so register nothing there (runtime access would throw).
+    if (api.registrationMode === "cli-metadata" || api.registrationMode === "setup-only") return;
     api?.logger?.info?.("register start");
     api.registerSpeechProvider(buildCompatibleSpeechProvider("irodori"));
     api.registerSpeechProvider(buildCompatibleSpeechProvider("speech-cpp"));
